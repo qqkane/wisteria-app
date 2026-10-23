@@ -103,7 +103,10 @@ select option, select optgroup { background-color: var(--surface); color: var(--
 .connect-btn .connect-text { font-size: 12px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; }
 .connect-btn.connected { background: var(--accent); color: #000; border-color: transparent; box-shadow: 0 0 60px rgba(var(--accent-rgb), 0.4); }
 .ring-anim { position: absolute; border-radius: 50%; pointer-events: none; border: 2px solid transparent; opacity: 0; inset: -12px; }
-.connected .ring-anim { animation: pulse-ring 2.5s ease-out infinite; border-color: var(--accent); }
+/* Three pulses after connect as feedback, then rest: an infinite expanding
+   ring keeps the webview compositing forever, which shows up as UI jank on
+   a GPU that is already busy. */
+.connected .ring-anim { animation: pulse-ring 2.5s ease-out 3; border-color: var(--accent); }
 .ring-anim.d2 { inset: -28px; animation-delay: .8s !important; }
 @keyframes pulse-ring { 0% { transform: scale(1); opacity: .5; } 100% { transform: scale(1.6); opacity: 0; } }
 
