@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Wisteria" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="colorPrimary">#6750A4</item>
+        <item name="colorPrimaryDark">#4F3D8A</item>
+        <item name="colorAccent">#6750A4</item>
+        <item name="android:statusBarColor">#4F3D8A</item>
+    </style>
+</resources>

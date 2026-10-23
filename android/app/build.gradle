@@ -1,0 +1,44 @@
+plugins {
+    id "com.android.application"
+    id "org.jetbrains.kotlin.android"
+}
+
+android {
+    namespace "org.wisteria.app"
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "org.wisteria.app"
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "0.1.0"
+    }
+
+    // The release APK ships signed with the debug key for now: a proper
+    // release keystore (and its CI secret) comes with the first store
+    // distribution. assembleRelease is therefore installable as-is.
+    signingConfigs {
+        debug {
+            storeFile file("${System.properties['user.home']}/.android/debug.keystore")
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.debug
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = "17" }
+}
+
+dependencies {
+    // The gomobile-bound wisteria engine (built by CI from the protocol repo).
+    implementation fileTree(dir: "libs", include: ["*.aar"])
+    implementation "androidx.core:core-ktx:1.13.1"
+    implementation "androidx.appcompat:appcompat:1.7.0"
+}

@@ -1,0 +1,87 @@
+name: android
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      # The Go engine lives in the private protocol repo; the AAR is built
+      # from its checkout, never committed to this repo.
+      - name: Checkout wisteria protocol repo
+        uses: actions/checkout@v4
+        with:
+          repository: qqkane/wisteria
+          token: ${{ secrets.WISTERIA_TOKEN }}
+          path: wisteria
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: wisteria/go.mod
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: "8.9"
+
+      - name: Install gomobile
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      # assembleRelease signs with the debug keystore; the runner has none.
+      - name: Create debug keystore
+        run: |
+          mkdir -p ~/.android
+          if [ ! -f ~/.android/debug.keystore ]; then
+            keytool -genkeypair -v -keystore ~/.android/debug.keystore \
+              -storepass android -keypass android -alias androiddebugkey \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
+      - name: gomobile bind
+        working-directory: wisteria
+        run: |
+          export ANDROID_NDK_HOME="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
+          echo "NDK: $ANDROID_NDK_HOME"
+          gomobile init
+          gomobile bind -target=android -androidapi 24 -javapkg=org.wisteria \
+            -o "$GITHUB_WORKSPACE/android/app/libs/wisteria.aar" ./mobile
+
+      - name: Build APKs
+        run: gradle -p android --no-daemon assembleDebug assembleRelease
+
+      - name: Rename APKs
+        run: |
+          mkdir -p dist
+          cp android/app/build/outputs/apk/debug/app-debug.apk dist/Wisteria-android-debug.apk
+          cp android/app/build/outputs/apk/release/app-release.apk dist/Wisteria-android.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Wisteria-android
+          path: dist/
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Wisteria-android.apk

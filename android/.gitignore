@@ -1,0 +1,7 @@
+# The mobile engine (wisteria.aar) is built by CI from the protocol repo.
+app/libs/*.aar
+.gradle/
+build/
+local.properties
+*.iml
+.idea/

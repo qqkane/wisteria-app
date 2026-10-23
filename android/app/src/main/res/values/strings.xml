@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Wisteria</string>
+    <string name="connect">Подключить</string>
+    <string name="disconnect">Отключить</string>
+    <string name="status_idle">Отключено</string>
+    <string name="status_connecting">Подключение…</string>
+    <string name="status_connected">Защищено</string>
+    <string name="status_retrying">Переподключение…</string>
+    <string name="status_disconnected">Отключено</string>
+    <string name="add_profile">Добавить профиль</string>
+    <string name="link_hint">Вставьте ссылку wisteria://…</string>
+    <string name="no_profile">Профиль не добавлен — вставьте ссылку от администратора</string>
+    <string name="profile_label">Профиль: %1$s</string>
+    <string name="added_ok">Профиль добавлен</string>
+    <string name="invite_unsupported">Приглашение без ключа не поддерживается: запросите у администратора ссылку-креденшел (с ключом)</string>
+    <string name="bad_link">Ссылка не распознана</string>
+    <string name="my_key">Мой публичный ключ</string>
+    <string name="vpn_consent">Разрешите создать VPN-подключение — оно понадобится системе, чтобы направлять трафик через туннель</string>
+    <string name="log_title">Журнал</string>
+</resources>
