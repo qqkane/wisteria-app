@@ -12,7 +12,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import org.json.JSONArray
-import org.wisteria.Mobile
+import org.wisteria.mobile.Mobile
 
 class MainActivity : AppCompatActivity() {
 

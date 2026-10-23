@@ -65,7 +65,13 @@ jobs:
           # gomobile bind requires golang.org/x/mobile in the module graph.
           # CI-only: the checkout's go.mod is never committed back.
           go get golang.org/x/mobile@latest
-          gomobile init
+          # The package-load phase runs cgo for GOOS=android; the system
+          # clang can't target android, which leaves the bound package
+          # with zero compiled files ("no exported names"). Give it the
+          # NDK wrapper for the first target (arm) instead.
+          PREBUILT="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export CC="$PREBUILT/armv7a-linux-androideabi24-clang"
+          export CXX="$PREBUILT/armv7a-linux-androideabi24-clang++"
           gomobile bind -target=android -androidapi 24 -javapkg=org.wisteria \
             -o "$GITHUB_WORKSPACE/android/app/libs/wisteria.aar" ./mobile
 

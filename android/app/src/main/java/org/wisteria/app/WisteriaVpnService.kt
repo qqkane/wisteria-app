@@ -12,7 +12,8 @@ import android.os.ParcelFileDescriptor
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import org.json.JSONObject
-import org.wisteria.Mobile
+import org.wisteria.mobile.Callback
+import org.wisteria.mobile.Mobile
 
 /**
  * VPN frontend for the Go engine. The tunnel device is created here via
@@ -37,7 +38,7 @@ class WisteriaVpnService : VpnService() {
 
     private var tun: ParcelFileDescriptor? = null
 
-    private val callback = object : Mobile.Callback {
+    private val callback = object : Callback {
         override fun onLog(line: String?) {
             EngineState.addLog(line ?: "")
         }
