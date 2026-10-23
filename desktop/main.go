@@ -10,6 +10,7 @@ import (
 	"embed"
 	"fmt"
 	"os"
+	"runtime"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -21,6 +22,15 @@ import (
 var assets embed.FS
 
 func main() {
+	if runtime.GOOS == "linux" {
+		// WebKit2GTK's DMABUF renderer is pathologically slow on NVIDIA
+		// proprietary setups (CSS animations drop to ~20-30 fps, sometimes
+		// with flicker). Must be set before WebKit loads; the user can still
+		// override with their own value.
+		if os.Getenv("WEBKIT_DISABLE_DMABUF_RENDERER") == "" {
+			os.Setenv("WEBKIT_DISABLE_DMABUF_RENDERER", "1")
+		}
+	}
 	app := NewApp()
 	err := wails.Run(&options.App{
 		Title:            "Wisteria Desktop",

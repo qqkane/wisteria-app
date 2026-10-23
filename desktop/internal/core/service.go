@@ -308,6 +308,17 @@ func (s *Service) Start(p Profile) error {
 		s.mu.Unlock()
 		return err
 	}
+	// The SOCKS port must be free before the core starts. A foreign proxy on
+	// the same port (v2rayN, another client instance) makes the readiness
+	// check below "succeed" against the wrong process — and the wisteria
+	// core, which binds SOCKS only after a completed server handshake, then
+	// never opens the port at all: the session would sit in CONNECTING for
+	// the full 20s readiness deadline. Fail fast with a clear message.
+	socksAddr0 := fmt.Sprintf("%s:%d", s.settings.ListenHost(), s.settings.LocalPort)
+	if err := checkPortFree(socksAddr0); err != nil {
+		s.mu.Unlock()
+		return err
+	}
 	core, args, confFile, err := s.prepareCore(p)
 	if err != nil {
 		s.mu.Unlock()
@@ -346,7 +357,7 @@ func (s *Service) Start(p Profile) error {
 	s.done = make(chan struct{})
 	s.wstStatus = "" // prepareCore re-sets it for wisteria profiles
 	s.wstEvents = nil
-	socksAddr := fmt.Sprintf("%s:%d", s.settings.ListenHost(), s.settings.LocalPort)
+	socksAddr := socksAddr0
 	httpAddr := fmt.Sprintf("%s:%d", s.settings.ListenHost(), s.settings.HttpPort)
 	s.st = Status{
 		State:       StateConnecting,
@@ -841,6 +852,17 @@ type WisteriaDiag struct {
 	Updated  int64         `json:"updated"` // status-file timestamp, unix nanos
 	Events   []WEvent      `json:"events"`
 	LastKind string        `json:"last_kind,omitempty"`
+}
+
+// checkPortFree reports whether a TCP listener can bind addr right now.
+// Go's net.Listen keeps SO_REUSEADDR semantics on Unix, so sockets in
+// TIME_WAIT don't trip it — only an active listener (a foreign proxy) does.
+func checkPortFree(addr string) error {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("порт %s уже занят другой программой — закройте её (например v2rayN или другой клиент) или смените локальный порт в настройках", addr)
+	}
+	return ln.Close()
 }
 
 // FindCore resolves a core binary: explicit path → bin/ next to the app →

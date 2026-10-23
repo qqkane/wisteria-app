@@ -580,7 +580,7 @@ func (a *App) Disconnect() { a.svc.Stop() }
 // must be up; the address is the current session's).
 func (a *App) ToggleSystemProxy(on bool) error {
 	if !core.SystemProxySupported() {
-		return errors.New("поддерживается только на Windows")
+		return errors.New("системный прокси на этой системе не поддерживается")
 	}
 	st := a.svc.Status()
 	if on && st.State != core.StateConnected {
