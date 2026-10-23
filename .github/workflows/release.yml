@@ -41,10 +41,13 @@ jobs:
           go-version-file: wisteria/go.mod
           cache-dependency-path: wisteria/go.sum
 
+      # go resolves the main module from the current directory, so the
+      # core build must run inside the protocol repo checkout.
       - name: build wisteria cores
+        working-directory: wisteria
         run: |
-          go build -trimpath -ldflags "-w -s" -o desktop/build/bin/wisteria-client.exe ./wisteria/cmd/wisteria-client
-          go build -trimpath -ldflags "-w -s" -o desktop/build/bin/wisteria-server.exe ./wisteria/cmd/wisteria-server
+          go build -trimpath -ldflags "-w -s" -o ../desktop/build/bin/wisteria-client.exe ./cmd/wisteria-client
+          go build -trimpath -ldflags "-w -s" -o ../desktop/build/bin/wisteria-server.exe ./cmd/wisteria-server
 
       # The GUI shell (nested module; static frontend, no Node needed).
       - name: build desktop shell
@@ -108,9 +111,10 @@ jobs:
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libnss3-dev
 
       - name: build wisteria cores
+        working-directory: wisteria
         run: |
-          go build -trimpath -ldflags "-w -s" -o desktop/build/bin/wisteria-client ./wisteria/cmd/wisteria-client
-          go build -trimpath -ldflags "-w -s" -o desktop/build/bin/wisteria-server ./wisteria/cmd/wisteria-server
+          go build -trimpath -ldflags "-w -s" -o ../desktop/build/bin/wisteria-client ./cmd/wisteria-client
+          go build -trimpath -ldflags "-w -s" -o ../desktop/build/bin/wisteria-server ./cmd/wisteria-server
 
       - name: vet and test
         working-directory: desktop
