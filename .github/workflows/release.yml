@@ -1,0 +1,167 @@
+name: release
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "desktop/**"
+      - ".github/workflows/release.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "desktop/**"
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: build windows bundle
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      # The wisteria core sources (wisteria-client) live in the protocol
+      # repo; the bundle ships the built core next to the shell.
+      - name: checkout wisteria protocol repo
+        uses: actions/checkout@v4
+        with:
+          repository: qqkane/wisteria
+          token: ${{ secrets.WISTERIA_TOKEN }}
+          path: wisteria
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: wisteria/go.mod
+          cache-dependency-path: wisteria/go.sum
+
+      - name: build wisteria cores
+        run: |
+          go build -trimpath -ldflags "-w -s" -o desktop/build/bin/wisteria-client.exe ./wisteria/cmd/wisteria-client
+          go build -trimpath -ldflags "-w -s" -o desktop/build/bin/wisteria-server.exe ./wisteria/cmd/wisteria-server
+
+      # The GUI shell (nested module; static frontend, no Node needed).
+      - name: build desktop shell
+        working-directory: desktop
+        run: |
+          go vet ./...
+          go test ./...
+          go build -tags desktop,production -ldflags "-w -s -H windowsgui" -o build/WisteriaDesktop.exe .
+
+      # Full-tunnel e2e with the real cores.
+      - name: service e2e
+        working-directory: desktop
+        env:
+          WIST_E2E: "1"
+          WIST_CLIENT: ${{ github.workspace }}/desktop/build/bin/wisteria-client.exe
+          WIST_SERVER: ${{ github.workspace }}/desktop/build/bin/wisteria-server.exe
+        run: go test ./internal/core/ -run TestServiceE2E -v
+
+      - name: package
+        working-directory: desktop
+        run: |
+          mkdir -p dist/WisteriaDesktop
+          cp build/WisteriaDesktop.exe dist/WisteriaDesktop/
+          cp build/bin/wisteria-client.exe dist/WisteriaDesktop/bin/ 2>/dev/null || (mkdir -p dist/WisteriaDesktop/bin && cp build/bin/wisteria-client.exe dist/WisteriaDesktop/bin/)
+          cp README.md dist/WisteriaDesktop/
+          cd dist
+          7z a ../WisteriaDesktop-windows-amd64.zip WisteriaDesktop
+          sha256sum ../WisteriaDesktop-windows-amd64.zip > ../WisteriaDesktop-windows-amd64.zip.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WisteriaDesktop-windows-amd64
+          path: |
+            desktop/WisteriaDesktop-windows-amd64.zip
+            desktop/WisteriaDesktop-windows-amd64.zip.sha256
+
+  # The Linux bundle: GTK3 + WebKit2GTK (the Wails runtime needs CGO here),
+  # native cores and the full service e2e. 22.04 pins libwebkit2gtk-4.0-dev,
+  # which 24.04 dropped.
+  linux:
+    name: build linux bundle
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: checkout wisteria protocol repo
+        uses: actions/checkout@v4
+        with:
+          repository: qqkane/wisteria
+          token: ${{ secrets.WISTERIA_TOKEN }}
+          path: wisteria
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: wisteria/go.mod
+          cache-dependency-path: wisteria/go.sum
+
+      - name: install GUI dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libnss3-dev
+
+      - name: build wisteria cores
+        run: |
+          go build -trimpath -ldflags "-w -s" -o desktop/build/bin/wisteria-client ./wisteria/cmd/wisteria-client
+          go build -trimpath -ldflags "-w -s" -o desktop/build/bin/wisteria-server ./wisteria/cmd/wisteria-server
+
+      - name: vet and test
+        working-directory: desktop
+        run: |
+          go vet ./...
+          go test -race ./...
+
+      - name: service e2e
+        working-directory: desktop
+        env:
+          WIST_E2E: "1"
+          WIST_CLIENT: ${{ github.workspace }}/desktop/build/bin/wisteria-client
+          WIST_SERVER: ${{ github.workspace }}/desktop/build/bin/wisteria-server
+        run: go test ./internal/core/ -run TestServiceE2E -v
+
+      - name: build desktop shell
+        working-directory: desktop
+        run: CGO_ENABLED=1 go build -tags desktop,production -ldflags "-w -s" -o build/WisteriaDesktop .
+
+      - name: package
+        working-directory: desktop
+        run: |
+          mkdir -p dist/WisteriaDesktop/bin
+          cp build/WisteriaDesktop dist/WisteriaDesktop/
+          cp build/bin/wisteria-client dist/WisteriaDesktop/bin/
+          cp README.md dist/WisteriaDesktop/
+          tar -czf WisteriaDesktop-linux-amd64.tar.gz -C dist WisteriaDesktop
+          sha256sum WisteriaDesktop-linux-amd64.tar.gz > WisteriaDesktop-linux-amd64.tar.gz.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WisteriaDesktop-linux-amd64
+          path: |
+            desktop/WisteriaDesktop-linux-amd64.tar.gz
+            desktop/WisteriaDesktop-linux-amd64.tar.gz.sha256
+
+  # One release per v* tag with every platform bundle; the self-updater
+  # reads releases/latest from this repo and picks its platform's asset.
+  release:
+    name: publish release
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/WisteriaDesktop-windows-amd64/*
+            dist/WisteriaDesktop-linux-amd64/*

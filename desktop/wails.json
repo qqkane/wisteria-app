@@ -1,0 +1,18 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "WisteriaDesktop",
+  "outputfilename": "WisteriaDesktop",
+  "frontend:install": "",
+  "frontend:build": "",
+  "frontend:dev:watcher": "",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "wisteria contributors"
+  },
+  "info": {
+    "productName": "Wisteria Desktop",
+    "productVersion": "0.1.0",
+    "copyright": "Copyright © 2026",
+    "comments": "Cross-platform client (Windows/Linux) for the wisteria protocol"
+  }
+}
