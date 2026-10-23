@@ -387,7 +387,7 @@ func (s *Service) prepareCore(p Profile) (core string, args []string, confFile s
 	if p.Type == TWisteria {
 		core = firstNonEmpty(s.settings.WisteriaCore, FindCore("wisteria-client"))
 		if core == "" {
-			return "", nil, "", fmt.Errorf("ядро wisteria-client.exe не найдено (положите в bin/ рядом с приложением или укажите путь в настройках)")
+			return "", nil, "", fmt.Errorf("ядро wisteria-client не найдено (положите в bin/ рядом с приложением или укажите путь в настройках)")
 		}
 		tomlText, err := WisteriaTOML(p, fmt.Sprintf("%s:%d", s.settings.ListenHost(), s.settings.LocalPort),
 			filepath.Join(s.dirs.Data, "serverkey-"+p.ID+".cache"))
@@ -411,7 +411,7 @@ func (s *Service) prepareCore(p Profile) (core string, args []string, confFile s
 	if XraySupports(p.Type) && s.settings.EngineFor(p.Type) == "xray" {
 		core = firstNonEmpty(s.settings.XrayCore, FindCore("xray"))
 		if core == "" {
-			return "", nil, "", fmt.Errorf("xray.exe не найден (скачайте с github.com/XTLS/Xray-core и положите в bin/ или укажите путь в настройках)")
+			return "", nil, "", fmt.Errorf("xray не найден (скачайте с github.com/XTLS/Xray-core и положите в bin/ или укажите путь в настройках)")
 		}
 		conf, err := XrayConfig(p, XrayOptions{
 			SocksPort:     s.settings.LocalPort,
@@ -434,7 +434,7 @@ func (s *Service) prepareCore(p Profile) (core string, args []string, confFile s
 	}
 	core = firstNonEmpty(s.settings.SingBoxCore, FindCore("sing-box"))
 	if core == "" {
-		return "", nil, "", fmt.Errorf("sing-box.exe не найден (скачайте с github.com/SagerNet/sing-box и положите в bin/ или укажите путь в настройках)")
+		return "", nil, "", fmt.Errorf("sing-box не найден (скачайте с github.com/SagerNet/sing-box и положите в bin/ или укажите путь в настройках)")
 	}
 	conf, err := SingBoxConfig(p, SingBoxOptions{
 		MixedPort:     s.settings.LocalPort,

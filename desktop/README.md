@@ -42,10 +42,13 @@ go build -tags desktop,production -ldflags "-w -s -H windowsgui" -o build/Wister
 # ядро
 # go build -trimpath -ldflags "-w -s" -o desktop/build/bin/wisteria-client ./cmd/wisteria-client
 
-# приложение (нужны GTK3 и WebKit2GTK + компилятор для CGO)
-# sudo apt install libgtk-3-dev libwebkit2gtk-4.0-dev   # debian/ubuntu
+# приложение (нужны GTK3 и WebKit2GTK 4.1 + компилятор для CGO)
+# sudo apt install libgtk-3-dev libwebkit2gtk-4.1-dev   # debian/ubuntu
+# Arch/Manjaro: sudo pacman -S webkit2gtk-4.1
 cd desktop
-go build -tags desktop,production -ldflags "-w -s" -o build/WisteriaDesktop .
+# тег webkit2_41 линкует оболочку с WebKit2GTK 4.1 (на современных
+# дистрибутивах ABI 4.0 выпилен; без тега бинарь не запустится)
+go build -tags desktop,production,webkit2_41 -ldflags "-w -s" -o build/WisteriaDesktop .
 ```
 
 Отличия от Windows: системный прокси ставится через gsettings (GNOME и GTK-окружения;
