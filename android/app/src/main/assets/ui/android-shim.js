@@ -13,11 +13,18 @@
     return new Promise((resolve, reject) => {
       setTimeout(() => {
         try {
-          let v;
+          let raw, v;
           try {
-            v = JSON.parse(n.Call(name, args === undefined ? "[]" : JSON.stringify(args)));
+            raw = n.Call(name, args === undefined ? "[]" : JSON.stringify(args));
           } catch (e) {
-            return reject(new Error("мост: некорректный ответ"));
+            return reject(e);
+          }
+          try {
+            v = JSON.parse(raw);
+          } catch (e) {
+            // Wails JSON-encodes Go strings; the raw bridge returns them
+            // verbatim (Version). Treat an unparseable reply as a string.
+            v = typeof raw === "string" && raw !== "" ? raw : null;
           }
           if (v && v.__error) return reject(new Error(v.__error));
           resolve(v === undefined ? null : v);
@@ -28,11 +35,23 @@
     });
   }
 
+  // After a subscription op (import from clipboard / add / refresh) jump
+  // to the main screen: the profiles the user just fetched live there, so
+  // connecting is one tap away.
+  const AUTO_NAV = { ImportFromClipboard: 1, AddSubscription: 1, RefreshSubscription: 1 };
+  const activeTab = () =>
+    document.querySelector(".sidebar-nav-item.active")?.dataset.tab || "vpn";
   window.go = {
     main: {
       App: new Proxy({}, {
         get(_, name) {
-          return (...args) => call(name, args);
+          return (...args) =>
+            call(name, args).then((res) => {
+              if (AUTO_NAV[name] && activeTab() !== "vpn") {
+                setTimeout(() => { if (activeTab() !== "vpn") navTo("vpn"); }, 350);
+              }
+              return res;
+            });
         },
       }),
     },
@@ -121,6 +140,22 @@
     if (b) navTo(b.dataset.abgoto);
   });
 
+  // While connecting, the big button becomes an active Cancel (the shared
+  // frontend just disables it). The SPA's connecting marker is the button's
+  // disabled attribute (renderVpn); "connected" adds the connected class.
+  const isConnectingBtn = (btn) =>
+    !!btn && btn.disabled && !btn.classList.contains("connected");
+
+  document.addEventListener("click", (ev) => {
+    const btn = ev.target.closest("#btn-toggle");
+    if (!btn) return;
+    if (btn.dataset.abCancel === "1" || isConnectingBtn(btn)) {
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      call("Disconnect");
+    }
+  }, true);
+
   // Keep the language toggle's highlight in sync with the select: the SPA
   // rewrites the form (fillSettingsForm) without firing a DOM mutation.
   document.addEventListener("change", (ev) => {
@@ -145,6 +180,25 @@
   }
   new MutationObserver(() => {
     document.body.classList.toggle("ab-modal", !!document.querySelector(".modal-overlay.show"));
+
+    // «Отмена» instead of a dead disabled button while connecting. The SPA
+    // marks connecting with the button's disabled attr; once we take over,
+    // our own abCancel marker keeps the state stable across observer runs
+    // (the SPA re-render on state change drops it with the old DOM).
+    const btn = document.getElementById("btn-toggle");
+    if (btn) {
+      const spaConnecting = btn.disabled && !btn.classList.contains("connected");
+      if (spaConnecting || btn.dataset.abCancel === "1") {
+        const txt = btn.querySelector(".connect-text");
+        btn.disabled = false;
+        btn.dataset.abCancel = "1";
+        btn.classList.add("ab-cancel");
+        if (txt && txt.dataset.abCancel !== "1") {
+          txt.dataset.abCancel = "1";
+          txt.textContent = document.documentElement.lang === "en" ? "Cancel" : "Отмена";
+        }
+      }
+    }
 
     const as = document.querySelector("input#s-autostart");
     if (as) {
@@ -199,22 +253,35 @@
   }).observe(document.documentElement, { childList: true, subtree: true, attributes: true });
 
   // Cold-start safety net: if the SPA boot chain died before its first
-  // render (a transient bridge hiccup leaves an empty content area), kick
-  // it — renderState is wired to the "state" event, so re-emitting a fresh
-  // GetState redraws the home view; a full reload is the last resort.
+  // render (any bridge hiccup leaves an empty content area), replay the
+  // boot's data loads directly into S and re-render — a plain state re-emit
+  // is not enough when an earlier await aborted the chain. A full reload is
+  // the last resort.
   setTimeout(() => {
     const cw = document.getElementById("content-wrapper");
     if (!cw || cw.children.length > 0 || document.querySelector(".modal-overlay")) return;
-    call("GetState").then(
-      (st) => window.__wisteriaEmit("state", JSON.stringify(st)),
-      () => {
+    Promise.all([
+      call("GetState").catch(() => null),
+      call("ListProfiles").catch(() => null),
+      call("ListSubscriptions").catch(() => null),
+    ]).then(([st, profiles, subs]) => {
+      if (window.S) {
+        if (profiles) S.profiles = profiles;
+        if (subs) S.subs = subs;
+      }
+      if (st) window.__wisteriaEmit("state", JSON.stringify(st));
+      // renderState is wired to "state"; if the view is STILL empty the
+      // renderer itself died — reload once.
+      setTimeout(() => {
+        const w = document.getElementById("content-wrapper");
+        if (!w || w.children.length > 0) return;
         try {
           if (!sessionStorage.getItem("ab-reloaded")) {
             sessionStorage.setItem("ab-reloaded", "1");
             location.reload();
           }
         } catch (e) { /* private mode */ }
-      },
-    );
+      }, 1200);
+    });
   }, 2500);
 })();

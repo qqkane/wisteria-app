@@ -54,6 +54,10 @@ class WisteriaVpnService : VpnService() {
     private val executor = Executors.newSingleThreadExecutor()
     private var engineIsBox = false
 
+    /** Guards tun/boxTun/engineIsBox: CancelConnect tears down on its own
+     *  thread even while connect() is stuck inside a native engine call. */
+    private val stateLock = Any()
+
     private val callback = object : Callback {
         override fun onLog(line: String?) {
             EngineHub.coreLog(line ?: "")
@@ -119,10 +123,12 @@ class WisteriaVpnService : VpnService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_DISCONNECT -> executor.execute {
+            // Own thread: CancelConnect must not queue behind a connect()
+            // that is stuck inside a blocking native engine call.
+            ACTION_DISCONNECT -> Thread({
                 teardown()
                 stopSelf()
-            }
+            }, "wisteria-disconnect").start()
             else -> {
                 val id = intent?.getStringExtra(EXTRA_PROFILE_ID).orEmpty()
                 executor.execute { connect(id) }
@@ -148,7 +154,9 @@ class WisteriaVpnService : VpnService() {
     }
 
     private fun connect(profileIdParam: String) {
-        if (tun != null || engineIsBox) return // already running
+        synchronized(stateLock) {
+            if (tun != null || engineIsBox) return // already running
+        }
 
         val store = AndroidStore(this)
         val id = profileIdParam.ifEmpty { store.activeId() }
@@ -293,33 +301,35 @@ class WisteriaVpnService : VpnService() {
     }
 
     private fun teardown() {
-        if (engineIsBox) {
-            unregisterBoxNetworkMonitor()
-            try {
-                Mobile.boxStop()
-            } catch (_: Throwable) {
+        synchronized(stateLock) {
+            if (engineIsBox) {
+                unregisterBoxNetworkMonitor()
+                try {
+                    Mobile.boxStop()
+                } catch (_: Throwable) {
+                }
+                boxTun?.let {
+                    try {
+                        it.close()
+                    } catch (_: Throwable) {
+                    }
+                }
+                boxTun = null
+                engineIsBox = false
+            } else {
+                try {
+                    Mobile.stop()
+                } catch (_: Throwable) {
+                }
             }
-            boxTun?.let {
+            tun?.let {
                 try {
                     it.close()
                 } catch (_: Throwable) {
                 }
             }
-            boxTun = null
-            engineIsBox = false
-        } else {
-            try {
-                Mobile.stop()
-            } catch (_: Throwable) {
-            }
+            tun = null
         }
-        tun?.let {
-            try {
-                it.close()
-            } catch (_: Throwable) {
-            }
-        }
-        tun = null
         EngineHub.profileId = ""
         EngineHub.profileName = ""
         EngineHub.profileType = ""

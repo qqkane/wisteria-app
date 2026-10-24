@@ -27,7 +27,7 @@ class WisteriaBridge(private val activity: MainActivity) {
     private val store by lazy { AndroidStore(context) }
 
     companion object {
-        const val VERSION = "0.4.1"
+        const val VERSION = "0.4.2"
         private const val MAX_SUB_BYTES = 4 shl 20
 
         /** Status shape shared with WisteriaVpnService (EngineHub-based). */
@@ -63,7 +63,9 @@ class WisteriaBridge(private val activity: MainActivity) {
         "GetState" -> statusJson()
         "GetLogs" -> EngineHub.logsSince(args.optLong(0))
         "GetWisteriaDiag" -> diagJson()
-        "Version" -> VERSION
+        // JSON-encode the version string: the frontend's boot chain does
+        // JSON.parse on every reply, and a bare 0.4.2 is not valid JSON.
+        "Version" -> JSONObject.quote(VERSION)
         "GetExternalIP" -> externalIP()
 
         // ---- profiles ----
@@ -338,7 +340,14 @@ class WisteriaBridge(private val activity: MainActivity) {
                 rest.append(rawLine).append("\n")
             }
         }
-        val entries = if (rest.isNotBlank()) JSONArray(Mobile.parseLinks(rest.toString())) else JSONArray()
+        // A sub with no wisteria lines (or plain junk in the mix) must not
+        // lose the sing-box profiles extracted above.
+        val entries = try {
+            if (rest.isNotBlank()) JSONArray(Mobile.parseLinks(rest.toString())) else JSONArray()
+        } catch (e: Exception) {
+            EngineHub.appLog("подписка: ссылки wisteria не разобраны (${e.message})")
+            JSONArray()
+        }
 
         val old = JSONArray()
         val profiles = store.listProfiles()
