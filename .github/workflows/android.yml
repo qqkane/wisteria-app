@@ -20,10 +20,13 @@ jobs:
 
       # The Go engine lives in the private protocol repo; the AAR is built
       # from its checkout, never committed to this repo.
+      # TODO: switch to the default branch once wisteria PR #13 (mobile/)
+      # is merged — the engine package only exists on feature/android-engine.
       - name: Checkout wisteria protocol repo
         uses: actions/checkout@v4
         with:
           repository: qqkane/wisteria
+          ref: feature/android-engine
           token: ${{ secrets.WISTERIA_TOKEN }}
           path: wisteria
 
