@@ -60,12 +60,14 @@ body { font-family: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif; backgrou
 .theme-arctic { color-scheme: light; }
 select option, select optgroup { background-color: var(--surface); color: var(--fg); }
 
-/* orbs */
+/* orbs: soft radial gradients instead of filter:blur — WebKit2GTK
+   re-rasterizes a 120px blur on every animated frame (~10fps with it,
+   vsync-capped 60fps without) */
 .bg-layers { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
-.orb { position: absolute; border-radius: 50%; filter: blur(120px); }
-.orb-1 { width: 600px; height: 600px; top: -15%; right: -10%; background: rgba(var(--accent-rgb), 0.3); }
-.orb-2 { width: 500px; height: 500px; bottom: -20%; left: -5%; background: rgba(var(--accent-rgb), 0.2); }
-.orb-3 { width: 300px; height: 300px; top: 40%; left: 30%; background: rgba(var(--accent-rgb), 0.15); }
+.orb { position: absolute; border-radius: 50%; }
+.orb-1 { width: 600px; height: 600px; top: -15%; right: -10%; background: radial-gradient(circle, rgba(var(--accent-rgb), 0.3) 0%, rgba(var(--accent-rgb), 0.3) 40%, rgba(var(--accent-rgb), 0.15) 55%, transparent 70%); }
+.orb-2 { width: 500px; height: 500px; bottom: -20%; left: -5%; background: radial-gradient(circle, rgba(var(--accent-rgb), 0.2) 0%, rgba(var(--accent-rgb), 0.2) 35%, rgba(var(--accent-rgb), 0.1) 50%, transparent 66%); }
+.orb-3 { width: 300px; height: 300px; top: 40%; left: 30%; background: radial-gradient(circle, rgba(var(--accent-rgb), 0.15) 0%, rgba(var(--accent-rgb), 0.15) 15%, rgba(var(--accent-rgb), 0.07) 35%, transparent 52%); }
 
 /* sidebar */
 .sidebar { width: 280px; background: rgba(10,10,12,0.5); backdrop-filter: blur(30px); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 24px 16px; z-index: 50; flex-shrink: 0; }
