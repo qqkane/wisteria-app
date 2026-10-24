@@ -18,9 +18,29 @@ html.platform-android .set-tab[data-settab="cores"] { display: none; }
    the shim's MutationObserver, not CSS: they are label+control pairs in a
    shared grid, and the labels carry no ids. */
 
+/* 1fr grid tracks are minmax(auto, 1fr): the min-content of theme cards and
+   of the number/select inputs in the settings grid forces horizontal overflow
+   on ~390dp phones, which pans the whole content area sideways. Cap both
+   grids and forbid horizontal panning on the scroll container itself. */
+html.platform-android .app-content { overflow-x: hidden; }
+
 /* ---------- phone layout ---------- */
 @media (max-width: 760px) {
   #app { flex-direction: column; }
+
+  .theme-grid { grid-template-columns: repeat(auto-fit, minmax(146px, 1fr)); }
+  .set-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  /* grid items otherwise refuse to shrink below min-content and spill out
+     of their track (the app-version row: text + "Проверить обновления"). */
+  .set-grid > * { min-width: 0; }
+  .set-grid div[style*="display:flex"] { flex-wrap: wrap; }
+  .upd-banner { flex-wrap: wrap; }
+  /* very narrow phones: stack label above control instead of squeezing */
+  @media (max-width: 380px) {
+    .set-grid { grid-template-columns: minmax(0, 1fr); }
+  }
+
+
 
   .sidebar {
     width: 100%;

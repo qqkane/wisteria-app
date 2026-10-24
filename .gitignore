@@ -1,3 +1,4 @@
 desktop/build/
 *.exe.old
 *.old
+build/

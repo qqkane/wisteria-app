@@ -62,9 +62,18 @@
   document.documentElement.classList.add("platform-android");
 
   // The settings form is re-rendered on every visit; drop the Windows-only
-  // switch pairs (start minimized / confirm exit) each time they appear.
+  // switch pairs (start minimized / confirm exit) each time they appear, and
+  // relabel the autostart toggle: s-autostart maps to Android boot autostart.
   const killPairs = ["s-startmin", "s-confirmexit"];
   new MutationObserver(() => {
+    const as = document.querySelector("input#s-autostart");
+    if (as) {
+      const lbl = as.closest("label.switch")?.previousElementSibling;
+      if (lbl && lbl.tagName === "LABEL" && lbl.textContent.includes("Windows"))
+        lbl.textContent = lbl.textContent
+          .replace("при входе в Windows", "при включении телефона")
+          .replace("Start with Windows", "Start on device boot");
+    }
     killPairs.forEach((id) => {
       const el = document.getElementById(id);
       if (!el) return;
