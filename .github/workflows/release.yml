@@ -162,10 +162,11 @@ jobs:
           curl -fsSL -o appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
           chmod +x appimagetool
 
-          mkdir -p AppDir/usr/bin/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
+          mkdir -p AppDir/usr/bin/bin
           cp build/WisteriaDesktop AppDir/usr/bin/
           cp build/bin/wisteria-client AppDir/usr/bin/bin/
 
+          # appimagetool expects the desktop file and icon at the AppDir root
           printf '%s\n' \
             '[Desktop Entry]' \
             'Type=Application' \
@@ -175,8 +176,8 @@ jobs:
             'Icon=WisteriaDesktop' \
             'Categories=Network;' \
             'Terminal=false' \
-            > AppDir/usr/share/applications/WisteriaDesktop.desktop
-          cp frontend/dist/assets/icon.png AppDir/usr/share/icons/hicolor/256x256/apps/WisteriaDesktop.png
+            > AppDir/WisteriaDesktop.desktop
+          cp frontend/dist/assets/icon.png AppDir/WisteriaDesktop.png
 
           printf '%s\n' \
             '#!/usr/bin/env bash' \
