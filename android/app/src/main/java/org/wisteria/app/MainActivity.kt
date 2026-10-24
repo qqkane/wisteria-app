@@ -31,6 +31,27 @@ class MainActivity : AppCompatActivity() {
     @Volatile
     private var pendingConnectId: String? = null
 
+    /** Theme accents, mirroring the frontend THEMES list (app.js). */
+    private val THEME_ACCENTS = mapOf(
+        "lilac" to "#a78bfa",
+        "neon-dark" to "#00e8a2",
+        "warm-sand" to "#e8a040",
+        "arctic" to "#2a64b4",
+        "sunset" to "#f06888",
+        "matrix" to "#00ff41",
+        "mono" to "#e02020",
+    )
+
+    /** The system status bar must follow the app theme (the WebView
+     *  chrome is themed by CSS; this bar belongs to Android). */
+    fun applyThemeFromSettings() {
+        try {
+            val theme = AndroidStore(this).settings().optString("theme", "lilac")
+            window.statusBarColor = Color.parseColor(THEME_ACCENTS[theme] ?: "#a78bfa")
+        } catch (_: Throwable) {
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         web = WebView(this)
@@ -78,6 +99,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         web.loadUrl("file:///android_asset/ui/index.html")
+        applyThemeFromSettings()
     }
 
     /** The bridge asks for VPN consent mid-Connect; the retry follows here. */

@@ -27,7 +27,7 @@ class WisteriaBridge(private val activity: MainActivity) {
     private val store by lazy { AndroidStore(context) }
 
     companion object {
-        const val VERSION = "0.4.0"
+        const val VERSION = "0.4.1"
         private const val MAX_SUB_BYTES = 4 shl 20
 
         /** Status shape shared with WisteriaVpnService (EngineHub-based). */
@@ -87,7 +87,11 @@ class WisteriaBridge(private val activity: MainActivity) {
 
         // ---- settings ----
         "GetSettings" -> store.settings()
-        "SaveSettings" -> { store.saveSettings(args.getJSONObject(0)); null }
+        "SaveSettings" -> {
+            store.saveSettings(args.getJSONObject(0))
+            activity.applyThemeFromSettings()
+            null
+        }
         "GetAutostart" -> store.autostart()
         "SetAutostart" -> { store.setAutostart(args.getBoolean(0)); null }
 

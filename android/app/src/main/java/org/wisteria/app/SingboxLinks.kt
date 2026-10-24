@@ -160,23 +160,72 @@ object SingboxLinks {
 
     // ---- config builder ---------------------------------------------------
 
-    /** Full sing-box config for the profile's raw link (tun + outbound). */
-    fun buildConfig(raw: String, name: String): String {
+    /** Private ranges for the bypass-LAN rule (applied before the proxy). */
+    private val PRIVATE_CIDRS = listOf(
+        "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8",
+        "169.254.0.0/16", "100.64.0.0/10", "224.0.0.0/4",
+        "::1/128", "fe80::/10", "fc00::/7",
+    )
+
+    /** Full sing-box config for the profile's raw link: tun inbound, the
+     *  parsed outbound, DNS and route. The optional settings carry the
+     *  routing tab (bypass_lan, route_direct, route_block, remote_dns,
+     *  log_level) — the same keys the desktop saves. */
+    fun buildConfig(raw: String, name: String, settings: JSONObject? = null): String {
+        val s = settings ?: JSONObject()
         val outbound = buildOutbound(raw, name)
+
+        val blockDomains = JSONArray()
+        val blockIps = JSONArray()
+        val directDomains = JSONArray()
+        val directIps = JSONArray()
+        for ((value, isIp) in parseRouteList(s.optString("route_block"))) {
+            (if (isIp) blockIps else blockDomains).put(value)
+        }
+        for ((value, isIp) in parseRouteList(s.optString("route_direct"))) {
+            (if (isIp) directIps else directDomains).put(value)
+        }
+        val hasBlock = blockDomains.length() > 0 || blockIps.length() > 0
+
+        val rules = JSONArray()
+            .put(JSONObject().put("action", "sniff"))
+            .put(JSONObject().put("protocol", "dns").put("action", "hijack-dns"))
+        if (hasBlock) {
+            rules.put(JSONObject().put("outbound", "block").apply {
+                if (blockDomains.length() > 0) put("domain_suffix", blockDomains)
+                if (blockIps.length() > 0) put("ip_cidr", blockIps)
+            })
+        }
+        if (directDomains.length() > 0 || directIps.length() > 0) {
+            rules.put(JSONObject().put("outbound", "direct").apply {
+                if (directDomains.length() > 0) put("domain_suffix", directDomains)
+                if (directIps.length() > 0) put("ip_cidr", directIps)
+            })
+        }
+        if (s.optBoolean("bypass_lan", false)) {
+            rules.put(
+                JSONObject()
+                    .put("ip_cidr", JSONArray().apply { PRIVATE_CIDRS.forEach { put(it) } })
+                    .put("outbound", "direct"),
+            )
+        }
+
+        val outbounds = JSONArray()
+            .put(outbound.put("domain_resolver", "dns-remote"))
+            .put(JSONObject().put("type", "direct").put("tag", "direct"))
+        if (hasBlock) {
+            outbounds.put(JSONObject().put("type", "block").put("tag", "block"))
+        }
+
         val cfg = JSONObject()
             .put(
                 "log",
-                JSONObject().put("level", "info").put("timestamp", true),
+                JSONObject().put("level", s.optString("log_level").ifEmpty { "info" }).put("timestamp", true),
             )
             .put(
                 "dns",
                 JSONObject()
-                    .put(
-                        "servers",
-                        JSONArray().put(
-                            JSONObject().put("type", "udp").put("tag", "dns-remote").put("server", "8.8.8.8"),
-                        ),
-                    )
+                    .put("servers", JSONArray().put(parseDnsServer(s.optString("remote_dns"))))
                     .put("final", "dns-remote")
                     .put("strategy", "prefer_ipv4")
                     .put("independent_cache", true),
@@ -194,25 +243,43 @@ object SingboxLinks {
                         .put("stack", "mixed"),
                 ),
             )
-            .put(
-                "outbounds",
-                JSONArray()
-                    .put(outbound.put("domain_resolver", "dns-remote"))
-                    .put(JSONObject().put("type", "direct").put("tag", "direct")),
-            )
+            .put("outbounds", outbounds)
             .put(
                 "route",
                 JSONObject()
                     .put("auto_detect_interface", true)
-                    .put(
-                        "rules",
-                        JSONArray()
-                            .put(JSONObject().put("action", "sniff"))
-                            .put(JSONObject().put("protocol", "dns").put("action", "hijack-dns")),
-                    )
+                    .put("rules", rules)
                     .put("final", "proxy"),
             )
         return cfg.toString()
+    }
+
+    /** "tcp://1.1.1.1" / "udp://8.8.8.8" / "tls://…" / bare address → the
+     *  sing-box dns-server entry (udp 8.8.8.8 when unset). */
+    private fun parseDnsServer(raw0: String): JSONObject {
+        var raw = raw0.trim()
+        if (raw.isEmpty()) raw = "udp://8.8.8.8"
+        val type = when {
+            raw.startsWith("tcp://") -> "tcp"
+            raw.startsWith("tls://") -> "tls"
+            raw.startsWith("https://") -> "https"
+            else -> "udp"
+        }
+        val server = raw.substringAfter("://").substringBefore('/').trim().ifEmpty { "8.8.8.8" }
+        return JSONObject().put("type", type).put("tag", "dns-remote").put("server", server)
+    }
+
+    /** Route lists: one entry per line (or comma/semicolon), # and //
+     *  comments stripped. Returns value + whether it's an IP/CIDR. */
+    private fun parseRouteList(text: String): List<Pair<String, Boolean>> {
+        val out = mutableListOf<Pair<String, Boolean>>()
+        val ipLike = Regex("^[0-9a-fA-F:.]+(/\\d{1,3})?$")
+        for (rawLine in text.split("\n", ",", ";")) {
+            var line = rawLine.substringBefore("#").substringBefore("//").trim()
+            if (line.isEmpty()) continue
+            out.add(line.lowercase() to ipLike.matches(line))
+        }
+        return out
     }
 
     private fun buildOutbound(raw: String, name: String): JSONObject {

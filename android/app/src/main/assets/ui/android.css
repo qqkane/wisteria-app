@@ -7,11 +7,11 @@
    everything; there is no system proxy concept). */
 html.platform-android .stats-row .stat-card:nth-child(3) { display: none; }
 
-/* TUN note and diag "open logs" stay; the connect/conn/routing/cores
-   settings tabs are desktop concepts (local ports, sing-box helpers,
-   per-protocol cores). Only Appearance and General remain. */
+/* TUN note and diag "open logs" stay; the conn/cores settings tabs are
+   desktop concepts (local ports, system proxy, per-protocol cores).
+   Routing (bypass LAN, direct/block lists, DNS, log level) is applied to
+   the sing-box config, so its tab stays. */
 html.platform-android .set-tab[data-settab="conn"],
-html.platform-android .set-tab[data-settab="routing"],
 html.platform-android .set-tab[data-settab="cores"] { display: none; }
 
 /* Windows-only switches (start minimized / confirm exit) are removed by

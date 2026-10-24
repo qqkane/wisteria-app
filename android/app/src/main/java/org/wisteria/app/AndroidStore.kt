@@ -71,7 +71,14 @@ class AndroidStore(private val context: Context) {
     // ---- profiles ----
 
     @Synchronized
-    fun listProfiles(): JSONArray = JSONArray(load().optJSONArray("profiles") ?: JSONArray())
+    fun listProfiles(): JSONArray {
+        val arr = load().optJSONArray("profiles") ?: return JSONArray()
+        // Copy element-wise: JSONArray(arr) would pick the JSONArray(Object)
+        // constructor and throw "Not a primitive array".
+        val out = JSONArray()
+        for (i in 0 until arr.length()) out.put(arr.getJSONObject(i))
+        return out
+    }
 
     @Synchronized
     fun profile(id: String): JSONObject? {
@@ -148,7 +155,12 @@ class AndroidStore(private val context: Context) {
     // ---- subscriptions ----
 
     @Synchronized
-    fun listSubs(): JSONArray = JSONArray(load().optJSONArray("subs") ?: JSONArray())
+    fun listSubs(): JSONArray {
+        val arr = load().optJSONArray("subs") ?: return JSONArray()
+        val out = JSONArray()
+        for (i in 0 until arr.length()) out.put(arr.getJSONObject(i))
+        return out
+    }
 
     @Synchronized
     fun sub(id: String): JSONObject? {
