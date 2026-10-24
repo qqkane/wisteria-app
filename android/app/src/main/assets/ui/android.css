@@ -1,0 +1,72 @@
+/* Android overrides for the shared «Наша Сеть» UI: desktop-only controls
+   are hidden and the sidebar folds into a phone-sized top bar. Everything
+   else (orbs, glass cards, pulse-rings connect button, themes) is the
+   desktop design language untouched. */
+
+/* The system-proxy stat card is meaningless on Android (VpnService routes
+   everything; there is no system proxy concept). */
+html.platform-android .stats-row .stat-card:nth-child(3) { display: none; }
+
+/* TUN note and diag "open logs" stay; the connect/conn/routing/cores
+   settings tabs are desktop concepts (local ports, sing-box helpers,
+   per-protocol cores). Only Appearance and General remain. */
+html.platform-android .set-tab[data-settab="conn"],
+html.platform-android .set-tab[data-settab="routing"],
+html.platform-android .set-tab[data-settab="cores"] { display: none; }
+
+/* Windows-only switches (start minimized / confirm exit) are removed by
+   the shim's MutationObserver, not CSS: they are label+control pairs in a
+   shared grid, and the labels carry no ids. */
+
+/* ---------- phone layout ---------- */
+@media (max-width: 760px) {
+  #app { flex-direction: column; }
+
+  .sidebar {
+    width: 100%;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar-logo { margin: 0; font-size: 17px; flex-shrink: 0; }
+  .sidebar-logo img { width: 22px; height: 22px; }
+  .sidebar-nav {
+    flex-direction: row;
+    overflow-x: auto;
+    gap: 2px;
+    flex: 1;
+    scrollbar-width: none;
+  }
+  .sidebar-nav::-webkit-scrollbar { display: none; }
+  .sidebar-nav-item {
+    padding: 10px 12px;
+    font-size: 13px;
+    white-space: nowrap;
+    gap: 7px;
+  }
+  .sidebar-nav-item svg { width: 15px; height: 15px; }
+  .sidebar-footer { display: none; }
+
+  .main-area { height: auto; flex: 1; }
+  .app-content { padding: 0 14px 20px; }
+
+  .vpn-screen { padding-top: 18px; }
+  .connect-btn { width: 176px; height: 176px; margin: 22px auto; }
+  .connect-btn .power-icon { width: 44px; height: 44px; }
+
+  .profile-card { margin-top: 18px; padding: 14px; }
+  .stats-row { flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+  .stat-card { flex: 1 1 40%; }
+
+  .servers-header { margin: 16px 0 16px; flex-wrap: wrap; gap: 8px; }
+  .servers-grid { grid-template-columns: 1fr; }
+  .sub-head { flex-wrap: wrap; }
+
+  .set-tabs { overflow-x: auto; scrollbar-width: none; }
+  .modal-content { width: 94vw; max-width: 94vw; max-height: 88vh; overflow-y: auto; }
+  .input-row { flex-wrap: wrap; }
+  .settings-title { font-size: 20px; }
+}

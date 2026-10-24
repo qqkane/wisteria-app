@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<title>Wisteria Desktop</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<link rel="icon" href="assets/icon.png"/>
+<link rel="stylesheet" href="style.css"/>
+<link rel="stylesheet" href="android.css"/>
+</head>
+<body>
+
+<div id="app" class="theme-sunset">
+  <div class="bg-layers">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-icon"><img src="assets/icon.png" alt=""/></div>
+      <span data-i18n="brand">Wisteria</span>
+    </div>
+    <nav class="sidebar-nav">
+      <button class="sidebar-nav-item active" data-tab="vpn" data-i18n="nav.vpn">VPN</button>
+      <button class="sidebar-nav-item" data-tab="profiles" data-i18n="nav.profiles">Профили</button>
+      <button class="sidebar-nav-item" data-tab="logs" data-i18n="nav.logs">Логи</button>
+      <button class="sidebar-nav-item" data-tab="diag" data-i18n="nav.diag">Диагностика</button>
+      <button class="sidebar-nav-item" data-tab="settings" data-i18n="nav.settings">Настройки</button>
+    </nav>
+    <div class="sidebar-footer" id="sidebar-footer"></div>
+  </aside>
+
+  <div class="main-area">
+    <div class="app-content">
+      <div class="content-wrapper" id="content-wrapper"></div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="modal-add">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 data-i18n="add.title">Добавить профиль</h2>
+        <button class="modal-close" onclick="UI.closeModal()" data-icon="xmark"></button>
+      </div>
+      <div class="modal-tabs">
+        <button class="modal-tab active" data-mtab="links" data-i18n="tab.links">Ссылки</button>
+        <button class="modal-tab" data-mtab="manual" data-i18n="tab.manual">Вручную</button>
+        <button class="modal-tab" data-mtab="toml" data-i18n="tab.toml">wisteria TOML</button>
+      </div>
+      <div class="modal-body" data-mbody="links">
+        <div class="input-group">
+          <label data-i18n="add.linksLabel">Share-ссылки (по одной в строке)</label>
+          <textarea id="import-area" data-ph="add.linksPh" placeholder="vless://…&#10;ss://…&#10;wisteria://…"></textarea>
+        </div>
+        <div id="import-errors" class="import-errors"></div>
+        <button class="submit-btn" id="btn-import" data-i18n="add.import">Импортировать</button>
+      </div>
+      <div class="modal-body hidden" data-mbody="manual">
+        <div class="input-group">
+          <label data-i18n="lbl.type">Тип</label>
+          <select id="m-type">
+            <option value="wisteria">wisteria</option>
+            <option value="ss">shadowsocks</option>
+            <option value="vmess">vmess</option>
+            <option value="vless">vless</option>
+            <option value="trojan">trojan</option>
+            <option value="hysteria2">hysteria2</option>
+            <option value="tuic">tuic</option>
+          </select>
+        </div>
+        <div class="input-row">
+          <div class="input-group"><label data-i18n="lbl.name">Имя</label><input id="m-name" type="text" data-ph="add.namePh" placeholder="auto"/></div>
+          <div class="input-group"><label data-i18n="lbl.host">Адрес</label><input id="m-host" type="text"/></div>
+          <div class="input-group small"><label data-i18n="lbl.port">Порт</label><input id="m-port" type="number" min="1" max="65535"/></div>
+        </div>
+        <div id="m-extra"></div>
+        <button class="submit-btn" id="btn-add-manual" data-i18n="add.add">Добавить</button>
+      </div>
+      <div class="modal-body hidden" data-mbody="toml">
+        <p class="hint" data-i18n="toml.hint">Вставьте client.toml — endpoint, ключи и обфускация переносятся; приватный ключ клиента сохраняется.</p>
+        <div class="input-group">
+          <textarea id="toml-area" rows="8" placeholder="[server]&#10;endpoint = &quot;…&quot;"></textarea>
+        </div>
+        <div id="toml-status" class="import-errors"></div>
+        <button class="submit-btn" id="btn-import-toml">Импорт TOML</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="modal-confirm">
+    <div class="modal-content confirm-box">
+      <div class="confirm-icon" data-icon="trash"></div>
+      <h2 class="confirm-title" data-i18n="confirm.title">Подтверждение</h2>
+      <div class="confirm-msg" id="cf-msg"></div>
+      <div class="confirm-actions">
+        <button class="ghost-btn" id="cf-cancel" data-i18n="confirm.cancel">Отмена</button>
+        <button class="danger-btn" id="cf-ok" data-i18n="confirm.deleteBtn">Удалить</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script src="android-shim.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
