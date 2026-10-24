@@ -83,7 +83,9 @@ jobs:
           printf '#!/bin/sh\nexec "%s/clang" --target=armv7a-linux-androideabi24 "$@"\n' "$PREBUILT" > "$SHIM/clang"
           chmod +x "$SHIM/clang"
           export PATH="$SHIM:$PATH"
-          gomobile bind -x -target=android -androidapi 24 -javapkg=org.wisteria \
+          # gomobile does not create the -o directory itself.
+          mkdir -p "$GITHUB_WORKSPACE/android/app/libs"
+          gomobile bind -target=android -androidapi 24 -javapkg=org.wisteria \
             -o "$GITHUB_WORKSPACE/android/app/libs/wisteria.aar" ./mobile
 
       - name: Build APKs
