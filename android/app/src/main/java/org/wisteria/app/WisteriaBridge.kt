@@ -32,7 +32,10 @@ class WisteriaBridge(private val activity: MainActivity) {
     @Volatile private var consentPending: String? = null
 
     companion object {
-        const val VERSION = "0.4.2"
+        /** Mirrors build.gradle's versionName so the version the settings
+         *  screen shows can never disagree with the APK again (the constant
+         *  here stayed "0.4.2" while the app shipped 0.4.6). */
+        val VERSION: String = BuildConfig.VERSION_NAME
         private const val MAX_SUB_BYTES = 4 shl 20
 
         /** Status shape shared with WisteriaVpnService (EngineHub-based). */
@@ -90,7 +93,7 @@ class WisteriaBridge(private val activity: MainActivity) {
         "ListSubscriptions" -> store.listSubs()
         "AddSubscription" -> addSubscription(args.getString(0))
         "RefreshSubscription" -> refreshSubscription(args.getString(0))
-        "DeleteSubscription" -> { store.deleteSub(args.getString(0)); null }
+        "DeleteSubscription" -> { deleteSubscription(args.getString(0)); null }
         "ImportFromClipboard" -> importFromClipboard()
 
         // ---- settings ----
@@ -197,6 +200,25 @@ class WisteriaBridge(private val activity: MainActivity) {
         }
         if (!store.deleteProfile(id)) throw err("профиль не найден")
         EngineHub.appLog("профиль удалён")
+        pushProfiles()
+    }
+
+    /** Same rule as the desktop: refuse while a profile of this
+     *  subscription is actually running. A merely selected profile does
+     *  not block the delete (the old active-based guard did). */
+    private fun deleteSubscription(id: String) {
+        val running = EngineHub.profileId
+        if (running.isNotEmpty() && isRunning(JSONObject(Mobile.status()))) {
+            val profiles = store.listProfiles()
+            for (i in 0 until profiles.length()) {
+                val p = profiles.getJSONObject(i)
+                if (p.optString("id") == running && p.optString("sub_id") == id) {
+                    throw err("подписка подключена — сначала отключитесь")
+                }
+            }
+        }
+        store.deleteSub(id)
+        EngineHub.appLog("подписка удалена вместе с её профилями")
         pushProfiles()
     }
 
@@ -440,7 +462,7 @@ class WisteriaBridge(private val activity: MainActivity) {
                         fetchSubAsync(sub) // fetch off the bridge thread
                     }
                 } catch (e: Exception) {
-                    EngineHub.appLog("подписка $line: ${e.message}")
+                    EngineHub.appLog("подписка ${maskUrl(line)}: ${e.message}")
                 }
             } else {
                 links.append(line).append("\n")
@@ -522,6 +544,10 @@ class WisteriaBridge(private val activity: MainActivity) {
         val port = p.optInt("port", 0)
         return if (port > 0) "$host:$port" else host
     }
+
+    /** Subscription URLs commonly carry an auth token in the query; keep
+     *  it out of the log ring the Логи screen shows. */
+    private fun maskUrl(u: String): String = u.substringBefore('?').substringBefore('#')
 
     /** host:port → (host, port); null when the endpoint is unusable. */
     private fun splitEndpoint(ep: String): Pair<String, Int>? {

@@ -206,25 +206,27 @@ class AndroidStore(private val context: Context) {
         save(store)
     }
 
-    /** Removes the subscription and exactly its own profiles. Throws when the
-     *  active profile belongs to it — same rule as the desktop. */
+    /** Removes the subscription and exactly its own profiles. The bridge
+     *  refuses the call while a profile of the sub is running; a merely
+     *  selected profile is removed too, and a dangling active pointer is
+     *  cleared (it used to survive and break the next auto-connect). */
     @Synchronized
     fun deleteSub(id: String) {
         val store = load()
         val profiles = store.optJSONArray("profiles") ?: JSONArray()
         val active = store.optString("active")
         val keep = JSONArray()
+        var activeRemoved = false
         for (i in 0 until profiles.length()) {
             val p = profiles.getJSONObject(i)
             if (p.optString("sub_id") == id) {
-                if (p.optString("id") == active) {
-                    throw IllegalStateException("подключённый профиль из этой подписки — сначала отключитесь")
-                }
+                if (p.optString("id") == active) activeRemoved = true
             } else {
                 keep.put(p)
             }
         }
         store.put("profiles", keep)
+        if (activeRemoved) store.put("active", "")
         val subs = store.optJSONArray("subs") ?: JSONArray()
         val out = JSONArray()
         for (i in 0 until subs.length()) {

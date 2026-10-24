@@ -49,14 +49,28 @@ jobs:
 
       - name: Install gomobile
         run: |
-          go install golang.org/x/mobile/cmd/gomobile@latest
-          go install golang.org/x/mobile/cmd/gobind@latest
+          # Pinned: @latest once shipped an incompatible release mid-day and
+          # the bind broke with no change in this repo. Bump deliberately.
+          go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20261011034528-197770444867
+          go install golang.org/x/mobile/cmd/gobind@v0.0.0-20261011034528-197770444867
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
-      # assembleRelease signs with the debug keystore; the runner has none.
-      - name: Create debug keystore
+      # The release APK must always carry the same signature, or no update
+      # ever installs over a previous release. WISTERIA_RELEASE_KEYSTORE_B64
+      # (base64 of a PKCS12 keystore, alias "wisteria") and
+      # WISTERIA_KEYSTORE_PASSWORD are repo secrets; without them the build
+      # falls back to a per-run debug key so CI stays green.
+      - name: Keystores
+        env:
+          RELEASE_KEYSTORE_B64: ${{ secrets.WISTERIA_RELEASE_KEYSTORE_B64 }}
         run: |
           mkdir -p ~/.android
+          if [ -n "$RELEASE_KEYSTORE_B64" ]; then
+            printf '%s' "$RELEASE_KEYSTORE_B64" | base64 -d > ~/.android/release.keystore
+            echo "release keystore restored from secrets"
+          else
+            echo "WISTERIA_RELEASE_KEYSTORE_B64 not set - release APK falls back to the debug key"
+          fi
           if [ ! -f ~/.android/debug.keystore ]; then
             keytool -genkeypair -v -keystore ~/.android/debug.keystore \
               -storepass android -keypass android -alias androiddebugkey \
@@ -75,8 +89,9 @@ jobs:
           GOOS=android GOARCH=arm CGO_ENABLED=1 go list -e -compiled=true \
             -f 'LOAD{{if .Error}}-ERR[{{.Error.Err}}]{{end}} {{.ImportPath}} compiled={{len .CompiledGoFiles}}' ./mobile
           # gomobile bind requires golang.org/x/mobile in the module graph.
-          # CI-only: the checkout's go.mod is never committed back.
-          go get golang.org/x/mobile@latest
+          # CI-only: the checkout's go.mod is never committed back. Pinned to
+          # the same version as the installed gomobile above.
+          go get golang.org/x/mobile@v0.0.0-20261011034528-197770444867
           # A system clang can't target android, which leaves the bound
           # package with zero compiled files ("no exported names"). Put a
           # shim in front of PATH that redirects plain clang at the NDK
@@ -89,6 +104,10 @@ jobs:
           export PATH="$SHIM:$PATH"
           # gomobile does not create the -o directory itself.
           mkdir -p "$GITHUB_WORKSPACE/android/app/libs"
+          # The embedded sing-box version must match the module the bind
+          # compiles, not a hand-maintained ldflags constant.
+          SBVER=$(go list -m -f '{{.Version}}' github.com/sagernet/sing-box)
+          SBVER=${SBVER#v}
           # -checklinkname=0: sing-box uses //go:linkname, which the Go
           # linker refuses by default since 1.23.
           # -tags: sing-box compiles its protocol support behind feature
@@ -97,12 +116,16 @@ jobs:
           # vless/vmess/trojan with "uTLS is not included" (the phone logs
           # proved exactly that). This is the same tag set SFA ships,
           # minus the server-only reality_server and clash_api.
-          gomobile bind -target=android -androidapi 24 -javapkg=org.wisteria \
-            -ldflags='-checklinkname=0 -s -w -X github.com/sagernet/sing-box/constant.Version=1.14.4' \
+          # arm64 + arm only: the x86 ABIs exist for emulators and doubled
+          # the AAR (a 186 MB APK); every real device is one of the two.
+          gomobile bind -target=android/arm64,android/arm -androidapi 24 -javapkg=org.wisteria \
+            -ldflags="-checklinkname=0 -s -w -X github.com/sagernet/sing-box/constant.Version=${SBVER}" \
             -tags='with_conntrack,with_quic,with_dhcp,with_wireguard,with_utls,with_gvisor' \
             -o "$GITHUB_WORKSPACE/android/app/libs/wisteria.aar" ./mobile
 
       - name: Build APKs
+        env:
+          WISTERIA_KEYSTORE_PASSWORD: ${{ secrets.WISTERIA_KEYSTORE_PASSWORD }}
         run: gradle -p android --no-daemon assembleDebug assembleRelease
 
       - name: Rename APKs

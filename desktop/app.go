@@ -18,7 +18,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const appVersion = "0.7.1"
+const appVersion = "1.0.0"
 
 type App struct {
 	ctx      context.Context
@@ -101,7 +101,6 @@ func (a *App) startup(ctx context.Context) {
 	store, err := core.OpenStore(d.Data)
 	if err != nil {
 		runtime.LogErrorf(ctx, "store: %v", err)
-		store, _ = core.OpenStore(d.Data)
 	}
 	a.store = store
 	a.svc = core.NewService(d, a.ring, func() {
@@ -270,8 +269,10 @@ func (a *App) logf(format string, args ...any) {
 // dies with the process, so without this a crash or a stuck switch leaves
 // nothing to diagnose afterwards.
 type fileLogger struct {
-	mu sync.Mutex
-	f  *os.File
+	mu      sync.Mutex
+	path    string
+	f       *os.File
+	written int64
 }
 
 func newFileLogger(dataDir string) *fileLogger {
@@ -286,16 +287,32 @@ func newFileLogger(dataDir string) *fileLogger {
 	if err != nil {
 		return nil
 	}
-	return &fileLogger{f: f}
+	return &fileLogger{path: path, f: f}
 }
 
+// write appends one line, rotating in place once the file passes 8 MB:
+// sing-box at debug level produces hundreds of lines per second, and the
+// old size check ran only at startup — a long session could fill the disk.
 func (fl *fileLogger) write(l core.LogLine) {
 	fl.mu.Lock()
 	defer fl.mu.Unlock()
 	if fl.f == nil {
 		return
 	}
-	fmt.Fprintf(fl.f, "%s [%s] %s\n", l.At.Format("2006-01-02 15:04:05"), l.Tag, l.Text)
+	if fl.written >= 8<<20 {
+		fl.f.Close()
+		fl.f = nil
+		fl.written = 0
+		_ = os.Remove(fl.path)
+		if f, err := os.OpenFile(fl.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600); err == nil {
+			fl.f = f
+		}
+		if fl.f == nil {
+			return
+		}
+	}
+	n, _ := fmt.Fprintf(fl.f, "%s [%s] %s\n", l.At.Format("2006-01-02 15:04:05"), l.Tag, l.Text)
+	fl.written += int64(n)
 }
 
 // ---- state / logs ----
@@ -448,7 +465,7 @@ func (a *App) AddSubscription(url, name string) (core.Subscription, error) {
 	if err != nil {
 		return sub, err
 	}
-	a.logf("добавлена подписка %s → %s", sub.Name, sub.URL)
+	a.logf("добавлена подписка %s → %s", sub.Name, maskURL(sub.URL))
 	return sub, nil
 }
 
@@ -743,10 +760,21 @@ func trimSpace(s string) string {
 }
 
 func shorten(s string) string {
-	if len(s) > 42 {
-		return s[:42] + "…"
+	r := []rune(s)
+	if len(r) > 42 {
+		return string(r[:42]) + "…"
 	}
 	return s
+}
+
+// maskURL drops the query and fragment: subscription URLs commonly carry
+// an auth token there, and the raw URL otherwise lands in the log ring and
+// app.log.
+func maskURL(u string) string {
+	if i := strings.IndexAny(u, "?#"); i >= 0 {
+		return u[:i]
+	}
+	return u
 }
 
 func firstDefined(vals ...string) string {

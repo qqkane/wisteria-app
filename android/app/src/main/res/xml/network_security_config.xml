@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Subscription providers legitimately serve plain http:// lists, so
+     cleartext stays permitted for the app's own HTTP stack; everything
+     else the app talks to (ipify, GitHub) is https. This replaces the
+     global android:usesCleartextTraffic flag, which meant the same thing
+     but left no place to tighten specific hosts later. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

@@ -75,7 +75,30 @@ func (s *Store) saveLocked() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.path, data, 0o600)
+	// Write to a sibling temp file and rename over the store: a plain
+	// WriteFile truncated profiles.json in place, so a crash or power loss
+	// mid-write (the auto-ping tick rewrites the file every few seconds)
+	// destroyed every profile at once. Go's rename over an existing file
+	// replaces it atomically on both Windows and Unix.
+	tmp := s.path + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, s.path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 func (s *Store) List() []Profile {

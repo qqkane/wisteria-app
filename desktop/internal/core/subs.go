@@ -16,7 +16,7 @@ import (
 
 const (
 	subMaxBody      = 4 << 20 // cap the download; lists are kilobytes
-	subUserAgent    = "WisteriaDesktop/0.5"
+	subUserAgent    = "WisteriaDesktop/1.0"
 	subFetchTimeout = 15 * time.Second
 )
 

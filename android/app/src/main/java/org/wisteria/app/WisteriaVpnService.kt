@@ -54,9 +54,17 @@ class WisteriaVpnService : VpnService() {
     private val executor = Executors.newSingleThreadExecutor()
     private var engineIsBox = false
 
-    /** Guards tun/boxTun/engineIsBox: CancelConnect tears down on its own
-     *  thread even while connect() is stuck inside a native engine call. */
+    /** Guards tun/boxTun/engineIsBox/teardownEpoch: CancelConnect tears
+     *  down on its own thread even while connect() is stuck inside a
+     *  blocking native engine call. */
     private val stateLock = Any()
+
+    /** Bumped by every teardown. connect() captures it before starting an
+     *  engine and re-checks afterwards: a Disconnect that raced the start
+     *  used to be lost entirely (teardown saw nothing running yet, the
+     *  engine then came up anyway, and the UI said "disconnected" over a
+     *  live tunnel). */
+    private var teardownEpoch = 0L
 
     private val callback = object : Callback {
         override fun onLog(line: String?) {
@@ -154,8 +162,9 @@ class WisteriaVpnService : VpnService() {
     }
 
     private fun connect(profileIdParam: String) {
-        synchronized(stateLock) {
+        val myEpoch = synchronized(stateLock) {
             if (tun != null || engineIsBox) return // already running
+            teardownEpoch
         }
 
         val store = AndroidStore(this)
@@ -168,13 +177,18 @@ class WisteriaVpnService : VpnService() {
             }
 
         if (profile.optString("type") == "wisteria") {
-            startWisteria(profile)
+            startWisteria(profile, myEpoch)
         } else {
-            startBox(profile)
+            startBox(profile, myEpoch)
         }
     }
 
-    private fun startWisteria(profile: JSONObject) {
+    /** True when a teardown happened since the caller captured its epoch:
+     *  the connect must honor a Disconnect that raced the engine start. */
+    private fun epochChanged(myEpoch: Long): Boolean =
+        synchronized(stateLock) { teardownEpoch != myEpoch }
+
+    private fun startWisteria(profile: JSONObject, myEpoch: Long) {
         val builder = Builder()
             .addAddress(TUN_ADDRESS, TUN_PREFIX)
             .addRoute("0.0.0.0", 0)
@@ -207,6 +221,13 @@ class WisteriaVpnService : VpnService() {
         EngineHub.pushEvent("state", statusJson("connecting"))
         try {
             Mobile.start(cfg, fd.fd.toLong(), callback)
+            // A Disconnect may have landed while we were establishing or
+            // starting; honor it by tearing the just-started engine down.
+            if (epochChanged(myEpoch)) {
+                EngineHub.appLog("отмена пришла во время запуска — останавливаю")
+                teardown(pushState = true)
+                stopSelf()
+            }
         } catch (e: Exception) {
             EngineHub.coreLog("start failed: ${e.message}")
             // Show the failure instead of silently swallowing it: the VPN
@@ -219,7 +240,7 @@ class WisteriaVpnService : VpnService() {
     }
 
     /** sing-box path: vless / vmess / trojan / ss / hysteria2 / tuic. */
-    private fun startBox(profile: JSONObject) {
+    private fun startBox(profile: JSONObject, myEpoch: Long) {
         val raw = profile.optString("raw")
         val name = profile.optString("name").ifEmpty { "Wisteria" }
         val config = try {
@@ -240,6 +261,11 @@ class WisteriaVpnService : VpnService() {
         try {
             Mobile.boxStart(config, callback)
             registerBoxNetworkMonitor()
+            if (epochChanged(myEpoch)) {
+                EngineHub.appLog("отмена пришла во время запуска — останавливаю")
+                teardown(pushState = true)
+                stopSelf()
+            }
         } catch (e: Exception) {
             EngineHub.coreLog("sing-box: ${e.message}")
             // See startWisteria: surface the failure on the VPN screen.
@@ -313,6 +339,7 @@ class WisteriaVpnService : VpnService() {
 
     private fun teardown(pushState: Boolean = true) {
         synchronized(stateLock) {
+            teardownEpoch++
             if (engineIsBox) {
                 unregisterBoxNetworkMonitor()
                 try {

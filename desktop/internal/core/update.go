@@ -31,6 +31,10 @@ type ghAsset struct {
 	Name string `json:"name"`
 	URL  string `json:"browser_download_url"`
 	Size int64  `json:"size"`
+	// Digest is the sha256 GitHub computed server-side at upload
+	// ("sha256:…"). Upstream cores ship no checksum files at all (sing-box)
+	// or per-asset sidecars (xray), but every asset carries this.
+	Digest string `json:"digest"`
 }
 
 // UpdateInfo is what the UI needs to offer and apply an update.
@@ -40,6 +44,7 @@ type UpdateInfo struct {
 	HasUpdate bool   `json:"has_update"`
 	AssetURL  string `json:"asset_url,omitempty"`
 	AssetName string `json:"asset_name,omitempty"`
+	Digest    string `json:"-"` // sha256 of AssetURL per the GitHub API
 }
 
 // ghLatest returns the tag and assets of a repo's latest stable release.
@@ -135,21 +140,59 @@ func httpDownload(url, dest string) error {
 	return nil
 }
 
-// verifySHA256 checks file against a "<hash>  <name>" checksum file.
+// verifyDigest checks a downloaded file against the sha256 the GitHub API
+// reports for the release asset (computed server-side at upload).
+func verifyDigest(file, digest string) error {
+	want := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(digest)), "sha256:")
+	if len(want) != 64 {
+		return errors.New("у ассета релиза нет sha256-digest — обновление отклонено")
+	}
+	f, err := os.Open(file)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return err
+	}
+	if got := hex.EncodeToString(h.Sum(nil)); got != want {
+		return fmt.Errorf("sha256 не совпал (%s…)", got[:12])
+	}
+	return nil
+}
+
+// verifySHA256 checks file against a "<hash>  <name>" checksum file. When
+// the file lists several assets (upstream releases) the line naming our
+// file wins; the first valid hash is the fallback (our own single-line
+// .sha256 assets).
 func verifySHA256(file, checksumFile string) error {
 	data, err := os.ReadFile(checksumFile)
 	if err != nil {
 		return err
 	}
-	want := ""
+	base := filepath.Base(file)
+	want, fallback := "", ""
 	for _, line := range strings.Split(string(data), "\n") {
 		fields := strings.Fields(strings.TrimSpace(line))
-		if len(fields) >= 1 {
-			want = strings.ToLower(fields[0])
-			break
+		if len(fields) < 1 || len(fields[0]) != 64 {
+			continue
+		}
+		hash := strings.ToLower(fields[0])
+		if fallback == "" {
+			fallback = hash
+		}
+		for _, name := range fields[1:] {
+			name = strings.TrimPrefix(name, "*") // GNU binary-mode marker
+			if name == base {
+				want = hash
+			}
 		}
 	}
-	if len(want) != 64 {
+	if want == "" {
+		want = fallback
+	}
+	if want == "" {
 		return errors.New("не удалось прочитать контрольную сумму")
 	}
 	f, err := os.Open(file)
@@ -300,28 +343,47 @@ func extractArchive(archivePath, dir string, suffixes ...string) ([]string, erro
 
 // stageReplace swaps dst for src: the running file is renamed to .old (a
 // running exe cannot be deleted or overwritten on Windows, only renamed),
-// then src is copied into place. The .old copy is cleaned up on next start.
+// then src is copied into place. If the copy fails midway the .old file is
+// renamed back — without the rollback a failed update left the app (or a
+// core) without a binary at all. The .old copy is cleaned up on next start.
 func stageReplace(src, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
 	old := dst + ".old"
 	_ = os.Remove(old)
+	movedOld := false
+	rollback := func() {
+		if movedOld {
+			_ = os.Remove(dst)
+			_ = os.Rename(old, dst)
+		}
+	}
 	if _, err := os.Stat(dst); err == nil {
 		if err := os.Rename(dst, old); err != nil {
 			return fmt.Errorf("переименование %s: %w", dst, err)
 		}
+		movedOld = true
 	}
 	in, err := os.Open(src)
 	if err != nil {
+		rollback()
 		return err
 	}
 	defer in.Close()
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
 	if err != nil {
+		rollback()
 		return err
 	}
-	defer out.Close()
-	_, err = io.Copy(out, in)
-	return err
+	if _, err = io.Copy(out, in); err != nil {
+		out.Close()
+		rollback()
+		return err
+	}
+	if err = out.Close(); err != nil {
+		rollback()
+		return err
+	}
+	return nil
 }

@@ -5,28 +5,49 @@ plugins {
 
 android {
     namespace "org.wisteria.app"
-    compileSdk 34
+    compileSdk 35
 
     defaultConfig {
         applicationId "org.wisteria.app"
         minSdk 24
-        targetSdk 34
-        versionCode 12
-        versionName "0.4.6"
+        targetSdk 35
+        versionCode 13
+        versionName "1.0.0"
     }
 
-    // The release APK ships signed with the debug key for now: a proper
-    // release keystore (and its CI secret) comes with the first store
-    // distribution. assembleRelease is therefore installable as-is.
+    // WisteriaBridge.VERSION reads BuildConfig.VERSION_NAME so the version
+    // the settings screen shows can never disagree with the APK again (it
+    // stayed "0.4.2" for three releases).
+    buildFeatures {
+        buildConfig true
+    }
+
+    // Release signing: the permanent keystore (restored from CI secrets)
+    // when present and its password is exported, else the debug key so
+    // local and secret-less CI builds keep assembling. The permanent key is
+    // what makes release APKs update over each other — a per-run debug key
+    // produced a new signature every build.
     signingConfigs {
         debug {
             storeFile file("${System.properties['user.home']}/.android/debug.keystore")
+        }
+        release {
+            def relKs = new File("${System.properties['user.home']}/.android/release.keystore")
+            def relPass = System.getenv("WISTERIA_KEYSTORE_PASSWORD") ?: ""
+            if (relKs.exists() && !relPass.isEmpty()) {
+                storeFile relKs
+                storePassword relPass
+                keyAlias "wisteria"
+                keyPassword relPass
+            } else {
+                storeFile file("${System.properties['user.home']}/.android/debug.keystore")
+            }
         }
     }
     buildTypes {
         release {
             minifyEnabled false
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.release
         }
     }
     compileOptions {

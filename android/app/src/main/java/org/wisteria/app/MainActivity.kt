@@ -1,6 +1,8 @@
 package org.wisteria.app
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.VpnService
 import android.os.Build
@@ -11,6 +13,8 @@ import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 
 /**
  * Hosts the shared frontend (the desktop «Наша Сеть» UI) from assets and
@@ -22,6 +26,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val REQ_VPN = 41
+        private const val REQ_NOTIF = 42
         private const val TAG = "WisteriaUI"
     }
 
@@ -59,7 +64,9 @@ class MainActivity : AppCompatActivity() {
         web.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true // the frontend keeps group-collapse state in localStorage
-            allowFileAccess = true
+            // file:///android_asset loads regardless of this flag; leaving
+            // file access on only widened what a script-injection could read.
+            allowFileAccess = false
         }
         web.webViewClient = WebViewClient()
         web.webChromeClient = object : WebChromeClient() {
@@ -100,6 +107,14 @@ class MainActivity : AppCompatActivity() {
 
         web.loadUrl("file:///android_asset/ui/index.html")
         applyThemeFromSettings()
+
+        // Android 13+ hides the VPN notification without the runtime grant;
+        // denial is harmless (the foreground service still runs).
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIF)
+        }
     }
 
     /** The bridge asks for VPN consent mid-Connect; the retry follows here. */

@@ -55,7 +55,9 @@ func pickCoreAsset(name string, assets []ghAsset) (ghAsset, error) {
 		switch name {
 		case "sing-box":
 			if runtime.GOOS == "windows" {
-				if strings.HasSuffix(l, ".zip") && strings.Contains(l, "windows-amd64") && !strings.Contains(l, "android") {
+				// "legacy-windows-7" builds also contain "windows-amd64"
+				// and may be listed first; only the main build matches.
+				if strings.HasSuffix(l, ".zip") && strings.Contains(l, "windows-amd64") && !strings.Contains(l, "android") && !strings.Contains(l, "legacy") {
 					return a, nil
 				}
 			} else {
@@ -102,6 +104,7 @@ func CoreUpdateCheck(name, explicitPath string) (UpdateInfo, error) {
 		return info, err
 	}
 	info.AssetURL, info.AssetName = asset.URL, asset.Name
+	info.Digest = asset.Digest
 	info.HasUpdate = true
 	if path := corePathFor(name, explicitPath); path != "" {
 		info.Current = probeVersion(path)
@@ -153,6 +156,12 @@ func CoreUpdateApply(name, explicitPath string) (string, error) {
 	zipPath := filepath.Join(tmp, info.AssetName)
 	if err := httpDownload(info.AssetURL, zipPath); err != nil {
 		return "", err
+	}
+	// The API-reported digest is the only checksum sing-box publishes;
+	// xray's sidecar .dgst files say the same thing. A mismatch (or a
+	// release without a digest) aborts the update.
+	if err := verifyDigest(zipPath, info.Digest); err != nil {
+		return "", fmt.Errorf("%s: %v", info.AssetName, err)
 	}
 	staged, err := extractArchive(zipPath, tmp, "/"+name+exeSuffix)
 	if err != nil {

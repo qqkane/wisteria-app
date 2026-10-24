@@ -319,6 +319,9 @@ func (s *Service) Start(p Profile) error {
 		s.mu.Unlock()
 		return err
 	}
+	if s.settings.ListenAll {
+		s.logf("внимание: прокси слушают на 0.0.0.0 — доступны любой машине в локальной сети без пароля")
+	}
 	core, args, confFile, err := s.prepareCore(p)
 	if err != nil {
 		s.mu.Unlock()
@@ -728,6 +731,10 @@ func (s *Service) failSession(cmd *exec.Cmd, confFile string, err error) {
 	cancel := s.cancel
 	s.cancel = nil
 	s.cmd = nil
+	// A TUN helper that died before readiness leaves its generated config
+	// behind; supervise's teardown path removes the file, this one must too.
+	tunConf := s.tunConf
+	s.tunConf = ""
 	s.mu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -740,6 +747,9 @@ func (s *Service) failSession(cmd *exec.Cmd, confFile string, err error) {
 		s.mu.Unlock()
 		s.logf("ошибка подключения: %v", err)
 		_ = os.Remove(confFile)
+		if tunConf != "" {
+			_ = os.Remove(tunConf)
+		}
 		s.mu.Lock()
 		if s.done != nil {
 			close(s.done)
