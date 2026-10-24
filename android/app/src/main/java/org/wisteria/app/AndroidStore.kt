@@ -228,7 +228,15 @@ class AndroidStore(private val context: Context) {
     fun settings(): JSONObject {
         val raw = prefs.getString("settings", null) ?: return JSONObject(DEFAULT_SETTINGS.toString())
         val out = JSONObject(DEFAULT_SETTINGS.toString())
-        return try { out.merge(JSONObject(raw)); out } catch (_: Exception) { out }
+        return try {
+            // manual shallow merge: org.json's JSONObject.merge is missing on
+            // some Android compile SDKs
+            val saved = JSONObject(raw)
+            saved.keys().forEach { k -> out.put(k, saved.opt(k)) }
+            out
+        } catch (_: Exception) {
+            out
+        }
     }
 
     @Synchronized

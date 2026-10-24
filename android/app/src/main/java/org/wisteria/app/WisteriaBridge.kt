@@ -58,11 +58,11 @@ class WisteriaBridge(private val activity: MainActivity) {
         // ---- profiles ----
         "ListProfiles" -> store.listProfiles()
         "GetActiveID" -> store.activeId()
-        "SetActive" -> store.setActive(args.getString(0)); null
-        "Connect" -> connect(args.getString(0)); null
-        "Disconnect" -> disconnect(); null
-        "DeleteProfile" -> deleteProfile(args.getString(0)); null
-        "PingProfile" -> pingProfile(args.getString(0)); null
+        "SetActive" -> { store.setActive(args.getString(0)); null }
+        "Connect" -> { connect(args.getString(0)); null }
+        "Disconnect" -> { disconnect(); null }
+        "DeleteProfile" -> { deleteProfile(args.getString(0)); null }
+        "PingProfile" -> { pingProfile(args.getString(0)); null }
         "AddLinks" -> addLinks(args.getString(0))
         "AddManual" -> addManual(args.getJSONObject(0))
         "ImportTOML" -> throw err("Импорт TOML пока только в десктоп-версии — используйте ссылку wisteria://")
@@ -71,14 +71,14 @@ class WisteriaBridge(private val activity: MainActivity) {
         "ListSubscriptions" -> store.listSubs()
         "AddSubscription" -> addSubscription(args.getString(0))
         "RefreshSubscription" -> refreshSubscription(args.getString(0))
-        "DeleteSubscription" -> store.deleteSub(args.getString(0)); null
+        "DeleteSubscription" -> { store.deleteSub(args.getString(0)); null }
         "ImportFromClipboard" -> importFromClipboard()
 
         // ---- settings ----
         "GetSettings" -> store.settings()
-        "SaveSettings" -> store.saveSettings(args.getJSONObject(0)); null
+        "SaveSettings" -> { store.saveSettings(args.getJSONObject(0)); null }
         "GetAutostart" -> store.autostart()
-        "SetAutostart" -> store.setAutostart(args.getBoolean(0)); null
+        "SetAutostart" -> { store.setAutostart(args.getBoolean(0)); null }
 
         // ---- desktop-only, honest stubs ----
         "IsElevated" -> false
@@ -88,7 +88,7 @@ class WisteriaBridge(private val activity: MainActivity) {
             .put("xray_found", false).put("xray_path", "")
         "CheckAppUpdate" -> JSONObject().put("current", VERSION).put("latest", VERSION).put("has_update", false)
         "ApplyAppUpdate" -> throw err("Обновление APK ставится вручную — скачайте новый из релиза")
-        "RestartApp" -> activity.restartApp(); null
+        "RestartApp" -> { activity.restartApp(); null }
         "CheckCoreUpdate" -> JSONObject().put("current", "-").put("latest", "-").put("has_update", false)
         "UpdateCore" -> throw err("Ядра sing-box/xray недоступны на Android")
 
