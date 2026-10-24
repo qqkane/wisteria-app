@@ -28,7 +28,6 @@ object EngineHub {
     @Volatile var profileId: String = ""
     @Volatile var profileName: String = ""
     @Volatile var profileType: String = ""
-    @Volatile var profileType: String = ""
 
     /** (event, payloadJson) push targets; the activity registers its webview. */
     val emitters = CopyOnWriteArrayList<(String, String) -> Unit>()
