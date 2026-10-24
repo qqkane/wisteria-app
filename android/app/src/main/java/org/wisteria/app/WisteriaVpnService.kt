@@ -184,7 +184,7 @@ class WisteriaVpnService : VpnService() {
         val fd = builder.establish()
         if (fd == null) {
             EngineHub.appLog("VpnService.establish() вернул null — согласие на VPN отозвано?")
-            EngineHub.pushEvent("state", statusJson("disconnected"))
+            EngineHub.pushEvent("state", statusJson("disconnected", "VpnService: согласие на VPN не выдано"))
             stopSelf()
             return
         }
@@ -209,9 +209,12 @@ class WisteriaVpnService : VpnService() {
             Mobile.start(cfg, fd.fd.toLong(), callback)
         } catch (e: Exception) {
             EngineHub.coreLog("start failed: ${e.message}")
-            EngineHub.pushEvent("state", statusJson("disconnected"))
-            teardown()
+            // Show the failure instead of silently swallowing it: the VPN
+            // screen renders status.error in the red box (v0.4.2's
+            // "connecting forever" looked exactly like a swallowed error).
+            teardown(pushState = false)
             stopSelf()
+            EngineHub.pushEvent("state", statusJson("disconnected", trimErr(e.message)))
         }
     }
 
@@ -223,7 +226,7 @@ class WisteriaVpnService : VpnService() {
             SingboxLinks.buildConfig(raw, name, AndroidStore(this).settings())
         } catch (e: Exception) {
             EngineHub.appLog("профиль повреждён: ${e.message}")
-            EngineHub.pushEvent("state", statusJson("disconnected"))
+            EngineHub.pushEvent("state", statusJson("disconnected", "профиль повреждён: ${trimErr(e.message)}"))
             stopSelf()
             return
         }
@@ -239,14 +242,22 @@ class WisteriaVpnService : VpnService() {
             registerBoxNetworkMonitor()
         } catch (e: Exception) {
             EngineHub.coreLog("sing-box: ${e.message}")
-            EngineHub.pushEvent("state", statusJson("disconnected"))
-            teardown()
+            // See startWisteria: surface the failure on the VPN screen.
+            teardown(pushState = false)
             stopSelf()
+            EngineHub.pushEvent("state", statusJson("disconnected", trimErr(e.message)))
         }
     }
 
     private fun boxVersion(): String =
         try { Mobile.boxVersion() } catch (_: Throwable) { "-" }
+
+    /** Engine errors go into the VPN screen's red box; keep them one line. */
+    private fun trimErr(msg: String?): String? {
+        val m = msg?.trim().orEmpty()
+        if (m.isEmpty()) return null
+        return if (m.length <= 160) m else m.take(157) + "…"
+    }
 
     /**
      * Android blocks netlink interface dumps, so the box's default
@@ -300,7 +311,7 @@ class WisteriaVpnService : VpnService() {
         boxNetCallback = null
     }
 
-    private fun teardown() {
+    private fun teardown(pushState: Boolean = true) {
         synchronized(stateLock) {
             if (engineIsBox) {
                 unregisterBoxNetworkMonitor()
@@ -333,13 +344,13 @@ class WisteriaVpnService : VpnService() {
         EngineHub.profileId = ""
         EngineHub.profileName = ""
         EngineHub.profileType = ""
-        EngineHub.pushEvent("state", statusJson("disconnected"))
+        if (pushState) EngineHub.pushEvent("state", statusJson("disconnected"))
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
     }
 
     /** The desktop Status shape the frontend renders. */
-    private fun statusJson(state: String): JSONObject =
-        WisteriaBridge.staticStatusJson(state, if (state == "disconnected") "" else EngineHub.profileType)
+    private fun statusJson(state: String, error: String? = null): JSONObject =
+        WisteriaBridge.staticStatusJson(state, if (state == "disconnected") "" else EngineHub.profileType, error)
 
     private fun createChannel() {
         val nm = getSystemService(NotificationManager::class.java) ?: return

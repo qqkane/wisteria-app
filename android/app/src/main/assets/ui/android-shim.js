@@ -152,7 +152,19 @@
     if (btn.dataset.abCancel === "1" || isConnectingBtn(btn)) {
       ev.preventDefault();
       ev.stopImmediatePropagation();
-      call("Disconnect");
+      call("Disconnect").catch(() => {});
+      // Instant feedback: do not wait for the service's state event (the
+      // user saw a dead button when that round-trip stalled). The next
+      // state event re-syncs the real picture anyway. "Connect" is the
+      // button label in both dictionaries by design.
+      delete btn.dataset.abCancel;
+      btn.classList.remove("ab-cancel");
+      btn.disabled = false;
+      const txt = btn.querySelector(".connect-text");
+      if (txt) {
+        delete txt.dataset.abCancel;
+        txt.textContent = "Connect";
+      }
     }
   }, true);
 

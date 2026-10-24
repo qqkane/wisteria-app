@@ -26,12 +26,17 @@ class WisteriaBridge(private val activity: MainActivity) {
     private val context: Context get() = activity.applicationContext
     private val store by lazy { AndroidStore(context) }
 
+    // The profile waiting for the system VPN consent dialog. Cancel clears
+    // it: after a reinstall consent is revoked, so «Отмена» pressed while
+    // the dialog is up must not be undone by the user then granting it.
+    @Volatile private var consentPending: String? = null
+
     companion object {
         const val VERSION = "0.4.2"
         private const val MAX_SUB_BYTES = 4 shl 20
 
         /** Status shape shared with WisteriaVpnService (EngineHub-based). */
-        fun staticStatusJson(state: String, type: String): JSONObject =
+        fun staticStatusJson(state: String, type: String, error: String? = null): JSONObject =
             JSONObject()
                 .put("state", state)
                 .put("profile_id", EngineHub.profileId)
@@ -39,6 +44,7 @@ class WisteriaBridge(private val activity: MainActivity) {
                 .put("type", type)
                 .put("sys_proxy", false)
                 .put("tun", false)
+                .put("error", error ?: JSONObject.NULL)
     }
 
     // ---- JS entry point ----
@@ -151,6 +157,7 @@ class WisteriaBridge(private val activity: MainActivity) {
         store.setActive(id)
         val consent = VpnService.prepare(activity)
         if (consent != null) {
+            consentPending = id
             activity.requestVpnConsent(id)
             return
         }
@@ -165,6 +172,7 @@ class WisteriaBridge(private val activity: MainActivity) {
     }
 
     private fun disconnect() {
+        consentPending = null // «Отмена» beats a later grant of the dialog
         context.startService(
             Intent(context, WisteriaVpnService::class.java)
                 .setAction(WisteriaVpnService.ACTION_DISCONNECT)
@@ -173,6 +181,11 @@ class WisteriaBridge(private val activity: MainActivity) {
 
     /** Called by the activity after the VPN consent dialog resolved OK. */
     fun onVpnConsentGranted(profileId: String) {
+        if (consentPending != profileId) { // canceled meanwhile
+            consentPending = null
+            return
+        }
+        consentPending = null
         startConnectService(profileId)
     }
 

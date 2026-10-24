@@ -91,8 +91,15 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/android/app/libs"
           # -checklinkname=0: sing-box uses //go:linkname, which the Go
           # linker refuses by default since 1.23.
+          # -tags: sing-box compiles its protocol support behind feature
+          # tags; without them every hysteria2/tuic outbound dies with
+          # "QUIC is not included in this build" and every uTLS/REALITY
+          # vless/vmess/trojan with "uTLS is not included" (the phone logs
+          # proved exactly that). This is the same tag set SFA ships,
+          # minus the server-only reality_server and clash_api.
           gomobile bind -target=android -androidapi 24 -javapkg=org.wisteria \
             -ldflags='-checklinkname=0 -s -w' \
+            -tags='with_conntrack,with_quic,with_dhcp,with_wireguard,with_utls,with_gvisor' \
             -o "$GITHUB_WORKSPACE/android/app/libs/wisteria.aar" ./mobile
 
       - name: Build APKs
