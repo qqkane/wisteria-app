@@ -35,6 +35,10 @@ type ghAsset struct {
 	// ("sha256:…"). Upstream cores ship no checksum files at all (sing-box)
 	// or per-asset sidecars (xray), but every asset carries this.
 	Digest string `json:"digest"`
+	// ID addresses the asset on the API download endpoint. The browser URL
+	// answers 404 for private repositories even with a token, so downloads
+	// go through /releases/assets/<id> with octet-stream negotiation.
+	ID int64 `json:"id"`
 }
 
 // UpdateInfo is what the UI needs to offer and apply an update.
@@ -45,6 +49,25 @@ type UpdateInfo struct {
 	AssetURL  string `json:"asset_url,omitempty"`
 	AssetName string `json:"asset_name,omitempty"`
 	Digest    string `json:"-"` // sha256 of AssetURL per the GitHub API
+
+	// Asset ids for the API download endpoint (ghDownload); unexported, so
+	// they stay out of the JSON the frontend sees.
+	zipID int64
+	shaID int64 // the sibling .sha256 asset, app releases only
+}
+
+// ghToken returns the GitHub access token for release access, "" when none
+// is configured. The app repository is private and the anonymous API answers
+// 404 for it — without a token the self-updater would forever report "no
+// releases". Read from the environment rather than baked into the binary: a
+// shipped token is everyone's token.
+func ghToken() string {
+	for _, k := range []string{"WISTERIA_GH_TOKEN", "WISTERIA_TOKEN", "GITHUB_TOKEN"} {
+		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // ghLatest returns the tag and assets of a repo's latest stable release.
@@ -56,12 +79,18 @@ func ghLatest(repo string) (string, []ghAsset, error) {
 		return "", nil, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
+	if tok := ghToken(); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
+		if ghToken() == "" {
+			return "", nil, errors.New("релиз не найден; для приватного репозитория задайте токен (переменная окружения WISTERIA_GH_TOKEN)")
+		}
 		return "", nil, errors.New("релизов ещё нет")
 	}
 	if resp.StatusCode != http.StatusOK {
@@ -115,15 +144,29 @@ func versionParts(v string) []int {
 	return out
 }
 
-func httpDownload(url, dest string) error {
+// ghDownload fetches a release asset to dest through the API download
+// endpoint. This is the only route that serves private repositories: the
+// browser_download_url 404s there even with a token (verified 2026-10), and
+// the endpoint redirects to a signed URL which Go's client follows by
+// default. Public repositories work the same way, token or not.
+func ghDownload(repo string, assetID int64, dest string) error {
+	req, err := http.NewRequest("GET",
+		fmt.Sprintf("https://api.github.com/repos/%s/releases/assets/%d", repo, assetID), nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept", "application/octet-stream")
+	if tok := ghToken(); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
 	client := &http.Client{Timeout: 10 * time.Minute}
-	resp, err := client.Get(url)
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("скачивание: %s", resp.Status)
+		return fmt.Errorf("загрузка: %s", resp.Status)
 	}
 	f, err := os.Create(dest)
 	if err != nil {

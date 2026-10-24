@@ -43,22 +43,23 @@ func AppUpdateCheck(current string) (UpdateInfo, error) {
 	}
 	assetName := appAssetName()
 	info.Latest = strings.TrimPrefix(tag, "v")
-	zipURL, shaURL := "", ""
+	var zipAsset, shaAsset ghAsset
 	for _, a := range assets {
 		switch a.Name {
 		case assetName:
-			zipURL = a.URL
+			zipAsset = a
 		case assetName + ".sha256":
-			shaURL = a.URL
+			shaAsset = a
 		}
 	}
-	if zipURL == "" {
+	if zipAsset.Name == "" {
 		return info, fmt.Errorf("в релизе нет %s", assetName)
 	}
-	if shaURL == "" {
+	if shaAsset.Name == "" {
 		return info, errors.New("в релизе нет файла контрольной суммы")
 	}
-	info.AssetURL, info.AssetName = zipURL, assetName
+	info.AssetURL, info.AssetName = zipAsset.URL, assetName
+	info.zipID, info.shaID = zipAsset.ID, shaAsset.ID
 	info.HasUpdate = CompareVersions(current, info.Latest) < 0
 	return info, nil
 }
@@ -82,13 +83,12 @@ func AppUpdateApply(current string) (string, error) {
 	defer os.RemoveAll(tmp)
 
 	zipPath := filepath.Join(tmp, info.AssetName)
-	if err := httpDownload(info.AssetURL, zipPath); err != nil {
+	if err := ghDownload(repoApp, info.zipID, zipPath); err != nil {
 		return "", err
 	}
 	// The checksum asset lives next to the bundle (<asset>.sha256).
 	shaPath := zipPath + ".sha256"
-	shaURL := strings.TrimSuffix(info.AssetURL, info.AssetName) + info.AssetName + ".sha256"
-	if err := httpDownload(shaURL, shaPath); err != nil {
+	if err := ghDownload(repoApp, info.shaID, shaPath); err != nil {
 		return "", err
 	}
 	if err := verifySHA256(zipPath, shaPath); err != nil {

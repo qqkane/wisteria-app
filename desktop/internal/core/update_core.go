@@ -80,20 +80,25 @@ func pickCoreAsset(name string, assets []ghAsset) (ghAsset, error) {
 	return ghAsset{}, fmt.Errorf("в релизе нет архива для %s amd64", runtime.GOOS)
 }
 
+// coreRepo maps a core name to its upstream repository.
+func coreRepo(name string) string {
+	if name == "xray" {
+		return repoXray
+	}
+	return repoSingBox
+}
+
 // CoreUpdateCheck looks up the latest upstream release for "sing-box" or
 // "xray". The installed version (if the binary is resolvable) is probed to
 // decide HasUpdate; an unprobeable binary leaves the choice to the user.
 func CoreUpdateCheck(name, explicitPath string) (UpdateInfo, error) {
 	info := UpdateInfo{}
-	repo := ""
 	switch name {
-	case "sing-box":
-		repo = repoSingBox
-	case "xray":
-		repo = repoXray
+	case "sing-box", "xray":
 	default:
 		return info, errors.New("неизвестное ядро")
 	}
+	repo := coreRepo(name)
 	tag, assets, err := ghLatest(repo)
 	if err != nil {
 		return info, err
@@ -104,6 +109,7 @@ func CoreUpdateCheck(name, explicitPath string) (UpdateInfo, error) {
 		return info, err
 	}
 	info.AssetURL, info.AssetName = asset.URL, asset.Name
+	info.zipID = asset.ID
 	info.Digest = asset.Digest
 	info.HasUpdate = true
 	if path := corePathFor(name, explicitPath); path != "" {
@@ -154,7 +160,7 @@ func CoreUpdateApply(name, explicitPath string) (string, error) {
 	}
 	defer os.RemoveAll(tmp)
 	zipPath := filepath.Join(tmp, info.AssetName)
-	if err := httpDownload(info.AssetURL, zipPath); err != nil {
+	if err := ghDownload(coreRepo(name), info.zipID, zipPath); err != nil {
 		return "", err
 	}
 	// The API-reported digest is the only checksum sing-box publishes;
