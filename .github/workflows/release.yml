@@ -11,6 +11,7 @@ on:
       - main
     paths:
       - "desktop/**"
+      - ".github/workflows/release.yml"
     tags:
       - "v*"
 
