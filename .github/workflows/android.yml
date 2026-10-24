@@ -62,17 +62,25 @@ jobs:
         run: |
           export ANDROID_NDK_HOME="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
           echo "NDK: $ANDROID_NDK_HOME"
+          # Diagnostics: the package-load phase runs cgo for GOOS=android.
+          go version
+          (which clang && clang --version | head -1) || echo "no system clang"
+          GOOS=android GOARCH=arm CGO_ENABLED=1 go list -e -compiled=true \
+            -f 'LOAD{{if .Error}}-ERR[{{.Error.Err}}]{{end}} {{.ImportPath}} compiled={{len .CompiledGoFiles}}' ./mobile
           # gomobile bind requires golang.org/x/mobile in the module graph.
           # CI-only: the checkout's go.mod is never committed back.
           go get golang.org/x/mobile@latest
-          # The package-load phase runs cgo for GOOS=android; the system
-          # clang can't target android, which leaves the bound package
-          # with zero compiled files ("no exported names"). Give it the
-          # NDK wrapper for the first target (arm) instead.
+          # A system clang can't target android, which leaves the bound
+          # package with zero compiled files ("no exported names"). Put a
+          # shim in front of PATH that redirects plain clang at the NDK
+          # one with an android target, so every cgo invocation during
+          # the load phases (gomobile's and gobind's) succeeds.
           PREBUILT="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          export CC="$PREBUILT/armv7a-linux-androideabi24-clang"
-          export CXX="$PREBUILT/armv7a-linux-androideabi24-clang++"
-          gomobile bind -target=android -androidapi 24 -javapkg=org.wisteria \
+          SHIM="$(mktemp -d)"
+          printf '#!/bin/sh\nexec "%s/clang" --target=armv7a-linux-androideabi24 "$@"\n' "$PREBUILT" > "$SHIM/clang"
+          chmod +x "$SHIM/clang"
+          export PATH="$SHIM:$PATH"
+          gomobile bind -x -target=android -androidapi 24 -javapkg=org.wisteria \
             -o "$GITHUB_WORKSPACE/android/app/libs/wisteria.aar" ./mobile
 
       - name: Build APKs
