@@ -64,10 +64,13 @@ select option, select optgroup { background-color: var(--surface); color: var(--
    re-rasterizes a 120px blur on every animated frame (~10fps with it,
    vsync-capped 60fps without) */
 .bg-layers { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
-.orb { position: absolute; border-radius: 50%; }
-.orb-1 { width: 600px; height: 600px; top: -15%; right: -10%; background: radial-gradient(circle, rgba(var(--accent-rgb), 0.3) 0%, rgba(var(--accent-rgb), 0.3) 40%, rgba(var(--accent-rgb), 0.15) 55%, transparent 70%); }
-.orb-2 { width: 500px; height: 500px; bottom: -20%; left: -5%; background: radial-gradient(circle, rgba(var(--accent-rgb), 0.2) 0%, rgba(var(--accent-rgb), 0.2) 35%, rgba(var(--accent-rgb), 0.1) 50%, transparent 66%); }
-.orb-3 { width: 300px; height: 300px; top: 40%; left: 30%; background: radial-gradient(circle, rgba(var(--accent-rgb), 0.15) 0%, rgba(var(--accent-rgb), 0.15) 15%, rgba(var(--accent-rgb), 0.07) 35%, transparent 52%); }
+.orb { position: absolute; border-radius: 50%; will-change: transform; }
+.orb-1 { width: 600px; height: 600px; top: -15%; right: -10%; background: radial-gradient(circle, rgba(var(--accent-rgb), 0.3) 0%, rgba(var(--accent-rgb), 0.3) 40%, rgba(var(--accent-rgb), 0.15) 55%, transparent 70%); animation: orb-drift-1 26s ease-in-out infinite alternate; }
+.orb-2 { width: 500px; height: 500px; bottom: -20%; left: -5%; background: radial-gradient(circle, rgba(var(--accent-rgb), 0.2) 0%, rgba(var(--accent-rgb), 0.2) 35%, rgba(var(--accent-rgb), 0.1) 50%, transparent 66%); animation: orb-drift-2 34s ease-in-out infinite alternate; }
+.orb-3 { width: 300px; height: 300px; top: 40%; left: 30%; background: radial-gradient(circle, rgba(var(--accent-rgb), 0.15) 0%, rgba(var(--accent-rgb), 0.15) 15%, rgba(var(--accent-rgb), 0.07) 35%, transparent 52%); animation: orb-drift-3 22s ease-in-out infinite alternate; }
+@keyframes orb-drift-1 { to { transform: translate(-70px, 50px) scale(1.06); } }
+@keyframes orb-drift-2 { to { transform: translate(60px, -45px) scale(0.94); } }
+@keyframes orb-drift-3 { to { transform: translate(-45px, -55px) scale(1.08); } }
 
 /* sidebar */
 .sidebar { width: 280px; background: rgba(10,10,12,0.5); backdrop-filter: blur(30px); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 24px 16px; z-index: 50; flex-shrink: 0; }
@@ -105,10 +108,12 @@ select option, select optgroup { background-color: var(--surface); color: var(--
 .connect-btn .connect-text { font-size: 12px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; }
 .connect-btn.connected { background: var(--accent); color: #000; border-color: transparent; box-shadow: 0 0 60px rgba(var(--accent-rgb), 0.4); }
 .ring-anim { position: absolute; border-radius: 50%; pointer-events: none; border: 2px solid transparent; opacity: 0; inset: -12px; }
-/* Three pulses after connect as feedback, then rest: an infinite expanding
-   ring keeps the webview compositing forever, which shows up as UI jank on
-   a GPU that is already busy. */
-.connected .ring-anim { animation: pulse-ring 2.5s ease-out 3; border-color: var(--accent); }
+/* pulse-ring and ring-breathe animate transform+opacity only, so the
+   compositor moves cached layers — no per-frame raster work, infinite
+   loops are fine */
+.connected .ring-anim { animation: pulse-ring 2.5s ease-out infinite; border-color: var(--accent); }
+.connect-btn:not(.connected) .ring-anim { animation: ring-breathe 3.2s ease-in-out infinite; border-color: rgba(var(--accent-rgb), 0.25); }
+@keyframes ring-breathe { 0%, 100% { opacity: .12; transform: scale(1); } 50% { opacity: .5; transform: scale(1.05); } }
 .ring-anim.d2 { inset: -28px; animation-delay: .8s !important; }
 @keyframes pulse-ring { 0% { transform: scale(1); opacity: .5; } 100% { transform: scale(1.6); opacity: 0; } }
 
