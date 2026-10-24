@@ -22,14 +22,13 @@ jobs:
       # from its checkout, never committed to this repo. The same bind
       # carries the embedded sing-box core (BoxStart facade) — a mobile app
       # can host exactly one gomobile runtime, so both protocol families
-      # ship in this single AAR.
-      # TODO: switch to the default branch once wisteria PR #13 (mobile/)
-      # is merged — the engine package only exists on feature/android-engine.
+      # ship in this single AAR. Built from main since wisteria PR #13
+      # (mobile/) merged.
       - name: Checkout wisteria protocol repo
         uses: actions/checkout@v4
         with:
           repository: qqkane/wisteria
-          ref: feature/android-engine
+          ref: main
           token: ${{ secrets.WISTERIA_TOKEN }}
           path: wisteria
 
