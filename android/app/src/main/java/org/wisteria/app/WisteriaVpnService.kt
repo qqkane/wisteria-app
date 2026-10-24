@@ -4,8 +4,12 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
@@ -18,16 +22,17 @@ import org.wisteria.mobile.Mobile
 import java.util.concurrent.Executors
 
 /**
- * VPN frontend for the Go engine. The tunnel device is created here via
- * Builder.establish() and its fd handed to the engine; the Go side never
- * closes the fd, teardown always goes through this service. Every socket
- * the engine opens (server TCP dial, DNS resolver) is bound to the VPN
+ * VPN frontend for the two embedded Go engines. The wisteria engine gets
+ * its tun fd upfront (Builder.establish() → Mobile.start); the sing-box
+ * engine (vless/vmess/trojan/ss/hysteria2/tuic) asks for it itself through
+ * Callback.onOpenTun once the box core boots. Both engines push
+ * state/log events through EngineHub, which the webview bridge serves to
+ * the shared frontend.
+ *
+ * The service tears everything down: the fds stay owned here, Go never
+ * closes them. Every socket the engines open is bound to the VPN
  * interface unless the Protect callback allows it out — that callback is
  * VpnService.protect().
- *
- * The service reads the profile from AndroidStore and pushes state/log
- * events through EngineHub, which the webview bridge serves to the
- * shared frontend.
  */
 class WisteriaVpnService : VpnService() {
 
@@ -44,7 +49,10 @@ class WisteriaVpnService : VpnService() {
     }
 
     private var tun: ParcelFileDescriptor? = null
+    private var boxTun: ParcelFileDescriptor? = null
+    private var boxNetCallback: ConnectivityManager.NetworkCallback? = null
     private val executor = Executors.newSingleThreadExecutor()
+    private var engineIsBox = false
 
     private val callback = object : Callback {
         override fun onLog(line: String?) {
@@ -66,6 +74,42 @@ class WisteriaVpnService : VpnService() {
 
         override fun protect(fd: Long): Boolean =
             this@WisteriaVpnService.protect(fd.toInt())
+
+        override fun onOpenTun(optionsJson: String?): Int {
+            val opts = try { JSONObject(optionsJson ?: "{}") } catch (_: Exception) { JSONObject() }
+            val builder = Builder()
+                .setSession(EngineHub.profileName.ifEmpty { "Wisteria" })
+                .setMtu(opts.optInt("mtu", TUN_MTU))
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) builder.setMetered(false)
+            for (key in listOf("inet4", "inet6")) {
+                val arr = opts.optJSONArray(key) ?: continue
+                for (i in 0 until arr.length()) {
+                    val cidr = arr.optString(i)
+                    val slash = cidr.lastIndexOf('/')
+                    if (slash <= 0) continue
+                    val addr = cidr.substring(0, slash)
+                    val bits = cidr.substring(slash + 1).toIntOrNull() ?: continue
+                    builder.addAddress(addr, bits)
+                }
+            }
+            val routes = opts.optJSONArray("routes")
+            if (routes != null && routes.length() > 0) {
+                for (i in 0 until routes.length()) {
+                    val cidr = routes.optString(i)
+                    val slash = cidr.lastIndexOf('/')
+                    if (slash <= 0) continue
+                    val addr = cidr.substring(0, slash)
+                    val bits = cidr.substring(slash + 1).toIntOrNull() ?: continue
+                    builder.addRoute(addr, bits)
+                }
+            } else {
+                builder.addRoute("0.0.0.0", 0)
+            }
+            builder.addDnsServer(DNS)
+            val pfd = builder.establish() ?: return -1
+            boxTun = pfd
+            return pfd.fd
+        }
     }
 
     override fun onCreate() {
@@ -104,17 +148,25 @@ class WisteriaVpnService : VpnService() {
     }
 
     private fun connect(profileIdParam: String) {
-        if (tun != null) return // already running
+        if (tun != null || engineIsBox) return // already running
 
         val store = AndroidStore(this)
         val id = profileIdParam.ifEmpty { store.activeId() }
         val profile = store.profile(id)
-        if (profile == null || profile.optString("type") != "wisteria") {
-            EngineHub.appLog("подключение: профиль wisteria не найден")
-            stopSelf()
-            return
-        }
+            ?: run {
+                EngineHub.appLog("подключение: профиль не найден")
+                stopSelf()
+                return
+            }
 
+        if (profile.optString("type") == "wisteria") {
+            startWisteria(profile)
+        } else {
+            startBox(profile)
+        }
+    }
+
+    private fun startWisteria(profile: JSONObject) {
         val builder = Builder()
             .addAddress(TUN_ADDRESS, TUN_PREFIX)
             .addRoute("0.0.0.0", 0)
@@ -131,6 +183,7 @@ class WisteriaVpnService : VpnService() {
         tun = fd
         EngineHub.profileId = profile.optString("id")
         EngineHub.profileName = profile.optString("name")
+        EngineHub.profileType = "wisteria"
         EngineHub.appLog("подключение к «${EngineHub.profileName}»…")
         startForegroundWith()
 
@@ -154,10 +207,111 @@ class WisteriaVpnService : VpnService() {
         }
     }
 
-    private fun teardown() {
+    /** sing-box path: vless / vmess / trojan / ss / hysteria2 / tuic. */
+    private fun startBox(profile: JSONObject) {
+        val raw = profile.optString("raw")
+        val name = profile.optString("name").ifEmpty { "Wisteria" }
+        val config = try {
+            SingboxLinks.buildConfig(raw, name)
+        } catch (e: Exception) {
+            EngineHub.appLog("профиль повреждён: ${e.message}")
+            EngineHub.pushEvent("state", statusJson("disconnected"))
+            stopSelf()
+            return
+        }
+        engineIsBox = true
+        EngineHub.profileId = profile.optString("id")
+        EngineHub.profileName = name
+        EngineHub.profileType = profile.optString("type")
+        EngineHub.appLog("подключение к «$name» (${EngineHub.profileType}, sing-box ${boxVersion()})…")
+        startForegroundWith()
+        EngineHub.pushEvent("state", statusJson("connecting"))
         try {
-            Mobile.stop()
-        } catch (_: Throwable) {
+            Mobile.boxStart(config, callback)
+            registerBoxNetworkMonitor()
+        } catch (e: Exception) {
+            EngineHub.coreLog("sing-box: ${e.message}")
+            EngineHub.pushEvent("state", statusJson("disconnected"))
+            teardown()
+            stopSelf()
+        }
+    }
+
+    private fun boxVersion(): String =
+        try { Mobile.boxVersion() } catch (_: Throwable) { "-" }
+
+    /**
+     * Android blocks netlink interface dumps, so the box's default
+     * interface monitor is fed from ConnectivityManager: initial state
+     * right after the start, then on every network change.
+     */
+    private fun registerBoxNetworkMonitor() {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                reportDefault()
+            }
+
+            override fun onLinkPropertiesChanged(network: Network, properties: android.net.LinkProperties) {
+                reportDefault()
+            }
+
+            private fun reportDefault() {
+                val active = cm.activeNetwork
+                val lp = active?.let { cm.getLinkProperties(it) }
+                val name = lp?.interfaceName
+                if (name.isNullOrEmpty()) {
+                    Mobile.boxUpdateDefaultInterface("", -1, false, false)
+                    return
+                }
+                val idx = try {
+                    java.net.NetworkInterface.getByName(name)?.index ?: -1
+                } catch (_: Exception) { -1 }
+                val caps = cm.getNetworkCapabilities(active)
+                val expensive =
+                    caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == false
+                Mobile.boxUpdateDefaultInterface(name, idx, expensive, false)
+            }
+        }
+        boxNetCallback = cb
+        try {
+            cm.registerDefaultNetworkCallback(cb)
+        } catch (e: Exception) {
+            EngineHub.coreLog("network monitor: ${e.message}")
+        }
+    }
+
+    private fun unregisterBoxNetworkMonitor() {
+        boxNetCallback?.let {
+            try {
+                val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                cm.unregisterNetworkCallback(it)
+            } catch (_: Throwable) {
+            }
+        }
+        boxNetCallback = null
+    }
+
+    private fun teardown() {
+        if (engineIsBox) {
+            unregisterBoxNetworkMonitor()
+            try {
+                Mobile.boxStop()
+            } catch (_: Throwable) {
+            }
+            boxTun?.let {
+                try {
+                    it.close()
+                } catch (_: Throwable) {
+                }
+            }
+            boxTun = null
+            engineIsBox = false
+        } else {
+            try {
+                Mobile.stop()
+            } catch (_: Throwable) {
+            }
         }
         tun?.let {
             try {
@@ -168,21 +322,14 @@ class WisteriaVpnService : VpnService() {
         tun = null
         EngineHub.profileId = ""
         EngineHub.profileName = ""
+        EngineHub.profileType = ""
         EngineHub.pushEvent("state", statusJson("disconnected"))
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
     }
 
     /** The desktop Status shape the frontend renders. */
-    private fun statusJson(state: String): JSONObject {
-        val out = JSONObject()
-            .put("state", state)
-            .put("profile_id", EngineHub.profileId)
-            .put("profile_name", EngineHub.profileName)
-            .put("type", if (state == "disconnected") "" else "wisteria")
-            .put("sys_proxy", false)
-            .put("tun", false)
-        return out
-    }
+    private fun statusJson(state: String): JSONObject =
+        WisteriaBridge.staticStatusJson(state, if (state == "disconnected") "" else EngineHub.profileType)
 
     private fun createChannel() {
         val nm = getSystemService(NotificationManager::class.java) ?: return

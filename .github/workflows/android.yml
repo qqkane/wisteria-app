@@ -14,12 +14,15 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
 
       # The Go engine lives in the private protocol repo; the AAR is built
-      # from its checkout, never committed to this repo.
+      # from its checkout, never committed to this repo. The same bind
+      # carries the embedded sing-box core (BoxStart facade) — a mobile app
+      # can host exactly one gomobile runtime, so both protocol families
+      # ship in this single AAR.
       # TODO: switch to the default branch once wisteria PR #13 (mobile/)
       # is merged — the engine package only exists on feature/android-engine.
       - name: Checkout wisteria protocol repo
@@ -33,6 +36,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: wisteria/go.mod
+          cache-dependency-path: wisteria/go.sum
 
       - uses: actions/setup-java@v4
         with:
@@ -85,7 +89,10 @@ jobs:
           export PATH="$SHIM:$PATH"
           # gomobile does not create the -o directory itself.
           mkdir -p "$GITHUB_WORKSPACE/android/app/libs"
+          # -checklinkname=0: sing-box uses //go:linkname, which the Go
+          # linker refuses by default since 1.23.
           gomobile bind -target=android -androidapi 24 -javapkg=org.wisteria \
+            -ldflags='-checklinkname=0 -s -w' \
             -o "$GITHUB_WORKSPACE/android/app/libs/wisteria.aar" ./mobile
 
       - name: Build APKs

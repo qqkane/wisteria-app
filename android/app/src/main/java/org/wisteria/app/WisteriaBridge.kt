@@ -27,8 +27,18 @@ class WisteriaBridge(private val activity: MainActivity) {
     private val store by lazy { AndroidStore(context) }
 
     companion object {
-        const val VERSION = "0.2.0"
+        const val VERSION = "0.4.0"
         private const val MAX_SUB_BYTES = 4 shl 20
+
+        /** Status shape shared with WisteriaVpnService (EngineHub-based). */
+        fun staticStatusJson(state: String, type: String): JSONObject =
+            JSONObject()
+                .put("state", state)
+                .put("profile_id", EngineHub.profileId)
+                .put("profile_name", EngineHub.profileName)
+                .put("type", type)
+                .put("sys_proxy", false)
+                .put("tun", false)
     }
 
     // ---- JS entry point ----
@@ -91,14 +101,16 @@ class WisteriaBridge(private val activity: MainActivity) {
         "ApplyAppUpdate" -> throw err("Обновление APK ставится вручную — скачайте новый из релиза")
         "RestartApp" -> { activity.restartApp(); null }
         "CheckCoreUpdate" -> JSONObject().put("current", "-").put("latest", "-").put("has_update", false)
-        "UpdateCore" -> throw err("Ядра sing-box/xray недоступны на Android")
+        "UpdateCore" -> throw err("Ядра встроены в приложение (sing-box) — обновление не требуется")
 
         else -> throw err("неизвестный метод: $name")
     }
 
     // ---- state ----
 
-    /** Engine state mapped onto core.Status (the desktop struct). */
+    /** Engine state mapped onto core.Status (the desktop struct). Both
+     *  engines report through Mobile.status(): the sing-box facade shares
+     *  the same status word set as the wisteria engine. */
     fun statusJson(): JSONObject {
         val engine = JSONObject(Mobile.status())
         val running = isRunning(engine)
@@ -106,7 +118,7 @@ class WisteriaBridge(private val activity: MainActivity) {
         out.put("state", mapState(engine.optString("state")))
         out.put("profile_id", if (running) EngineHub.profileId else "")
         out.put("profile_name", if (running) EngineHub.profileName else "")
-        out.put("type", if (running) "wisteria" else "")
+        out.put("type", if (running) EngineHub.profileType.ifEmpty { "wisteria" } else "")
         val since = engine.optLong("since", 0)
         out.put("started_at", if (since > 0) AndroidStore.epochIso(since) else "")
         out.put("sys_proxy", false)
@@ -130,9 +142,6 @@ class WisteriaBridge(private val activity: MainActivity) {
 
     private fun connect(id: String) {
         val p = store.profile(id) ?: throw err("профиль не найден")
-        if (p.optString("type") != "wisteria") {
-            throw err("протокол «${p.optString("type")}» на Android пока не поддерживается — только wisteria")
-        }
         store.setActive(id)
         val consent = VpnService.prepare(activity)
         if (consent != null) {
@@ -175,7 +184,11 @@ class WisteriaBridge(private val activity: MainActivity) {
     private fun pingProfile(id: String) {
         val p = store.profile(id) ?: throw err("профиль не найден")
         val lat = try {
-            Mobile.ping(endpointOf(p))
+            if (p.optString("type") == "wisteria") {
+                Mobile.ping(endpointOf(p))
+            } else {
+                tcpPing(p.optString("host"), p.optInt("port", 443))
+            }
         } catch (e: Exception) {
             -1L
         }
@@ -191,6 +204,21 @@ class WisteriaBridge(private val activity: MainActivity) {
             val line = rawLine.trim()
             if (line.isEmpty()) continue
             if (!line.contains("://")) continue
+            if (SingboxLinks.handles(line)) {
+                try {
+                    val p = SingboxLinks.parseProfile(line)
+                    if (p == null) {
+                        errors.put(JSONObject().put("line", line).put("error", "не удалось разобрать ссылку"))
+                    } else {
+                        p.put("latency_ms", 0)
+                        val saved = store.addProfile(p)
+                        if (saved != null) added.put(saved)
+                    }
+                } catch (e: Exception) {
+                    errors.put(JSONObject().put("line", line).put("error", e.message ?: "не распознано"))
+                }
+                continue
+            }
             try {
                 val entries = JSONArray(Mobile.parseLinks(line))
                 for (j in 0 until entries.length()) {
@@ -283,13 +311,30 @@ class WisteriaBridge(private val activity: MainActivity) {
         }
     }
 
-    /** Fetches the subscription body, parses every wisteria link and
-     *  replaces exactly this subscription's profiles, keeping the client
-     *  keys of endpoints seen before (the desktop merge rule). */
+    /** Fetches the subscription body, parses every link (wisteria and
+     *  sing-box protocols) and replaces exactly this subscription's
+     *  profiles, keeping the client keys of endpoints seen before (the
+     *  desktop merge rule). */
     private fun fetchIntoSub(sub: JSONObject): JSONObject {
         val body = httpGet(sub.optString("url"), MAX_SUB_BYTES, 15_000)
         val text = decodeSubBody(body)
-        val entries = JSONArray(Mobile.parseLinks(text))
+
+        // sing-box protocol lines never reach Mobile.parseLinks; pull them
+        // out first and hand Mobile only the rest (wisteria invites).
+        val sbProfiles = mutableListOf<JSONObject>()
+        val rest = StringBuilder()
+        for (rawLine in text.split("\n")) {
+            val line = rawLine.trim()
+            if (line.isNotEmpty() && SingboxLinks.handles(line)) {
+                try {
+                    SingboxLinks.parseProfile(line)?.let { sbProfiles.add(it) }
+                } catch (_: Exception) {
+                }
+            } else {
+                rest.append(rawLine).append("\n")
+            }
+        }
+        val entries = if (rest.isNotBlank()) JSONArray(Mobile.parseLinks(rest.toString())) else JSONArray()
 
         val old = JSONArray()
         val profiles = store.listProfiles()
@@ -327,6 +372,10 @@ class WisteriaBridge(private val activity: MainActivity) {
                 .put("client_priv", keyByEndpoint[host + ":" + port] ?: entry.optString("key"))
                 .put("servers", servers)
                 .put("latency_ms", 0)
+            store.addProfile(p)?.let { count++ }
+        }
+        for (p in sbProfiles) {
+            p.put("sub_id", sub.optString("id")).put("latency_ms", 0)
             store.addProfile(p)?.let { count++ }
         }
         sub.put("count", count).put("updated_at", AndroidStore.nowIso()).put("error", "")
@@ -413,6 +462,15 @@ class WisteriaBridge(private val activity: MainActivity) {
 
     private fun pushProfiles() {
         EngineHub.pushEvent("profiles", null)
+    }
+
+    /** TCP connect RTT for sing-box-protocol profiles (no engine ping). */
+    private fun tcpPing(host: String, port: Int): Long {
+        val start = System.nanoTime()
+        java.net.Socket().use { s ->
+            s.connect(java.net.InetSocketAddress(host, if (port in 1..65535) port else 443), 3000)
+        }
+        return (System.nanoTime() - start) / 1_000_000
     }
 
     fun endpointOf(p: JSONObject): String {
