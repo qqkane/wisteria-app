@@ -187,7 +187,10 @@ jobs:
             -i AppDir/WisteriaDesktop.png \
             --plugin gtk \
             --output appimage
-          mv Wisteria*_x86_64.AppImage WisteriaDesktop-linux-x86_64.AppImage
+          # linuxdeploy derives the file name from the desktop Name entry
+          # (lowercase/dashes), so take whatever *.AppImage it produced
+          APPIMG=$(find . -maxdepth 1 -name "*.AppImage" ! -name "linuxdeploy*" | head -1)
+          mv "$APPIMG" WisteriaDesktop-linux-x86_64.AppImage
           sha256sum WisteriaDesktop-linux-x86_64.AppImage > WisteriaDesktop-linux-x86_64.AppImage.sha256
 
       - uses: actions/upload-artifact@v4
