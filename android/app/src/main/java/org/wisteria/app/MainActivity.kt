@@ -3,8 +3,10 @@ package org.wisteria.app
 import android.content.Intent
 import android.graphics.Color
 import android.net.VpnService
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.view.WindowInsets
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -49,6 +51,21 @@ class MainActivity : AppCompatActivity() {
         WisteriaBridgeHolder.instance = bridge
         web.addJavascriptInterface(bridge, "WisteriaAndroid")
         setContentView(web)
+
+        // Edge-to-edge ROMs draw the app under the status bar, which pushed
+        // the logo under the clock; pad the webview by the system-bar insets
+        // instead (no-op when the decor already fits system windows).
+        web.setOnApplyWindowInsetsListener { v, insets ->
+            val (top, bottom) = if (Build.VERSION.SDK_INT >= 30) {
+                val bars = insets.getInsets(WindowInsets.Type.systemBars())
+                bars.top to bars.bottom
+            } else {
+                insets.systemWindowInsetTop to insets.systemWindowInsetBottom
+            }
+            v.setPadding(0, top, 0, bottom)
+            if (Build.VERSION.SDK_INT >= 30) WindowInsets.CONSUMED
+            else insets.consumeSystemWindowInsets()
+        }
 
         EngineHub.emitters += { event, payload ->
             // evaluateJavascript must run on the UI thread; skip silently

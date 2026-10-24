@@ -46,7 +46,7 @@ const THEMES = [
 const I18N = {
   ru: {
     "brand": "Wisteria",
-    "nav.vpn": "VPN", "nav.profiles": "Профили", "nav.logs": "Логи", "nav.diag": "Диагностика", "nav.settings": "Настройки",
+    "nav.vpn": "VPN", "nav.profiles": "Профили", "nav.logs": "Логи", "nav.diag": "Диагностика", "nav.settings": "Настройки", "ab.home": "Главная", "ab.more": "Ещё",
     "vpn.unprotected": "UNPROTECTED", "vpn.protected": "SECURED", "vpn.connecting": "CONNECTING…",
     "vpn.connect": "Connect", "vpn.disconnect": "Disconnect", "vpn.connected": "Connected",
     "vpn.noProfile": "Профиль не выбран", "vpn.clickSelect": "Нажмите, чтобы выбрать",
@@ -123,7 +123,7 @@ const I18N = {
   },
   en: {
     "brand": "Wisteria",
-    "nav.vpn": "VPN", "nav.profiles": "Profiles", "nav.logs": "Logs", "nav.diag": "Diagnostics", "nav.settings": "Settings",
+    "nav.vpn": "VPN", "nav.profiles": "Profiles", "nav.logs": "Logs", "nav.diag": "Diagnostics", "nav.settings": "Settings", "ab.home": "Home", "ab.more": "More",
     "vpn.unprotected": "UNPROTECTED", "vpn.protected": "SECURED", "vpn.connecting": "CONNECTING…",
     "vpn.connect": "Connect", "vpn.disconnect": "Disconnect", "vpn.connected": "Connected",
     "vpn.noProfile": "No profile selected", "vpn.clickSelect": "Click to choose",

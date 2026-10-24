@@ -71,7 +71,64 @@ html.platform-android .app-content { overflow-x: hidden; }
   .sidebar-footer { display: none; }
 
   .main-area { height: auto; flex: 1; }
-  .app-content { padding: 0 14px 20px; }
+  .app-content { padding: 0 14px 96px; }
+
+  /* ---------- bottom navigation (Hiddify-style) ---------- */
+  /* The five-item top bar is unreachable on a phone; navigation moves to a
+     fixed bottom bar (built by android-shim.js): «Главная» = VPN view, and
+     «Ещё» opens a menu with Profiles / Logs / Diagnostics / Settings. The
+     top bar keeps only the logo. */
+  html.platform-android .sidebar-nav { display: none; }
+  .sidebar { padding: 10px 16px; }
+
+  #android-bottom {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 300;
+    display: flex;
+    background: rgba(12, 12, 17, 0.86);
+    backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+    border-top: 1px solid var(--border);
+    transition: transform .25s;
+  }
+  .ab-item {
+    flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
+    padding: 9px 0 11px; border: none; background: none; cursor: pointer;
+    color: var(--muted); font-family: inherit; font-size: 11px; font-weight: 500;
+    transition: color .2s;
+  }
+  .ab-item svg { width: 22px; height: 22px; }
+  .ab-item.active { color: var(--accent); }
+  /* modals render above everything in .main-area; slide the bar away so
+     their bottom buttons stay reachable */
+  body.ab-modal #android-bottom { transform: translateY(110%); }
+
+  #android-menu { position: fixed; inset: 0; z-index: 310; display: none; }
+  #android-menu.open { display: block; }
+  .am-scrim {
+    position: absolute; inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  }
+  .am-card {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: min(88vw, 340px);
+    background: rgba(26, 26, 31, 0.96);
+    border: 1px solid var(--border); border-radius: 22px; padding: 10px;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  }
+  .am-title {
+    font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase;
+    color: var(--muted); padding: 10px 14px 6px;
+  }
+  .am-item {
+    display: flex; align-items: center; gap: 14px; width: 100%;
+    padding: 14px; border: none; background: none; cursor: pointer;
+    color: var(--fg); font-family: inherit; font-size: 15px; font-weight: 500;
+    border-radius: 14px; text-align: left; transition: background .15s, color .15s;
+  }
+  .am-item svg { width: 18px; height: 18px; flex-shrink: 0; }
+  .am-item:hover, .am-item:active { background: rgba(var(--accent-rgb), 0.12); color: var(--accent); }
+  .am-chev { margin-left: auto; opacity: 0.45; }
+
 
   .vpn-screen { padding-top: 18px; }
   .connect-btn { width: 176px; height: 176px; margin: 22px auto; }
