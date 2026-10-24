@@ -85,6 +85,7 @@
   const svg = (body) => `<svg viewBox="0 0 24 24" ${stroke}>${body}</svg>`;
   const ICONS = {
     home: svg('<path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/>'),
+    back: svg('<line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>'),
     logs: svg('<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>'),
     diag: svg('<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>'),
     settings: svg('<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>'),
@@ -239,6 +240,23 @@
       grid.id = "ab-sec-grid";
       grid.innerHTML = secCard("logs") + secCard("diag");
       title.after(grid);
+    }
+
+    // «Назад» on the Логи/Диагностика screens: the phone has no sidebar,
+    // and the bottom bar's second tab is not an obvious way back.
+    const curTab = document.querySelector(".sidebar-nav-item.active")?.dataset.tab;
+    if ((curTab === "logs" || curTab === "diag") &&
+        !document.getElementById("ab-back") && !document.getElementById("content-wrapper")?.querySelector(".modal-overlay")) {
+      const host = document.querySelector(".logs-header");
+      if (host) {
+        const back = document.createElement("button");
+        back.id = "ab-back";
+        back.className = "ab-sec-card";
+        back.innerHTML = `${ICONS.back}<span>${document.documentElement.lang === "en" ? "Back" : "Назад"}</span>` +
+          `<span class="ab-chev">${ICONS.chev}</span>`;
+        back.addEventListener("click", () => navTo("settings"));
+        host.before(back);
+      }
     }
 
     const langSel = document.getElementById("s-lang");

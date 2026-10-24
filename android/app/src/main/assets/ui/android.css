@@ -116,6 +116,11 @@ html.platform-android .app-content { overflow-x: hidden; }
   .ab-chev { margin-left: auto; opacity: 0.45; display: flex; }
   .ab-chev svg { width: 16px; height: 16px; color: var(--muted); }
 
+  /* «Назад» on the Логи/Диагностика screens: the phone has no sidebar,
+     and the bottom bar's second tab is not an obvious way back */
+  #ab-back { width: 100%; margin: 0 0 14px; }
+  #ab-back .ab-chev svg { transform: rotate(180deg); }
+
   /* native <select> for language is hidden (Android's dialog looks alien);
      the shim injects a segmented RU/EN toggle in its place */
   html.platform-android #s-lang { display: none; }

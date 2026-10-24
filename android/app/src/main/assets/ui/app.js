@@ -1060,6 +1060,20 @@ setInterval(() => {
   if (html) el.innerHTML = html;
 }, 1000);
 
+// State reconciliation: the push channel is not bulletproof — an event can
+// get lost on the webview bridge and leave the big button stuck on
+// "connecting" while the engine is actually connected (observed on a phone
+// in 0.4.5). GetState is a cheap read of the engine's shared status;
+// repaint whenever the state differs. Only the state string is compared so
+// a failure's error box is not wiped by a matching state.
+setInterval(async () => {
+  if (S.busy) return; // the optimistic connecting state is in flight
+  try {
+    const st = await api().GetState();
+    if (st && st.state && st.state !== S.state.state) renderState(st);
+  } catch (e) { /* bridge not ready yet */ }
+}, 3000);
+
 // Self-heal the external IP: the push event can be lost when the backend
 // finishes the check before the frontend has registered its listeners
 // (auto-connect at startup). If we are connected and the card is empty,
