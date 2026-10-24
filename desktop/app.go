@@ -100,7 +100,9 @@ func (a *App) startup(ctx context.Context) {
 	}()
 	store, err := core.OpenStore(d.Data)
 	if err != nil {
-		runtime.LogErrorf(ctx, "store: %v", err)
+		// Into the ring (and app.log): the user must see that profiles were
+		// set aside, not silently lost.
+		a.logf("хранилище: %v", err)
 	}
 	a.store = store
 	a.svc = core.NewService(d, a.ring, func() {

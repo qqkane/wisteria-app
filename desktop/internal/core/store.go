@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -46,11 +47,22 @@ func OpenStore(appDataDir string) (*Store, error) {
 	data, err := os.ReadFile(s.path)
 	if err == nil {
 		var disk Store
-		if json.Unmarshal(data, &disk) == nil {
+		if jerr := json.Unmarshal(data, &disk); jerr == nil {
 			s.Profiles = disk.Profiles
 			s.Subs = disk.Subs // without this subscriptions vanish on every restart
 			s.ActiveID = disk.ActiveID
 			normalizeLegacyTypes(s.Profiles)
+		} else {
+			// An unparseable store must survive the next save: saveLocked
+			// renames over profiles.json, which would replace the corrupt
+			// file (and every profile in it) with an empty one. Rename it
+			// aside and report; the app then starts empty but recoverable.
+			backup := s.path + ".corrupt"
+			_ = os.Remove(backup)
+			if rerr := os.Rename(s.path, backup); rerr == nil {
+				return s, fmt.Errorf("profiles.json повреждён (%v) — копия сохранена: %s", jerr, backup)
+			}
+			return s, fmt.Errorf("profiles.json повреждён (%v) и копию сохранить не удалось", jerr)
 		}
 	}
 	return s, nil

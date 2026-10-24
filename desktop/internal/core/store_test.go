@@ -33,3 +33,26 @@ func TestOpenStoreNormalizesLegacyTypeID(t *testing.T) {
 		t.Fatalf("untouched profiles changed: %q %q", s.Profiles[1].Type, s.Profiles[2].Type)
 	}
 }
+
+func TestOpenStoreCorruptFileBackedUp(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "profiles.json"), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := OpenStore(dir)
+	if err == nil {
+		t.Fatal("corrupt store must report an error")
+	}
+	backup := filepath.Join(dir, "profiles.json.corrupt")
+	if b, rerr := os.ReadFile(backup); rerr != nil || string(b) != "{not json" {
+		t.Fatalf("corrupt file not preserved as %s (err=%v)", backup, rerr)
+	}
+	// The store must be usable afterwards: the next save writes a fresh
+	// profiles.json instead of dying on the removed original.
+	if _, aerr := s.Add(Profile{Name: "n", Type: TVLESS, Host: "h", Port: 1}); aerr != nil {
+		t.Fatalf("Add after corrupt open: %v", aerr)
+	}
+	if _, rerr := os.Stat(filepath.Join(dir, "profiles.json")); rerr != nil {
+		t.Fatalf("profiles.json not re-created: %v", rerr)
+	}
+}
