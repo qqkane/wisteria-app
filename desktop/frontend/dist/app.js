@@ -1073,9 +1073,37 @@ async function ensureExtIP() {
 }
 
 function renderState(st) {
+  const prev = S.state;
   S.state = st || S.state;
-  if (S.tab === "vpn") renderContent();
-  else renderSidebarFooter();
+  if (S.tab !== "vpn") { renderSidebarFooter(); return; }
+  // Rebuild only on structural changes (profile switch, error box, TUN
+  // note, proxy toggle). Same-profile transitions (idle → connecting →
+  // connected) patch the DOM in place: an innerHTML swap would recreate
+  // the button node and restart its CSS animation from frame zero, which
+  // reads as the button animation stuttering on every state event.
+  const structural = !prev ||
+    prev.profile_id !== S.state.profile_id ||
+    !!prev.tun !== !!S.state.tun ||
+    (prev.error || "") !== (S.state.error || "") ||
+    !!prev.sys_proxy !== !!S.state.sys_proxy;
+  if (structural) { renderContent(); return; }
+  patchVpnState();
+  renderSidebarFooter();
+}
+
+function patchVpnState() {
+  const st = S.state;
+  const conn = st.state === "connected";
+  const connecting = st.state === "connecting";
+  const labelEl = document.querySelector(".vpn-status .label");
+  if (labelEl) labelEl.textContent = conn ? t("vpn.protected") : connecting ? t("vpn.connecting") : t("vpn.unprotected");
+  const btn = $("btn-toggle");
+  if (btn) {
+    btn.classList.toggle("connected", conn);
+    btn.disabled = connecting;
+    const txt = btn.querySelector(".connect-text");
+    if (txt) txt.textContent = conn ? t("vpn.disconnect") : t("vpn.connect");
+  }
 }
 
 // ---------- modal ----------
