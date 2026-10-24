@@ -171,7 +171,7 @@ object SingboxLinks {
      *  parsed outbound, DNS and route. The optional settings carry the
      *  routing tab (bypass_lan, route_direct, route_block, remote_dns,
      *  log_level) — the same keys the desktop saves. */
-    fun buildConfig(raw: String, name: String, settings: JSONObject? = null): String {
+    fun buildConfig(raw: String, name: String, settings: JSONObject? = null, cachePath: String? = null): String {
         val s = settings ?: JSONObject()
         val outbound = buildOutbound(raw, name)
 
@@ -251,6 +251,20 @@ object SingboxLinks {
                     .put("rules", rules)
                     .put("final", "proxy"),
             )
+        // sing-box creates the cache file whenever a PlatformLogWriter is
+        // set (box.go: PlatformLogWriter != nil → needCacheFile), and the
+        // default path is relative to the process CWD — on Android that is
+        // the read-only "/", so every start died with "open cache.db:
+        // read-only file system". Point it at app-private storage.
+        if (cachePath != null) {
+            cfg.put(
+                "experimental",
+                JSONObject().put(
+                    "cache_file",
+                    JSONObject().put("enabled", true).put("path", cachePath),
+                ),
+            )
+        }
         return cfg.toString()
     }
 

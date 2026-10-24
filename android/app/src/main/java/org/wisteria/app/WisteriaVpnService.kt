@@ -223,7 +223,7 @@ class WisteriaVpnService : VpnService() {
         val raw = profile.optString("raw")
         val name = profile.optString("name").ifEmpty { "Wisteria" }
         val config = try {
-            SingboxLinks.buildConfig(raw, name, AndroidStore(this).settings())
+            SingboxLinks.buildConfig(raw, name, AndroidStore(this).settings(), cachePath = "${filesDir.absolutePath}/cache.db")
         } catch (e: Exception) {
             EngineHub.appLog("профиль повреждён: ${e.message}")
             EngineHub.pushEvent("state", statusJson("disconnected", "профиль повреждён: ${trimErr(e.message)}"))

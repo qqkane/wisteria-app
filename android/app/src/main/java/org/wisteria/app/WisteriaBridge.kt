@@ -202,18 +202,22 @@ class WisteriaBridge(private val activity: MainActivity) {
 
     private fun pingProfile(id: String) {
         val p = store.profile(id) ?: throw err("профиль не найден")
-        val lat = try {
-            if (p.optString("type") == "wisteria") {
-                Mobile.ping(endpointOf(p))
-            } else {
-                tcpPing(p.optString("host"), p.optInt("port", 443))
+        // The dial itself takes seconds; on the bridge thread it would
+        // freeze the whole UI (same class as the subscription fetch).
+        Thread {
+            val lat = try {
+                if (p.optString("type") == "wisteria") {
+                    Mobile.ping(endpointOf(p))
+                } else {
+                    tcpPing(p.optString("host"), p.optInt("port", 443))
+                }
+            } catch (e: Exception) {
+                -1L
             }
-        } catch (e: Exception) {
-            -1L
-        }
-        p.put("latency_ms", lat)
-        store.updateProfile(p)
-        pushProfiles()
+            p.put("latency_ms", lat)
+            store.updateProfile(p)
+            pushProfiles()
+        }.start()
     }
 
     private fun addLinks(text: String): JSONObject {
@@ -310,24 +314,31 @@ class WisteriaBridge(private val activity: MainActivity) {
     private fun addSubscription(url: String): JSONObject {
         val sub = store.addSub(url.trim()) ?: throw err("такая подписка уже есть")
         EngineHub.appLog("подписка добавлена: ${sub.optString("name")}")
-        return try {
-            fetchIntoSub(sub)
-        } catch (e: Exception) {
-            sub.put("error", e.message ?: "ошибка сети")
-            store.updateSub(sub)
-            sub
-        }
+        fetchSubAsync(sub)
+        return sub
     }
 
     private fun refreshSubscription(id: String): JSONObject {
         val sub = store.sub(id) ?: throw err("подписка не найдена")
-        return try {
-            fetchIntoSub(sub)
-        } catch (e: Exception) {
-            sub.put("error", e.message ?: "ошибка сети")
-            store.updateSub(sub)
-            sub
-        }
+        fetchSubAsync(sub)
+        return sub
+    }
+
+    /** The fetch (up to 15s of blocking HTTP) must never run on the bridge
+     *  thread: a @JavascriptInterface call holds the WebView's JS thread,
+     *  so the whole UI — including the Cancel button — freezes meanwhile.
+     *  Runs in its own thread and reports through the "profiles" event. */
+    private fun fetchSubAsync(sub: JSONObject) {
+        Thread {
+            try {
+                fetchIntoSub(sub)
+            } catch (e: Exception) {
+                sub.put("error", e.message ?: "ошибка сети")
+                store.updateSub(sub)
+                EngineHub.appLog("подписка «${sub.optString("name")}»: ${e.message}")
+            }
+            pushProfiles()
+        }.start()
     }
 
     /** Fetches the subscription body, parses every link (wisteria and
@@ -426,13 +437,7 @@ class WisteriaBridge(private val activity: MainActivity) {
                     val sub = store.addSub(line)
                     if (sub != null) {
                         subCount++
-                        try {
-                            fetchIntoSub(sub)
-                        } catch (e: Exception) {
-                            sub.put("error", e.message ?: "ошибка сети")
-                            store.updateSub(sub)
-                            EngineHub.appLog("подписка ${sub.optString("name")}: ${e.message}")
-                        }
+                        fetchSubAsync(sub) // fetch off the bridge thread
                     }
                 } catch (e: Exception) {
                     EngineHub.appLog("подписка $line: ${e.message}")

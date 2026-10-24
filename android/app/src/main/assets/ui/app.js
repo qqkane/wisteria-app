@@ -1010,12 +1010,14 @@ async function refreshSub(id) {
   S.subBusy[id] = true;
   if (S.tab === "profiles") renderContent(); // spin the refresh icon
   try {
-    const sub = await api().RefreshSubscription(id);
-    if (sub && sub.error) showToast(sub.error);
+    await api().RefreshSubscription(id);
   } catch (e) {
     showToast((e && e.message) || e); // the error is also stored on the sub row
+    S.subBusy[id] = false;
   }
-  S.subBusy[id] = false;
+  // On success the fetch itself is asynchronous (it used to freeze the UI
+  // for seconds): the "profiles" event lands when it finishes and clears
+  // the spinner together with the fresh data.
   await loadSubs();
   await loadProfiles();
 }
@@ -1187,8 +1189,12 @@ whenReady(async () => {
     if (el) el.textContent = S.extIP || ((d && d.error) ? "✕" : "—");
   });
   // The backend auto-pinger emits this; don't wipe an open settings form.
+  // Subscription fetches run on their own thread and report through this
+  // event too, so it also clears the per-sub refresh spinners.
   window.runtime.EventsOn("profiles", async () => {
     S.profiles = (await api().ListProfiles()) || [];
+    S.subs = (await api().ListSubscriptions()) || S.subs;
+    S.subBusy = {};
     if (S.tab === "profiles" || S.tab === "vpn") renderContent();
     else renderSidebarFooter();
   });

@@ -98,7 +98,7 @@ jobs:
           # proved exactly that). This is the same tag set SFA ships,
           # minus the server-only reality_server and clash_api.
           gomobile bind -target=android -androidapi 24 -javapkg=org.wisteria \
-            -ldflags='-checklinkname=0 -s -w' \
+            -ldflags='-checklinkname=0 -s -w -X github.com/sagernet/sing-box/constant.Version=1.14.4' \
             -tags='with_conntrack,with_quic,with_dhcp,with_wireguard,with_utls,with_gvisor' \
             -o "$GITHUB_WORKSPACE/android/app/libs/wisteria.aar" ./mobile
 
