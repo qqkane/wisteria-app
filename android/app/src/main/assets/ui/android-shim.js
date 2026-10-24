@@ -61,64 +61,47 @@
   window.__PLATFORM = "android";
   document.documentElement.classList.add("platform-android");
 
-  // ---------- bottom navigation (Hiddify-style) ----------
-  // Five items across the top of a phone are hard to reach; navigation moves
-  // to a fixed bottom bar: «Главная» opens the VPN view directly, «Ещё»
-  // opens a menu with the four secondary views. Clicks are forwarded to the
-  // real sidebar buttons so SPA state stays exactly as the desktop drives it.
+  // ---------- inline icons (feather-style, match the app's icon set) ----------
+  const stroke = 'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+  const svg = (body) => `<svg viewBox="0 0 24 24" ${stroke}>${body}</svg>`;
+  const ICONS = {
+    home: svg('<path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/>'),
+    logs: svg('<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>'),
+    diag: svg('<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>'),
+    settings: svg('<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>'),
+    chev: svg('<path d="M9 6l6 6-6 6"/>'),
+  };
+
+  // ---------- bottom navigation ----------
+  // Five items across the top of a phone are hard to reach. The bottom bar
+  // has two tabs: «Главная» (VPN view) and «Настройки» (settings view, which
+  // carries quick links to Логи and Диагностика). Clicks are forwarded to
+  // the real sidebar buttons so SPA state stays desktop-identical.
+  const navTo = (tab) => {
+    const b = document.querySelector(`.sidebar-nav-item[data-tab="${tab}"]`);
+    if (b) b.click();
+  };
+
   function buildBottomNav() {
     if (document.getElementById("android-bottom")) return;
     const app = document.getElementById("app");
     if (!app) return;
-
-    const stroke = 'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
-    const svg = (body) => `<svg viewBox="0 0 24 24" ${stroke}>${body}</svg>`;
-    const ICONS = {
-      home: svg('<path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/>'),
-      more: svg('<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>'),
-      profiles: svg('<path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>'),
-      logs: svg('<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>'),
-      diag: svg('<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>'),
-      settings: svg('<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>'),
-      chev: svg('<path d="M9 6l6 6-6 6"/>'),
-    };
-
     const bar = document.createElement("nav");
     bar.id = "android-bottom";
     bar.innerHTML =
       `<button class="ab-item" id="ab-home">${ICONS.home}<span data-i18n="ab.home">Главная</span></button>` +
-      `<button class="ab-item" id="ab-more">${ICONS.more}<span data-i18n="ab.more">Ещё</span></button>`;
+      `<button class="ab-item" id="ab-settings">${ICONS.settings}<span data-i18n="nav.settings">Настройки</span></button>`;
     app.appendChild(bar);
-
-    const menu = document.createElement("div");
-    menu.id = "android-menu";
-    const row = (tab) =>
-      `<button class="am-item" data-goto="${tab}">${ICONS[tab]}<span data-i18n="nav.${tab}"></span><span class="am-chev">${ICONS.chev}</span></button>`;
-    menu.innerHTML =
-      '<div class="am-scrim"></div><div class="am-card">' +
-      '<div class="am-title" data-i18n="ab.more">Ещё</div>' +
-      row("profiles") + row("logs") + row("diag") + row("settings") +
-      "</div>";
-    app.appendChild(menu);
-
-    const navTo = (tab) => {
-      const b = document.querySelector(`.sidebar-nav-item[data-tab="${tab}"]`);
-      if (b) b.click();
-      menu.classList.remove("open");
-    };
     bar.querySelector("#ab-home").addEventListener("click", () => navTo("vpn"));
-    bar.querySelector("#ab-more").addEventListener("click", () => menu.classList.add("open"));
-    menu.querySelector(".am-scrim").addEventListener("click", () => menu.classList.remove("open"));
-    menu.querySelectorAll(".am-item").forEach((b) =>
-      b.addEventListener("click", () => navTo(b.dataset.goto)));
-
-    // Mirror the SPA's active view onto the two bottom tabs; the sidebar
-    // nav itself is display:none but still owns the source of truth.
+    bar.querySelector("#ab-settings").addEventListener("click", () => navTo("settings"));
+    // Mirror the SPA's active view onto the bottom tabs; the hidden sidebar
+    // nav still owns the source of truth. Логи/Диагностика count as the
+    // settings section (they are reached from it).
     const sync = () => {
       const cur = document.querySelector(".sidebar-nav-item.active");
       const homeActive = !cur || cur.dataset.tab === "vpn";
       bar.querySelector("#ab-home").classList.toggle("active", homeActive);
-      bar.querySelector("#ab-more").classList.toggle("active", !homeActive);
+      bar.querySelector("#ab-settings").classList.toggle("active", !homeActive);
     };
     new MutationObserver(sync).observe(document.querySelector(".sidebar-nav"), {
       subtree: true, attributes: true, attributeFilter: ["class"],
@@ -131,12 +114,38 @@
     buildBottomNav();
   }
 
-  // The settings form is re-rendered on every visit; drop the Windows-only
-  // switch pairs (start minimized / confirm exit) each time they appear, and
-  // relabel the autostart toggle: s-autostart maps to Android boot autostart.
+  // One delegated click handler for the shim-built navigation cards; they
+  // are re-injected whenever the SPA re-renders the view.
+  document.addEventListener("click", (ev) => {
+    const b = ev.target.closest("[data-abgoto]");
+    if (b) navTo(b.dataset.abgoto);
+  });
+
+  // Keep the language toggle's highlight in sync with the select: the SPA
+  // rewrites the form (fillSettingsForm) without firing a DOM mutation.
+  document.addEventListener("change", (ev) => {
+    if (!ev.target || ev.target.id !== "s-lang") return;
+    document.querySelectorAll(".ab-lang button").forEach((b) =>
+      b.classList.toggle("active", b.dataset.lang === ev.target.value));
+  });
+
+  // The settings form is re-rendered on every visit; re-apply each time:
+  // - drop the Windows-only switch pairs (start minimized / confirm exit)
+  // - relabel the autostart toggle (it maps to Android boot autostart)
+  // - quick links to Логи/Диагностика at the top of the settings view
+  // - segmented RU/EN toggle instead of the native <select> dialog
   const killPairs = ["s-startmin", "s-confirmexit"];
+  let abLangWanted = null; // language picked via the segmented toggle
+  function secCard(tab) {
+    // the boot-time i18n pass has already run by the time these render, so
+    // take the label text from the (hidden, already-translated) sidebar nav
+    const label = document.querySelector(`.sidebar-nav-item[data-tab="${tab}"]`)?.textContent?.trim() || tab;
+    return `<button class="ab-sec-card" data-abgoto="${tab}">${ICONS[tab]}` +
+      `<span data-i18n="nav.${tab}">${label}</span><span class="ab-chev">${ICONS.chev}</span></button>`;
+  }
   new MutationObserver(() => {
     document.body.classList.toggle("ab-modal", !!document.querySelector(".modal-overlay.show"));
+
     const as = document.querySelector("input#s-autostart");
     if (as) {
       const lbl = as.closest("label.switch")?.previousElementSibling;
@@ -145,6 +154,7 @@
           .replace("при входе в Windows", "при включении телефона")
           .replace("Start with Windows", "Start on device boot");
     }
+
     killPairs.forEach((id) => {
       const el = document.getElementById(id);
       if (!el) return;
@@ -153,6 +163,58 @@
       if (lbl && lbl.tagName === "LABEL") lbl.remove();
       ctl.remove();
     });
+
+    const title = document.querySelector(".settings-title");
+    if (title && !document.getElementById("ab-sec-grid")) {
+      const grid = document.createElement("div");
+      grid.id = "ab-sec-grid";
+      grid.innerHTML = secCard("logs") + secCard("diag");
+      title.after(grid);
+    }
+
+    const langSel = document.getElementById("s-lang");
+    if (langSel && !(langSel.nextElementSibling && langSel.nextElementSibling.classList.contains("ab-lang"))) {
+      const seg = document.createElement("div");
+      seg.className = "ab-lang";
+      seg.innerHTML = '<button type="button" data-lang="ru">Русский</button>' +
+        '<button type="button" data-lang="en">English</button>';
+      langSel.after(seg);
+      // The re-rendered template select resets to "ru"; fillSettingsForm
+      // applies the real value only after its async GetSettings, so prefer
+      // the language the toggle itself picked (abLangWanted).
+      const sync = () => seg.querySelectorAll("button").forEach((b) =>
+        b.classList.toggle("active", b.dataset.lang === (abLangWanted || langSel.value || "ru")));
+      seg.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
+        if (langSel.value === b.dataset.lang && !abLangWanted) return;
+        abLangWanted = b.dataset.lang;
+        langSel.value = b.dataset.lang;
+        // the frontend listens for change on #s-lang: re-renders everything
+        // in the new language; pressing «Сохранить настройки» persists it
+        langSel.dispatchEvent(new Event("change", { bubbles: true }));
+        setTimeout(sync, 200); // re-sync after fillSettingsForm settled
+      }));
+      sync();
+    }
     // attributes too: .modal-overlay.show is a class change, not a DOM one
   }).observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+
+  // Cold-start safety net: if the SPA boot chain died before its first
+  // render (a transient bridge hiccup leaves an empty content area), kick
+  // it — renderState is wired to the "state" event, so re-emitting a fresh
+  // GetState redraws the home view; a full reload is the last resort.
+  setTimeout(() => {
+    const cw = document.getElementById("content-wrapper");
+    if (!cw || cw.children.length > 0 || document.querySelector(".modal-overlay")) return;
+    call("GetState").then(
+      (st) => window.__wisteriaEmit("state", JSON.stringify(st)),
+      () => {
+        try {
+          if (!sessionStorage.getItem("ab-reloaded")) {
+            sessionStorage.setItem("ab-reloaded", "1");
+            location.reload();
+          }
+        } catch (e) { /* private mode */ }
+      },
+    );
+  }, 2500);
 })();

@@ -75,17 +75,17 @@ html.platform-android .app-content { overflow-x: hidden; }
 
   /* ---------- bottom navigation (Hiddify-style) ---------- */
   /* The five-item top bar is unreachable on a phone; navigation moves to a
-     fixed bottom bar (built by android-shim.js): «Главная» = VPN view, and
-     «Ещё» opens a menu with Profiles / Logs / Diagnostics / Settings. The
-     top bar keeps only the logo. */
+     fixed bottom bar (built by android-shim.js): «Главная» = VPN view and
+     «Настройки» = settings view (with quick links to Логи / Диагностика).
+     The top bar keeps only the logo. */
   html.platform-android .sidebar-nav { display: none; }
   .sidebar { padding: 10px 16px; }
 
   #android-bottom {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 300;
     display: flex;
-    background: rgba(12, 12, 17, 0.86);
-    backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+    background: var(--card);
+    backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px);
     border-top: 1px solid var(--border);
     transition: transform .25s;
   }
@@ -101,33 +101,35 @@ html.platform-android .app-content { overflow-x: hidden; }
      their bottom buttons stay reachable */
   body.ab-modal #android-bottom { transform: translateY(110%); }
 
-  #android-menu { position: fixed; inset: 0; z-index: 310; display: none; }
-  #android-menu.open { display: block; }
-  .am-scrim {
-    position: absolute; inset: 0;
-    background: rgba(0, 0, 0, 0.55);
-    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  /* quick links at the top of the settings view (Логи / Диагностика) —
+     theme vars keep them readable on light themes like Arctic */
+  #ab-sec-grid { display: flex; gap: 10px; width: 100%; margin: 0 0 18px; }
+  .ab-sec-card {
+    flex: 1; display: flex; align-items: center; gap: 12px;
+    padding: 15px 16px; border: 1px solid var(--border); border-radius: 16px;
+    background: var(--card); backdrop-filter: blur(20px);
+    color: var(--fg); font-family: inherit; font-size: 14.5px; font-weight: 600;
+    cursor: pointer; text-align: left; transition: border-color .2s, background .2s;
   }
-  .am-card {
-    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
-    width: min(88vw, 340px);
-    background: rgba(26, 26, 31, 0.96);
-    border: 1px solid var(--border); border-radius: 22px; padding: 10px;
-    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  .ab-sec-card svg { width: 18px; height: 18px; flex-shrink: 0; color: var(--accent); }
+  .ab-sec-card:active { border-color: rgba(var(--accent-rgb), .45); background: rgba(var(--accent-rgb), .1); }
+  .ab-chev { margin-left: auto; opacity: 0.45; display: flex; }
+  .ab-chev svg { width: 16px; height: 16px; color: var(--muted); }
+
+  /* native <select> for language is hidden (Android's dialog looks alien);
+     the shim injects a segmented RU/EN toggle in its place */
+  html.platform-android #s-lang { display: none; }
+  .ab-lang {
+    display: flex; width: 100%; background: var(--card);
+    border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
   }
-  .am-title {
-    font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase;
-    color: var(--muted); padding: 10px 14px 6px;
+  .ab-lang button {
+    flex: 1; padding: 11px 8px; border: none; background: none; cursor: pointer;
+    color: var(--muted); font-family: inherit; font-size: 13.5px; font-weight: 500;
+    transition: color .2s, background .2s;
   }
-  .am-item {
-    display: flex; align-items: center; gap: 14px; width: 100%;
-    padding: 14px; border: none; background: none; cursor: pointer;
-    color: var(--fg); font-family: inherit; font-size: 15px; font-weight: 500;
-    border-radius: 14px; text-align: left; transition: background .15s, color .15s;
-  }
-  .am-item svg { width: 18px; height: 18px; flex-shrink: 0; }
-  .am-item:hover, .am-item:active { background: rgba(var(--accent-rgb), 0.12); color: var(--accent); }
-  .am-chev { margin-left: auto; opacity: 0.45; }
+  .ab-lang button + button { border-left: 1px solid var(--border); }
+  .ab-lang button.active { color: var(--accent); background: rgba(var(--accent-rgb), .14); }
 
 
   .vpn-screen { padding-top: 18px; }
