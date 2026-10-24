@@ -148,23 +148,22 @@ jobs:
           tar -czf WisteriaDesktop-linux-amd64.tar.gz -C dist WisteriaDesktop
           sha256sum WisteriaDesktop-linux-amd64.tar.gz > WisteriaDesktop-linux-amd64.tar.gz.sha256
 
-      # AppImage: linuxdeploy + the gtk plugin bundle the GTK3/WebKit2GTK
-      # stack from the 24.04 build env. The AppRun env file neutralizes
-      # WebKit's bubblewrap sandbox — bwrap cannot find its helpers inside
-      # an AppImage mount. The wisteria core sits next to the shell in
-      # usr/bin/bin, matching BinDir() (executable dir + "bin").
+      # AppImage (thin): the shell + wisteria core + desktop integration;
+      # GTK3/WebKit2GTK come from the host, same requirement as the tar.gz.
+      # Bundling WebKit2GTK is not portable — its child processes
+      # (WebKitNetworkProcess etc.) are looked up at the build host's
+      # hardcoded /usr/lib/.../webkit2gtk-4.1 path, which crashes at
+      # startup on any distro with a different layout (Arch, Fedora).
       - name: package appimage
         working-directory: desktop
         env:
           APPIMAGE_EXTRACT_AND_RUN: "1"
-          DEPLOY_GTK_VERSION: "3"
         run: |
-          curl -fsSL -o linuxdeploy-x86_64.AppImage https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          curl -fsSL -o linuxdeploy-plugin-gtk https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh
-          chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-gtk
-          export PATH="$PWD:$PATH"
+          curl -fsSL -o appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
 
-          mkdir -p AppDir/usr/bin/bin AppDir/usr/share/applications AppDir/usr/share/AppRun/env
+          mkdir -p AppDir/usr/bin/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
+          cp build/WisteriaDesktop AppDir/usr/bin/
           cp build/bin/wisteria-client AppDir/usr/bin/bin/
 
           printf '%s\n' \
@@ -177,20 +176,18 @@ jobs:
             'Categories=Network;' \
             'Terminal=false' \
             > AppDir/usr/share/applications/WisteriaDesktop.desktop
-          cp frontend/dist/assets/icon.png AppDir/WisteriaDesktop.png
+          cp frontend/dist/assets/icon.png AppDir/usr/share/icons/hicolor/256x256/apps/WisteriaDesktop.png
 
-          printf '%s\n' 'WEBKIT_FORCE_SANDBOX=0' > AppDir/usr/share/AppRun/env/webkit.conf
+          printf '%s\n' \
+            '#!/usr/bin/env bash' \
+            'set -e' \
+            'self="$(readlink -f "$0")"' \
+            'appdir="$(dirname "$self")"' \
+            'exec "$appdir/usr/bin/WisteriaDesktop" "$@"' \
+            > AppDir/AppRun
+          chmod +x AppDir/AppRun
 
-          ./linuxdeploy-x86_64.AppImage --appdir AppDir \
-            -e build/WisteriaDesktop \
-            -d AppDir/usr/share/applications/WisteriaDesktop.desktop \
-            -i AppDir/WisteriaDesktop.png \
-            --plugin gtk \
-            --output appimage
-          # linuxdeploy derives the file name from the desktop Name entry
-          # (lowercase/dashes), so take whatever *.AppImage it produced
-          APPIMG=$(find . -maxdepth 1 -name "*.AppImage" ! -name "linuxdeploy*" | head -1)
-          mv "$APPIMG" WisteriaDesktop-linux-x86_64.AppImage
+          ./appimagetool AppDir WisteriaDesktop-linux-x86_64.AppImage
           sha256sum WisteriaDesktop-linux-x86_64.AppImage > WisteriaDesktop-linux-x86_64.AppImage.sha256
 
       - uses: actions/upload-artifact@v4
