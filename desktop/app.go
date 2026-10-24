@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -483,7 +484,9 @@ func (a *App) RefreshSubscription(id string) (core.Subscription, error) {
 	if err != nil {
 		sub.Error = err.Error()
 		_ = a.store.UpdateSubscription(sub)
-		a.logf("подписка %s: %v", sub.Name, err)
+		// Fetch errors embed the full request URL ("Get \"…?token=…\": …"),
+		// and subscription URLs carry auth tokens — scrub before logging.
+		a.logf("подписка %s: %s", sub.Name, scrubURLs(err.Error()))
 		return sub, err
 	}
 	if _, err := a.store.ReplaceSubscriptionProfiles(id, fetch.Profiles); err != nil {
@@ -777,6 +780,17 @@ func maskURL(u string) string {
 		return u[:i]
 	}
 	return u
+}
+
+// urlInText matches an http(s) URL inside free text (fetch errors quote the
+// request URL; it ends at the closing quote or whitespace).
+var urlInText = regexp.MustCompile(`\bhttps?://[^\s"'<>]+`)
+
+// scrubURLs strips the query and fragment from every http(s) URL in s —
+// the same masking maskURL applies, for error strings that embed whole
+// URLs (redirects included, not just the subscription's own).
+func scrubURLs(s string) string {
+	return urlInText.ReplaceAllStringFunc(s, maskURL)
 }
 
 func firstDefined(vals ...string) string {
