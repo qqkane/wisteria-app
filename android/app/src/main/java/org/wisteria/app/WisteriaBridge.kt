@@ -435,24 +435,37 @@ class WisteriaBridge(private val activity: MainActivity) {
 
     // ---- external IP / diag ----
 
-    private fun externalIP(): String {
-        if (!isRunning(JSONObject(Mobile.status()))) throw err("нет активного подключения")
-        val ip = httpGet("https://api.ipify.org", 1024, 10_000).trim()
-        if (ip.isEmpty()) throw err("пустой ответ")
-        EngineHub.pushEvent("extip", JSONObject().put("ip", ip))
-        return ip
-    }
+    // A @JavascriptInterface call is synchronous for the WebView JS thread:
+    // a slow reply freezes the whole UI (this is what "приложение зависло"
+    // was — a 10s HTTP probe through a dead tunnel on every vpn render).
+    // The check therefore always runs on its own thread and reports through
+    // the "extip" event; the bridge call itself returns immediately.
+    private val extIpChecking = java.util.concurrent.atomic.AtomicBoolean(false)
 
-    fun onConnectedCheckIP() {
-        if (!store.settings().optBoolean("check_ext_ip", true)) return
+    private fun requestExtIP() {
+        if (!extIpChecking.compareAndSet(false, true)) return
         Thread {
             try {
                 val ip = httpGet("https://api.ipify.org", 1024, 10_000).trim()
                 if (ip.isNotEmpty()) EngineHub.pushEvent("extip", JSONObject().put("ip", ip))
+                else EngineHub.pushEvent("extip", JSONObject().put("error", "пустой ответ"))
             } catch (e: Exception) {
                 EngineHub.pushEvent("extip", JSONObject().put("error", e.message ?: ""))
+            } finally {
+                extIpChecking.set(false)
             }
         }.start()
+    }
+
+    private fun externalIP(): String {
+        if (!isRunning(JSONObject(Mobile.status()))) throw err("нет активного подключения")
+        requestExtIP()
+        return "" // the result arrives via the "extip" event
+    }
+
+    fun onConnectedCheckIP() {
+        if (!store.settings().optBoolean("check_ext_ip", true)) return
+        requestExtIP()
     }
 
     private fun diagJson(): JSONObject {

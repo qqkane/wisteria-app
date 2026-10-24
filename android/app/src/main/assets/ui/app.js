@@ -70,6 +70,7 @@ const I18N = {
     "set.memLimit": "Лимит памяти ядра, МБ", "set.memLimitNote": "0 — без лимита",
     "set.checkIpNow": "Проверить IP сейчас",
     "toast.ipFail": "Не удалось определить IP",
+    "toast.ipWait": "Определяю IP…",
     "set.tun": "Режим TUN (весь трафик системы)",
     "set.tunNote": "маршрутизирует всё через туннель; нужен sing-box и wintun.dll; системный прокси при этом не используется",
     "set.tunStack": "Стек TUN",
@@ -147,6 +148,7 @@ const I18N = {
     "set.memLimit": "Core memory limit, MB", "set.memLimitNote": "0 — unlimited",
     "set.checkIpNow": "Check IP now",
     "toast.ipFail": "Could not determine the IP",
+    "toast.ipWait": "Checking IP…",
     "set.tun": "TUN mode (all system traffic)",
     "set.tunNote": "routes everything through the tunnel; needs sing-box and wintun.dll; the system proxy is not used",
     "set.tunStack": "TUN stack",
@@ -814,6 +816,10 @@ function wireContent() {
   on("btn-checkip", "click", async () => {
     try {
       const ip = await api().GetExternalIP();
+      if (!ip) { // the Android bridge checks on its own thread → "extip" event
+        showToast(t("toast.ipWait"));
+        return;
+      }
       S.extIP = ip;
       const el = $("stat-ip");
       if (el) el.textContent = ip;

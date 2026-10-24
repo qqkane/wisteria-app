@@ -11,8 +11,8 @@ android {
         applicationId "org.wisteria.app"
         minSdk 24
         targetSdk 34
-        versionCode 8
-        versionName "0.4.2"
+        versionCode 9
+        versionName "0.4.3"
     }
 
     // The release APK ships signed with the debug key for now: a proper

@@ -35,10 +35,10 @@
     });
   }
 
-  // After a subscription op (import from clipboard / add / refresh) jump
-  // to the main screen: the profiles the user just fetched live there, so
-  // connecting is one tap away.
-  const AUTO_NAV = { ImportFromClipboard: 1, AddSubscription: 1, RefreshSubscription: 1 };
+  // Selecting a config (a profile row calls SetActive; the big button and
+  // switch-while-connected call Connect) jumps to the main screen. Per user
+  // request subscription ops (import / add / refresh) must NOT navigate.
+  const AUTO_NAV = { SetActive: 1, Connect: 1 };
   const activeTab = () =>
     document.querySelector(".sidebar-nav-item.active")?.dataset.tab || "vpn";
   window.go = {
@@ -184,15 +184,18 @@
     // «Отмена» instead of a dead disabled button while connecting. The SPA
     // marks connecting with the button's disabled attr; once we take over,
     // our own abCancel marker keeps the state stable across observer runs
-    // (the SPA re-render on state change drops it with the old DOM).
+    // (the SPA re-render on state change drops it with the old DOM). Every
+    // write below is guarded: this observer watches attributes on the whole
+    // document, and an unguarded same-value write would re-trigger it on
+    // every pass — a self-sustaining microtask loop, i.e. a frozen app.
     const btn = document.getElementById("btn-toggle");
     if (btn) {
       const spaConnecting = btn.disabled && !btn.classList.contains("connected");
       if (spaConnecting || btn.dataset.abCancel === "1") {
         const txt = btn.querySelector(".connect-text");
-        btn.disabled = false;
-        btn.dataset.abCancel = "1";
-        btn.classList.add("ab-cancel");
+        if (btn.dataset.abCancel !== "1") btn.dataset.abCancel = "1";
+        if (btn.disabled) btn.disabled = false;
+        if (!btn.classList.contains("ab-cancel")) btn.classList.add("ab-cancel");
         if (txt && txt.dataset.abCancel !== "1") {
           txt.dataset.abCancel = "1";
           txt.textContent = document.documentElement.lang === "en" ? "Cancel" : "Отмена";
