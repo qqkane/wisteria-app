@@ -2,10 +2,10 @@
 
 package core
 
-// Linux system proxy: GNOME/gsettings (the de-facto system-wide proxy
+// GNOME system proxy backend: gsettings (the de-facto system-wide proxy
 // settings on GNOME and GTK-based desktops; read by libgsettings consumers).
-// Best effort by design: on a desktop without gsettings the feature reports
-// unsupported instead of pretending.
+// Best effort by design: on a desktop without gsettings the backend simply
+// reports unavailable.
 
 import (
 	"errors"
@@ -33,10 +33,18 @@ func gsettingsAvailable() bool {
 	return err == nil
 }
 
-func SetSystemProxy(on bool, addr string) error {
+func gnomeBackend() (proxyBackend, bool) {
 	if !gsettingsAvailable() {
-		return errors.New("системный прокси на этой системе не поддерживается (нужен GNOME/gsettings)")
+		return proxyBackend{}, false
 	}
+	return proxyBackend{
+		name:       "gnome",
+		set:        gnomeSetProxy,
+		clearStale: gnomeClearStale,
+	}, true
+}
+
+func gnomeSetProxy(on bool, addr string) error {
 	if !on {
 		if _, err := gsettings("set", "org.gnome.system.proxy", "mode", "none"); err != nil {
 			return fmt.Errorf("gsettings: %w", err)
@@ -72,11 +80,11 @@ func SetSystemProxy(on bool, addr string) error {
 	return nil
 }
 
-func SystemProxySupported() bool { return gsettingsAvailable() }
+func SystemProxySupported() bool { return len(availableProxyBackends()) > 0 }
 
-// ClearStaleSystemProxy disables the system proxy when it points at our own
-// HTTP port — the mark of a previous run that died without teardown.
-func ClearStaleSystemProxy(localPort int) bool {
+// gnomeClearStale disables the GNOME proxy when it points at our own HTTP
+// port. Reports whether a stale entry was cleared.
+func gnomeClearStale(localPort int) bool {
 	if !gsettingsAvailable() {
 		return false
 	}
@@ -99,5 +107,5 @@ func ClearStaleSystemProxy(localPort int) bool {
 	if strings.TrimSpace(port) != strconv.Itoa(localPort) {
 		return false
 	}
-	return SetSystemProxy(false, "") == nil
+	return gnomeSetProxy(false, "") == nil
 }
