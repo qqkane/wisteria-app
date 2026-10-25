@@ -56,6 +56,14 @@ type UpdateInfo struct {
 	shaID int64 // the sibling .sha256 asset, app releases only
 }
 
+// ghTokenOverride carries the token from the app settings (set by the UI
+// layer at startup and on every settings save). Env vars take precedence:
+// they are the CI/advanced route and never appear in a config file.
+var ghTokenOverride string
+
+// SetGitHubToken stores the settings-provided token for release access.
+func SetGitHubToken(tok string) { ghTokenOverride = strings.TrimSpace(tok) }
+
 // ghToken returns the GitHub access token for release access, "" when none
 // is configured. The app repository is private and the anonymous API answers
 // 404 for it — without a token the self-updater would forever report "no
@@ -67,7 +75,7 @@ func ghToken() string {
 			return v
 		}
 	}
-	return ""
+	return ghTokenOverride
 }
 
 // ghLatest returns the tag and assets of a repo's latest stable release.

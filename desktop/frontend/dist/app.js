@@ -81,6 +81,7 @@ const I18N = {
     "sec.engines": "Ядро по протоколу",
     "sec.updates": "Обновления",
     "set.updCheck": "Проверять обновления при запуске", "set.updNote": "приложение и ядра sing-box / xray",
+    "set.ghToken": "GitHub-токен для обновлений", "set.ghTokenNote": "репозиторий приватный — без токена обновлений не видно; токен с правом чтения (classic, scope repo)",
     "set.appVersion": "Версия приложения",
     "set.checkUpd": "Проверить обновления", "set.updAvail": "Доступна версия",
     "set.updApply": "Скачать и установить", "set.updRestart": "Перезапустить приложение",
@@ -158,6 +159,7 @@ const I18N = {
     "sec.engines": "Engine per protocol",
     "sec.updates": "Updates",
     "set.updCheck": "Check for updates on launch", "set.updNote": "the app and the sing-box / xray cores",
+    "set.ghToken": "GitHub token for updates", "set.ghTokenNote": "the repo is private — without a token no releases are visible; read-only classic token (repo scope)",
     "set.appVersion": "App version",
     "set.checkUpd": "Check for updates", "set.updAvail": "New version available",
     "set.updApply": "Download and install", "set.updRestart": "Restart the app",
@@ -537,6 +539,8 @@ function renderSettings() {
       <div class="set-grid">
         <label>${esc(t("set.updCheck"))}<span class="set-note">${esc(t("set.updNote"))}</span></label>
         <label class="switch"><input id="s-updcheck" type="checkbox"/><span class="slider"></span></label>
+        <label>${esc(t("set.ghToken"))}<span class="set-note">${esc(t("set.ghTokenNote"))}</span></label>
+        <input id="s-ghtoken" type="password" placeholder="ghp_…" autocomplete="off"/>
         <label>${esc(t("set.appVersion"))}</label>
         <div style="display:flex; gap:10px; align-items:center;">
           <span class="core-note" style="margin:0;">v${esc(S.version || "?")}</span>
@@ -910,6 +914,7 @@ async function fillSettingsForm(s) {
   setv("s-wisteria", s.wisteria_core || "");
   setv("s-singbox", s.singbox_core || "");
   setc("s-updcheck", !s.no_update_check);
+  setv("s-ghtoken", s.github_token || "");
   setc("s-autostart", await api().GetAutostart());
   setc("s-startmin", s.start_minimized);
   setc("s-confirmexit", s.confirm_exit);
@@ -956,6 +961,7 @@ async function saveSettings() {
     confirm_exit: g("s-confirmexit") ? $("s-confirmexit").checked : cur.confirm_exit,
     check_ext_ip: g("s-checkip") ? $("s-checkip").checked : cur.check_ext_ip,
     no_update_check: g("s-updcheck") ? !$("s-updcheck").checked : cur.no_update_check,
+    github_token: g("s-ghtoken") ? $("s-ghtoken").value.trim() : cur.github_token,
     auto_ping_sec: g("s-autoping") ? Math.max(0, num("s-autoping", 0)) : cur.auto_ping_sec,
     listen_all: g("s-listenall") ? $("s-listenall").checked : cur.listen_all,
     bypass_lan: g("s-bypasslan") ? $("s-bypasslan").checked : cur.bypass_lan,

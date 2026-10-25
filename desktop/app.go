@@ -115,6 +115,7 @@ func (a *App) startup(ctx context.Context) {
 		}
 	})
 	a.svc.LoadSettings()
+	core.SetGitHubToken(a.svc.Settings().GitHubToken)
 	// First-run onboarding defaults: a VPN client is expected to take over
 	// the system proxy (v2rayN/NekoBox behaviour). A stale proxy entry left
 	// by another client otherwise keeps pointing browsers at a dead port.
@@ -626,6 +627,7 @@ func (a *App) GetSettings() core.Settings { return a.svc.Settings() }
 
 func (a *App) SaveSettings(s core.Settings) core.Settings {
 	out := a.svc.SaveSettings(s)
+	core.SetGitHubToken(out.GitHubToken)
 	a.startAutoPing() // interval may have changed
 	a.logf("настройки сохранены")
 	return out

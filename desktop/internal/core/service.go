@@ -63,6 +63,10 @@ type Settings struct {
 
 	// Updates: the zero value keeps the check on (so old configs stay in it).
 	NoUpdateCheck bool `json:"no_update_check"`
+	// GitHubToken reads releases of the private app repo (the anonymous API
+	// 404s there forever). Plaintext in settings.json (0600) — the same
+	// trust level as the client keys in profiles.json; env vars win.
+	GitHubToken string `json:"github_token"`
 
 	// Inbound
 	ListenAll bool `json:"listen_all"` // bind proxies on 0.0.0.0 instead of 127.0.0.1
@@ -628,7 +632,12 @@ func (s *Service) startTun(ctx context.Context, p Profile, socksAddr string, set
 		if runtime.GOOS == "windows" {
 			return nil, errors.New("TUN требует прав администратора — перезапустите приложение от администратора (кнопка в настройках)")
 		}
-		return nil, errors.New("TUN требует права root — запустите приложение от root (sudo) или выдайте бинарю CAP_NET_ADMIN")
+		// Linux: root is not the only route — a file capability on the
+		// sing-box binary (setcap cap_net_admin=+ep) grants exactly what
+		// the helper needs, without running the whole app elevated.
+		if _, err := tunGrantHint(singbox); err != nil {
+			return nil, err
+		}
 	}
 	if runtime.GOOS == "windows" && !hasWintunDLL(singbox, s.dirs) {
 		return nil, errors.New("wintun.dll не найден рядом с sing-box.exe — возьмите его из архива релиза sing-box или с wintun.net и положите рядом")
