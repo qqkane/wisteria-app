@@ -57,7 +57,7 @@ const I18N = {
     "set.lang": "Язык", "set.socksPort": "Локальный SOCKS-порт", "set.httpPort": "Локальный HTTP-порт",
     "set.sysproxy": "Системный прокси при подключении", "set.bridge": "HTTP-мост (нужен для системного прокси)",
     "set.autoconnect": "Автоподключение при старте", "set.autostart": "Запускать при входе в Windows",
-    "set.wisteriaCore": "Путь к wisteria-client.exe", "set.singboxCore": "Путь к sing-box.exe",
+    "set.wisteriaCore": "Путь к wisteria-client", "set.singboxCore": "Путь к sing-box",
     "set.detect": "Найти ядра", "set.save": "Сохранить настройки",
     "set.startMin": "Запускать свёрнутым", "set.startMinNote": "окно свернётся в панель задач",
     "set.confirmExit": "Спрашивать подтверждение при выходе во время соединения",
@@ -85,13 +85,13 @@ const I18N = {
     "set.appVersion": "Версия приложения",
     "set.checkUpd": "Проверить обновления", "set.updAvail": "Доступна версия",
     "set.updApply": "Скачать и установить", "set.updRestart": "Перезапустить приложение",
-    "set.updCore": "Обновить",
+    "set.updCore": "Обновить", "set.dlCore": "Скачать",
     "toast.updNone": "актуальная версия",
     "toast.updReady": "Обновление загружено — можно перезапускать",
     "set.restartAdmin": "Перезапустить от администратора",
     "set.notAdmin": "Без прав администратора TUN недоступен.",
     "set.mpCore": "Ядро для ss/vmess/vless/trojan",
-    "set.xrayCore": "Путь к xray.exe",
+    "set.xrayCore": "Путь к xray",
     "logs.title": "Логи", "logs.follow": "Автопрокрутка", "logs.clear": "Очистить",
     "diag.title": "Диагностика wisteria", "diag.inactive": "Диагностика работает только для профилей wisteria",
     "diag.inactiveHint": "Подключитесь к профилю wisteria — здесь появится причина сбоя: заблокировали, упал интернет или ключ не принят.",
@@ -135,7 +135,7 @@ const I18N = {
     "set.lang": "Language", "set.socksPort": "Local SOCKS port", "set.httpPort": "Local HTTP port",
     "set.sysproxy": "Set system proxy on connect", "set.bridge": "HTTP bridge (required for the system proxy)",
     "set.autoconnect": "Auto-connect on start", "set.autostart": "Start with Windows",
-    "set.wisteriaCore": "Path to wisteria-client.exe", "set.singboxCore": "Path to sing-box.exe",
+    "set.wisteriaCore": "Path to wisteria-client", "set.singboxCore": "Path to sing-box",
     "set.detect": "Detect cores", "set.save": "Save settings",
     "set.startMin": "Start minimized", "set.startMinNote": "the window opens minimized",
     "set.confirmExit": "Ask for confirmation on exit while connected",
@@ -163,13 +163,13 @@ const I18N = {
     "set.appVersion": "App version",
     "set.checkUpd": "Check for updates", "set.updAvail": "New version available",
     "set.updApply": "Download and install", "set.updRestart": "Restart the app",
-    "set.updCore": "Update",
+    "set.updCore": "Update", "set.dlCore": "Download",
     "toast.updNone": "up to date",
     "toast.updReady": "Update staged — restart to apply",
     "set.restartAdmin": "Restart as administrator",
     "set.notAdmin": "TUN needs administrator rights.",
     "set.mpCore": "Engine for ss/vmess/vless/trojan",
-    "set.xrayCore": "Path to xray.exe",
+    "set.xrayCore": "Path to xray",
     "logs.title": "Logs", "logs.follow": "Auto-scroll", "logs.clear": "Clear",
     "diag.title": "Wisteria diagnostics", "diag.inactive": "Diagnostics only works for wisteria profiles",
     "diag.inactiveHint": "Connect to a wisteria profile — the failure reason will show up here: server blocked, internet down, or the key was rejected.",
@@ -287,7 +287,10 @@ function renderContent() {
 
 function renderSidebarFooter() {
   const st = S.state;
-  const p = S.profiles.find((x) => x.id === st.profile_id);
+  // Before the first connect the backend status carries no profile_id —
+  // fall back to the user's selected (active) profile so the choice made
+  // on the profiles tab is visible immediately, not only after Connect.
+  const p = S.profiles.find((x) => x.id === (st.profile_id || S.selected));
   const dot = st.state === "connected" ? "on" : st.state === "connecting" ? "mid" : "";
   const statusText = st.state === "connected" ? t("vpn.connected") : st.state === "connecting" ? t("vpn.connecting") : t("vpn.unprotected");
   $("sidebar-footer").innerHTML = `
@@ -300,7 +303,9 @@ function renderVpn() {
   const st = S.state;
   const conn = st.state === "connected";
   const connecting = st.state === "connecting";
-  const p = S.profiles.find((x) => x.id === st.profile_id) || null;
+  // Same as the sidebar footer: show the selected profile before the
+  // backend status ever mentions one (i.e. before the first Connect).
+  const p = S.profiles.find((x) => x.id === (st.profile_id || S.selected)) || null;
   const label = conn ? t("vpn.protected") : connecting ? t("vpn.connecting") : t("vpn.unprotected");
   const btnText = conn ? t("vpn.disconnect") : t("vpn.connect");
   const lat = p && p.latency_ms ? (p.latency_ms < 0 ? "n/a" : p.latency_ms + " ms") : "";
@@ -720,7 +725,13 @@ function wireContent() {
         markConnecting(S.selected);
         await withTimeout(api().Connect(S.selected), 45000, t("toast.stuck"));
       }
-    } catch (e) { showToast((e && e.message) || e); }
+    } catch (e) {
+      showToast((e && e.message) || e);
+      // markConnecting drew a local "connecting" screen; a fast backend
+      // failure returns with no state event of its own — re-pull the real
+      // state so the UI never stays wedged until a restart.
+      try { renderState(await api().GetState()); } catch (_) { /* keep local view */ }
+    }
     finally { S.busy = false; }
   });
   on("card-profile", "click", () => switchTab("profiles"));
@@ -743,7 +754,10 @@ function wireContent() {
         S.busy = true;
         markConnecting(row.dataset.id);
         try { await withTimeout(api().Connect(row.dataset.id), 45000, t("toast.stuck")); }
-        catch (e) { showToast((e && e.message) || e); }
+        catch (e) {
+          showToast((e && e.message) || e);
+          try { renderState(await api().GetState()); } catch (_) { /* keep local view */ }
+        }
         finally { S.busy = false; }
       }
     });
@@ -875,6 +889,17 @@ function wireContent() {
   });
   on("btn-upd-singbox", "click", () => updateCore("sing-box"));
   on("btn-upd-xray", "click", () => updateCore("xray"));
+  // Cores tab: when a third-party core is not installed at all, the
+  // upstream button is a first download, not an update — say so on the
+  // button ("Скачать xray") instead of the misleading "Обновить".
+  if ($("btn-upd-singbox") || $("btn-upd-xray")) {
+    api().DetectCores().then((info) => {
+      if (!info) return;
+      const b1 = $("btn-upd-singbox"), b2 = $("btn-upd-xray");
+      if (b1 && !info.singbox_found) b1.textContent = t("set.dlCore") + " sing-box";
+      if (b2 && !info.xray_found) b2.textContent = t("set.dlCore") + " xray";
+    }).catch(() => { /* detection is cosmetic here */ });
+  }
   document.querySelectorAll(".set-tab").forEach((b) => b.addEventListener("click", () => {
     S.setTab = b.dataset.settab;
     renderContent();

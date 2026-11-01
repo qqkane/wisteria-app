@@ -291,7 +291,17 @@ func (s *Service) logf(format string, args ...any) {
 // Start connects the profile. A running session is stopped first and its
 // teardown awaited, so clicking another server switches tunnels without a
 // manual disconnect (and a new core never fights the old one for the port).
-func (s *Service) Start(p Profile) error {
+func (s *Service) Start(p Profile) (err error) {
+	// The frontend optimistically renders "connecting" before this call, but
+	// every early failure below returns with the stored state untouched and
+	// no event — the UI then stays wedged on the connecting screen (disabled
+	// button included) until a restart. Emit one final state event on the
+	// way out; on success this is a no-op (the session notifies on its own).
+	defer func() {
+		if err != nil {
+			s.notify()
+		}
+	}()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		s.mu.Lock()
@@ -403,9 +413,12 @@ func (s *Service) prepareCore(p Profile) (core string, args []string, confFile s
 	confFile = filepath.Join(s.dirs.Runtime, "profile-"+p.ID+
 		map[bool]string{true: ".toml", false: ".json"}[p.Type == TWisteria])
 	if p.Type == TWisteria {
-		core = firstNonEmpty(s.settings.WisteriaCore, FindCore("wisteria-client"))
+		core = firstNonEmpty(cleanCorePath(s.settings.WisteriaCore), FindCore("wisteria-client"))
+		if err := checkCorePath(core); err != nil {
+			return "", nil, "", err
+		}
 		if core == "" {
-			return "", nil, "", fmt.Errorf("ядро wisteria-client не найдено (положите в bin/ рядом с приложением или укажите путь в настройках)")
+			return "", nil, "", fmt.Errorf("ядро wisteria-client не найдено — положите его в bin/ рядом с приложением или укажите путь в настройках")
 		}
 		tomlText, err := WisteriaTOML(p, fmt.Sprintf("%s:%d", s.settings.ListenHost(), s.settings.LocalPort),
 			filepath.Join(s.dirs.Data, "serverkey-"+p.ID+".cache"))
@@ -427,9 +440,12 @@ func (s *Service) prepareCore(p Profile) (core string, args []string, confFile s
 	// xray-core as the multiprotocol engine when the per-protocol setting
 	// says so; hysteria2/tuic always need sing-box.
 	if XraySupports(p.Type) && s.settings.EngineFor(p.Type) == "xray" {
-		core = firstNonEmpty(s.settings.XrayCore, FindCore("xray"))
+		core = firstNonEmpty(cleanCorePath(s.settings.XrayCore), FindCore("xray"))
+		if err := checkCorePath(core); err != nil {
+			return "", nil, "", err
+		}
 		if core == "" {
-			return "", nil, "", fmt.Errorf("xray не найден (скачайте с github.com/XTLS/Xray-core и положите в bin/ или укажите путь в настройках)")
+			return "", nil, "", fmt.Errorf("xray не найден — скачайте его кнопкой в Настройки → Ядра или положите в bin/ рядом с приложением")
 		}
 		conf, err := XrayConfig(p, XrayOptions{
 			SocksPort:     s.settings.LocalPort,
@@ -450,9 +466,12 @@ func (s *Service) prepareCore(p Profile) (core string, args []string, confFile s
 		}
 		return core, []string{"run", "-c", confFile}, confFile, nil
 	}
-	core = firstNonEmpty(s.settings.SingBoxCore, FindCore("sing-box"))
+	core = firstNonEmpty(cleanCorePath(s.settings.SingBoxCore), FindCore("sing-box"))
+	if err := checkCorePath(core); err != nil {
+		return "", nil, "", err
+	}
 	if core == "" {
-		return "", nil, "", fmt.Errorf("sing-box не найден (скачайте с github.com/SagerNet/sing-box и положите в bin/ или укажите путь в настройках)")
+		return "", nil, "", fmt.Errorf("sing-box не найден — скачайте его кнопкой в Настройки → Ядра или положите в bin/ рядом с приложением")
 	}
 	conf, err := SingBoxConfig(p, SingBoxOptions{
 		MixedPort:     s.settings.LocalPort,
@@ -624,7 +643,10 @@ func (s *Service) supervise(cmd *exec.Cmd, ctx context.Context, cancel context.C
 // session not yet marked connected; on failure the caller tears the
 // whole session down. Reads only the session's settings snapshot.
 func (s *Service) startTun(ctx context.Context, p Profile, socksAddr string, set Settings) (<-chan error, error) {
-	singbox := firstNonEmpty(set.SingBoxCore, FindCore("sing-box"))
+	singbox := firstNonEmpty(cleanCorePath(set.SingBoxCore), FindCore("sing-box"))
+	if err := checkCorePath(singbox); err != nil {
+		return nil, err
+	}
 	if singbox == "" {
 		return nil, errors.New("для TUN нужен sing-box" + exeSuffix + " (положите в bin/ или укажите путь в настройках)")
 	}
@@ -902,4 +924,35 @@ func FindCore(name string) string {
 		return p
 	}
 	return ""
+}
+
+// cleanCorePath normalizes a user-typed core path. Windows "Copy as path"
+// yields a quoted string, and a leading quote makes the path non-absolute
+// for exec: it is then resolved against the session's working directory
+// (runtime/) and fails as a mangled "runtime\...C:\...: file does not
+// exist" instead of a readable "no such file". Stripping the quotes fixes
+// the pasted-path case at the source.
+func cleanCorePath(p string) string {
+	p = strings.TrimSpace(p)
+	for len(p) >= 2 {
+		q := p[0]
+		if (q != '"' && q != '\'') || p[len(p)-1] != q {
+			break
+		}
+		p = strings.TrimSpace(p[1 : len(p)-1])
+	}
+	return p
+}
+
+// checkCorePath gives a broken user-typed core path a readable error at
+// prepare time, before exec would fail on it. Bare names (no separators)
+// still resolve through PATH at exec time.
+func checkCorePath(core string) error {
+	if core == "" || !strings.ContainsAny(core, `/\`) {
+		return nil
+	}
+	if _, err := os.Stat(core); err != nil {
+		return fmt.Errorf("ядро не найдено по пути из настроек: %s — исправьте его в Настройки → Ядра", core)
+	}
+	return nil
 }
