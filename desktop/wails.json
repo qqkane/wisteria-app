@@ -11,7 +11,7 @@
   },
   "info": {
     "productName": "Wisteria Desktop",
-    "productVersion": "1.1.4",
+    "productVersion": "1.1.5",
     "copyright": "Copyright © 2026",
     "comments": "Cross-platform client (Windows/Linux) for the wisteria protocol"
   }

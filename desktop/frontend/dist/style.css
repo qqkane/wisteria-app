@@ -60,17 +60,20 @@ body { font-family: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif; backgrou
 .theme-arctic { color-scheme: light; }
 select option, select optgroup { background-color: var(--surface); color: var(--fg); }
 
-/* orbs: soft radial gradients instead of filter:blur — WebKit2GTK
-   re-rasterizes a 120px blur on every animated frame (~10fps with it,
-   vsync-capped 60fps without). The gradients keep a wide full-alpha
-   plateau and feather out slowly: a gradient that turns transparent at
-   50-70% reads as a faint smudge and the UI goes near-black (the old
-   blur(120px) spread its alpha over the whole circle). */
+/* orbs: the blur(120px) look without the blur cost. WebKit2GTK
+   re-rasterizes a 120px filter blur on every animated frame (~10fps with
+   it, vsync-capped 60fps without), so the glow is a radial-gradient
+   instead — rasterized once per layer, drift is transform-only and runs
+   on the compositor. The stops approximate a gaussian exp(-r²/2σ²)
+   (σ=0.3575, closest-side extent): a real bell curve melts into the
+   background like the old blur, while a 4-stop gradient reads as a flat
+   disc with a visible rim. Edge alpha ends at ~2% of peak inside the
+   element, so the border-radius clip never shows. */
 .bg-layers { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
 .orb { position: absolute; border-radius: 50%; will-change: transform; }
-.orb-1 { width: 600px; height: 600px; top: -15%; right: -10%; background: radial-gradient(circle, rgba(var(--accent-rgb), 0.32) 0%, rgba(var(--accent-rgb), 0.3) 48%, rgba(var(--accent-rgb), 0.16) 64%, transparent 82%); animation: orb-drift-1 26s ease-in-out infinite alternate; }
-.orb-2 { width: 500px; height: 500px; bottom: -20%; left: -5%; background: radial-gradient(circle, rgba(var(--accent-rgb), 0.22) 0%, rgba(var(--accent-rgb), 0.2) 45%, rgba(var(--accent-rgb), 0.11) 62%, transparent 80%); animation: orb-drift-2 34s ease-in-out infinite alternate; }
-.orb-3 { width: 300px; height: 300px; top: 40%; left: 30%; background: radial-gradient(circle, rgba(var(--accent-rgb), 0.16) 0%, rgba(var(--accent-rgb), 0.15) 42%, rgba(var(--accent-rgb), 0.08) 60%, transparent 78%); animation: orb-drift-3 22s ease-in-out infinite alternate; }
+.orb-1 { width: 820px; height: 820px; top: -17%; right: -13%; background: radial-gradient(circle closest-side, rgba(var(--accent-rgb), 0.38) 0%, rgba(var(--accent-rgb), 0.366) 10%, rgba(var(--accent-rgb), 0.325) 20%, rgba(var(--accent-rgb), 0.267) 30%, rgba(var(--accent-rgb), 0.203) 40%, rgba(var(--accent-rgb), 0.143) 50%, rgba(var(--accent-rgb), 0.093) 60%, rgba(var(--accent-rgb), 0.056) 70%, rgba(var(--accent-rgb), 0.031) 80%, rgba(var(--accent-rgb), 0.016) 90%, rgba(var(--accent-rgb), 0.008) 100%); animation: orb-drift-1 26s ease-in-out infinite alternate; }
+.orb-2 { width: 680px; height: 680px; bottom: -24%; left: -9%; background: radial-gradient(circle closest-side, rgba(var(--accent-rgb), 0.27) 0%, rgba(var(--accent-rgb), 0.26) 10%, rgba(var(--accent-rgb), 0.231) 20%, rgba(var(--accent-rgb), 0.19) 30%, rgba(var(--accent-rgb), 0.144) 40%, rgba(var(--accent-rgb), 0.102) 50%, rgba(var(--accent-rgb), 0.066) 60%, rgba(var(--accent-rgb), 0.04) 70%, rgba(var(--accent-rgb), 0.022) 80%, rgba(var(--accent-rgb), 0.011) 90%, rgba(var(--accent-rgb), 0.005) 100%); animation: orb-drift-2 34s ease-in-out infinite alternate; }
+.orb-3 { width: 420px; height: 420px; top: 38%; left: 30%; background: radial-gradient(circle closest-side, rgba(var(--accent-rgb), 0.2) 0%, rgba(var(--accent-rgb), 0.192) 10%, rgba(var(--accent-rgb), 0.171) 20%, rgba(var(--accent-rgb), 0.141) 30%, rgba(var(--accent-rgb), 0.107) 40%, rgba(var(--accent-rgb), 0.075) 50%, rgba(var(--accent-rgb), 0.049) 60%, rgba(var(--accent-rgb), 0.029) 70%, rgba(var(--accent-rgb), 0.016) 80%, rgba(var(--accent-rgb), 0.008) 90%, rgba(var(--accent-rgb), 0.004) 100%); animation: orb-drift-3 22s ease-in-out infinite alternate; }
 @keyframes orb-drift-1 { to { transform: translate(-70px, 50px) scale(1.06); } }
 @keyframes orb-drift-2 { to { transform: translate(60px, -45px) scale(0.94); } }
 @keyframes orb-drift-3 { to { transform: translate(-45px, -55px) scale(1.08); } }
