@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.appcompat.app.AppCompatActivity
@@ -17,6 +18,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import kotlin.math.max
+import org.json.JSONObject
 
 /**
  * Hosts the shared frontend (the desktop «Наша Сеть» UI) from assets and
@@ -70,7 +72,20 @@ class MainActivity : AppCompatActivity() {
             // file access on only widened what a script-injection could read.
             allowFileAccess = false
         }
-        web.webViewClient = WebViewClient()
+        web.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                // Only the bundled asset page may render here: the JS bridge
+                // is bound for it and must never be exposed to a remote
+                // origin. Everything else (a future «скачать релиз» link,
+                // help pages) leaves for the system browser.
+                if (request.url.scheme == "file") return false
+                try {
+                    startActivity(Intent(Intent.ACTION_VIEW, request.url))
+                } catch (_: Exception) {
+                }
+                return true
+            }
+        }
         web.webChromeClient = object : WebChromeClient() {
             override fun onConsoleMessage(m: android.webkit.ConsoleMessage): Boolean {
                 Log.d(TAG, "${m.message()} @${m.lineNumber()}")
@@ -102,7 +117,12 @@ class MainActivity : AppCompatActivity() {
             // when the webview is gone (activity finishing).
             runOnUiThread {
                 if (!isFinishing && !isDestroyed) {
-                    web.evaluateJavascript("window.__wisteriaEmit(\"$event\", $payload)", null)
+                    // quote() the event name: a JSON string literal is a
+                    // valid JS expression even if a future pushEvent uses a
+                    // name with quotes; payload is already JSON or null.
+                    web.evaluateJavascript(
+                        "window.__wisteriaEmit(${JSONObject.quote(event)}, $payload)", null
+                    )
                 }
             }
         }
@@ -140,6 +160,15 @@ class MainActivity : AppCompatActivity() {
             } else {
                 EngineHub.appLog("согласие на VPN не выдано")
             }
+        }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        // The SPA has its own layers (open modals, a non-VPN tab): let the
+        // shim consume Back before the activity finishes over a dialog.
+        web.evaluateJavascript("window.__wisteriaBack ? window.__wisteriaBack() : 'false'") { handled ->
+            if (handled != "\"true\"") super.onBackPressed()
         }
     }
 
