@@ -58,7 +58,10 @@ class AndroidStore(private val context: Context) {
             if (!o.has("subs")) o.put("subs", JSONArray())
             if (!o.has("active")) o.put("active", "")
             o
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            // Never wipe silently: the user loses every profile and must be
+            // able to say why ("все профили пропали" was unreproducible).
+            android.util.Log.w("WisteriaStore", "stored JSON is corrupt, starting empty", e)
             emptyStore()
         }
     }
