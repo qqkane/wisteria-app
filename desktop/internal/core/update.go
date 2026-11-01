@@ -96,9 +96,10 @@ func ghLatest(repo string) (string, []ghAsset, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		if ghToken() == "" {
-			return "", nil, errors.New("релиз не найден; для приватного репозитория задайте токен (переменная окружения WISTERIA_GH_TOKEN)")
-		}
+		// Both the app repo (public since 2026-11-01) and the core repos
+		// are public: a 404 here means "no releases yet", not "invisible
+		// without a token". The token remains optional (env WISTERIA_GH_TOKEN
+		// or the settings field) — only useful against API rate limits.
 		return "", nil, errors.New("релизов ещё нет")
 	}
 	if resp.StatusCode != http.StatusOK {
