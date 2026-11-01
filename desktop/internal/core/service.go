@@ -906,9 +906,19 @@ func checkPortFree(addr string) error {
 	return ln.Close()
 }
 
-// FindCore resolves a core binary: explicit path → bin/ next to the app →
-// the app dir → PATH.
+// FindCore resolves a core binary: the writable bin/ (a downloaded copy) →
+// bin/ next to the app → the app dir → PATH. On a writable exe dir the
+// first two coincide; on an AppImage the downloaded copy lives in the user
+// config dir and shadows nothing, while the bundled core is still found in
+// the exe-dir candidates.
 func FindCore(name string) string {
+	for _, cand := range []string{
+		filepath.Join(BinDir(), name+exeSuffix),
+	} {
+		if st, err := os.Stat(cand); err == nil && !st.IsDir() {
+			return cand
+		}
+	}
 	if exe, err := os.Executable(); err == nil {
 		dir := filepath.Dir(exe)
 		for _, cand := range []string{

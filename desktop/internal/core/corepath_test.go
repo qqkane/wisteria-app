@@ -44,3 +44,21 @@ func TestCheckCorePath(t *testing.T) {
 		t.Fatalf("existing file must pass: %v", err)
 	}
 }
+
+func TestDirWritable(t *testing.T) {
+	dir := t.TempDir()
+	if !dirWritable(dir) {
+		t.Fatal("a fresh temp dir must be writable")
+	}
+	if !dirWritable(BinDir()) {
+		t.Fatal("BinDir must always resolve to a writable location")
+	}
+	ro := filepath.Join(dir, "ro")
+	if err := os.Mkdir(ro, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(ro, 0o755) // so t.TempDir cleanup can remove it
+	if dirWritable(ro) {
+		t.Fatal("a read-only dir must not be reported writable")
+	}
+}

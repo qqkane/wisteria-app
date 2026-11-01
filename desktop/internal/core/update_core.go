@@ -20,13 +20,39 @@ const (
 	repoXray    = "XTLS/Xray-core"
 )
 
-// BinDir is the app's own core directory (<exe dir>/bin), "" if unknown.
+// BinDir is the app's own core directory — <exe dir>/bin when that is
+// usable (Windows zip, tar.gz, plain installs). When the exe directory is
+// not writable (an AppImage mounts its /tmp/.mount_* squashfs read-only)
+// downloaded cores go to <user config>/wisteria-desktop/bin instead, next
+// to the settings; FindCore searches both.
 func BinDir() string {
-	exe, err := os.Executable()
-	if err != nil {
-		return ""
+	if exe, err := os.Executable(); err == nil {
+		bin := filepath.Join(filepath.Dir(exe), "bin")
+		if dirWritable(bin) {
+			return bin
+		}
 	}
-	return filepath.Join(filepath.Dir(exe), "bin")
+	base, err := os.UserConfigDir()
+	if err != nil || base == "" {
+		base = "."
+	}
+	return filepath.Join(base, "wisteria-desktop", "bin")
+}
+
+// dirWritable reports whether dir exists or can be created, and accepts
+// writes. A mount-point check alone is not enough: squashfs stats fine and
+// only fails on actual use.
+func dirWritable(dir string) bool {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return false
+	}
+	probe := filepath.Join(dir, ".wisteria-writable")
+	f, err := os.OpenFile(probe, os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return false
+	}
+	_ = f.Close()
+	return os.Remove(probe) == nil
 }
 
 var versionToken = regexp.MustCompile(`v?\d+(?:\.\d+)+`)
