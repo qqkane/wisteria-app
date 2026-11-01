@@ -46,7 +46,9 @@ class WisteriaBridge(private val activity: MainActivity) {
                 .put("profile_name", EngineHub.profileName)
                 .put("type", type)
                 .put("sys_proxy", false)
-                .put("tun", false)
+                // An Android VPN is always TUN; the frontend shows its
+                // "tun active" note only while this is true when connected.
+                .put("tun", state == "connected")
                 .put("error", error ?: JSONObject.NULL)
     }
 
@@ -137,7 +139,7 @@ class WisteriaBridge(private val activity: MainActivity) {
         val since = engine.optLong("since", 0)
         out.put("started_at", if (since > 0) AndroidStore.epochIso(since) else "")
         out.put("sys_proxy", false)
-        out.put("tun", false)
+        out.put("tun", running)
         if (running) {
             out.put("socks_addr", engine.optString("endpoint"))
         }
@@ -310,6 +312,17 @@ class WisteriaBridge(private val activity: MainActivity) {
         val host = o.optString("host").trim()
         val port = o.optInt("port", 0)
         if (host.isEmpty() || port <= 0) throw err("укажите адрес и порт сервера")
+        // Manual profiles carry no raw link, so addProfile's raw-dedup
+        // never fires for them — compare by type+host+port explicitly.
+        val existing = store.listProfiles()
+        for (i in 0 until existing.length()) {
+            val p = existing.getJSONObject(i)
+            if (p.optString("type") == "wisteria" &&
+                p.optString("host") == host && p.optInt("port", 0) == port
+            ) {
+                throw err("такой профиль уже есть")
+            }
+        }
         val fields = o.optJSONObject("fields") ?: JSONObject()
         val priv = fields.optString("priv")
         val keypair = if (priv.isEmpty()) {
@@ -408,6 +421,19 @@ class WisteriaBridge(private val activity: MainActivity) {
                 keyByEndpoint[p.optString("host") + ":" + p.optInt("port")] = p.optString("client_priv")
             }
         }
+        // The active profile survives the wipe below (deleting a running
+        // profile would orphan the live engine). Re-adding its endpoint
+        // from the fresh body would duplicate it (wisteria entries carry
+        // no raw link, so the store's raw-dedup never fires), so the
+        // matching entry is skipped instead.
+        var keptActiveEndpoint: String? = null
+        for (i in 0 until old.length()) {
+            val p = old.getJSONObject(i)
+            if (p.optString("id") == store.activeId()) {
+                keptActiveEndpoint = p.optString("host") + ":" + p.optInt("port")
+                break
+            }
+        }
 
         for (i in 0 until old.length()) {
             val p = old.getJSONObject(i)
@@ -421,6 +447,7 @@ class WisteriaBridge(private val activity: MainActivity) {
             val servers = entry.optJSONArray("servers") ?: continue
             if (servers.length() == 0) continue
             val (host, port) = splitEndpoint(servers.getJSONObject(0).optString("endpoint")) ?: continue
+            if (keptActiveEndpoint != null && keptActiveEndpoint == host + ":" + port) continue
             val p = JSONObject()
                 .put("name", entry.optString("name").ifEmpty { host })
                 .put("type", "wisteria")
@@ -486,9 +513,25 @@ class WisteriaBridge(private val activity: MainActivity) {
         if (!extIpChecking.compareAndSet(false, true)) return
         Thread {
             try {
-                val ip = httpGet("https://api.ipify.org", 1024, 10_000).trim()
+                // Mirrors in turn: a single slow or throttled checker (ipify
+                // in particular) used to leave the IP card empty forever.
+                val mirrors = listOf(
+                    "https://api.ipify.org",
+                    "https://ipinfo.io/ip",
+                    "https://ifconfig.me/ip",
+                )
+                var ip = ""
+                var lastError: Exception? = null
+                for (m in mirrors) {
+                    try {
+                        ip = httpGet(m, 1024, 10_000).trim()
+                        if (ip.isNotEmpty()) break
+                    } catch (e: Exception) {
+                        lastError = e
+                    }
+                }
                 if (ip.isNotEmpty()) EngineHub.pushEvent("extip", JSONObject().put("ip", ip))
-                else EngineHub.pushEvent("extip", JSONObject().put("error", "пустой ответ"))
+                else EngineHub.pushEvent("extip", JSONObject().put("error", lastError?.message ?: "пустой ответ"))
             } catch (e: Exception) {
                 EngineHub.pushEvent("extip", JSONObject().put("error", e.message ?: ""))
             } finally {
@@ -606,7 +649,10 @@ class WisteriaBridge(private val activity: MainActivity) {
             var n: Int
             while (input.read(buf).also { n = it } > 0) {
                 out.write(buf, 0, n)
-                if (out.size() > maxBytes) throw err("ответ больше 4 МБ")
+                if (out.size() > maxBytes) {
+                    val limit = if (maxBytes >= 1 shl 20) "${maxBytes shr 20} МБ" else "${maxBytes / 1024} КБ"
+                    throw err("ответ больше $limit")
+                }
             }
             return out.toString("UTF-8")
         } finally {
