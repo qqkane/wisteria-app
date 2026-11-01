@@ -16,6 +16,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import kotlin.math.max
 import org.json.JSONObject
@@ -40,23 +41,14 @@ class MainActivity : AppCompatActivity() {
     @Volatile
     private var pendingConnectId: String? = null
 
-    /** Theme accents, mirroring the frontend THEMES list (app.js). */
-    private val THEME_ACCENTS = mapOf(
-        "lilac" to "#a78bfa",
-        "neon-dark" to "#00e8a2",
-        "warm-sand" to "#e8a040",
-        "arctic" to "#2a64b4",
-        "sunset" to "#f06888",
-        "matrix" to "#00ff41",
-        "mono" to "#e02020",
-    )
-
-    /** The system status bar must follow the app theme (the WebView
-     *  chrome is themed by CSS; this bar belongs to Android). */
+    /** The strips left visible by the inset padding (status bar above the
+     *  glass header, nav bar below it) must blend with them, not fight them:
+     *  the accent lives in the UI itself, so both bars stay near-black.
+     *  Called on theme changes too — the web chrome re-themes via CSS. */
     fun applyThemeFromSettings() {
         try {
-            val theme = AndroidStore(this).settings().optString("theme", "lilac")
-            window.statusBarColor = Color.parseColor(THEME_ACCENTS[theme] ?: "#a78bfa")
+            window.statusBarColor = Color.parseColor("#050505")
+            window.navigationBarColor = Color.parseColor("#050505")
         } catch (_: Throwable) {
         }
     }
@@ -95,22 +87,42 @@ class MainActivity : AppCompatActivity() {
         bridge = WisteriaBridge(this)
         WisteriaBridgeHolder.instance = bridge
         web.addJavascriptInterface(bridge, "WisteriaAndroid")
-        setContentView(web)
-
-        // Edge-to-edge ROMs draw the app under the status bar, which pushed
-        // the logo under the clock; pad the webview by the system-bar insets
-        // instead. The listener sits on the DECOR view — the dispatch origin
-        // — because with targetSdk 35 (enforced edge-to-edge) insets that a
-        // plain listener on the content view expects may never arrive (the
-        // v1.0.0 release rendered the header under the clock). The IME inset
-        // lifts the content above the keyboard on API 30+, where adjustResize
-        // no longer resizes the window.
+        // Edge-to-edge ROMs draw the app under the system bars: with
+        // targetSdk 35 (enforced edge-to-edge) the window spans the whole
+        // screen, which put the header under the clock and the bottom nav
+        // under the gesture pill. WebView ignores its own view padding, so
+        // the v1.1.4 fix that padded the WebView directly did nothing —
+        // wrap it in a frame and pad that, which insets the page viewport.
+        // The IME inset lifts the content above the keyboard on API 30+,
+        // where adjustResize no longer resizes the window.
+        val root = android.widget.FrameLayout(this)
+        // API 35 ignores window.statusBarColor under enforced edge-to-edge,
+        // so the padded strips show the view background of the frame — keep
+        // it the app near-black, and the system icons light on top of it.
+        root.setBackgroundColor(Color.parseColor("#050505"))
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars = false
+            isAppearanceLightNavigationBars = false
+        }
+        root.addView(
+            web,
+            android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
+        // The listener stays on the DECOR view — the dispatch origin —
+        // because with targetSdk 35 insets that a plain content-view
+        // listener expects may never arrive; the padding goes to the frame.
         ViewCompat.setOnApplyWindowInsetsListener(window.decorView) { _, insets ->
-            val sys = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            val bars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+            )
             val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
-            web.setPadding(sys.left, sys.top, sys.right, max(sys.bottom, ime.bottom))
+            root.setPadding(bars.left, bars.top, bars.right, max(bars.bottom, ime.bottom))
             WindowInsetsCompat.CONSUMED
         }
+        setContentView(root)
 
         EngineHub.emitters += { event, payload ->
             // evaluateJavascript must run on the UI thread; skip silently
