@@ -3,6 +3,7 @@ package core
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -52,6 +53,9 @@ func TestDirWritable(t *testing.T) {
 	}
 	if !dirWritable(BinDir()) {
 		t.Fatal("BinDir must always resolve to a writable location")
+	}
+	if runtime.GOOS == "windows" {
+		return // directory write-permission bits are a POSIX concept
 	}
 	ro := filepath.Join(dir, "ro")
 	if err := os.Mkdir(ro, 0o555); err != nil {

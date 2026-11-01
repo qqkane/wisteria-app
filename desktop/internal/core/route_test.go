@@ -25,9 +25,9 @@ MySite.ORG.
 
 func TestEngineFor(t *testing.T) {
 	s := Settings{}
-	s.defaults() // all per-protocol engines fall back to sing-box
+	s.defaults() // all per-protocol engines fall back to xray (the v1.1.3 default)
 	for _, p := range []ProfileType{TSS, TVMess, TVLESS, TTrojan} {
-		if got := s.EngineFor(p); got != "sing-box" {
+		if got := s.EngineFor(p); got != "xray" {
 			t.Fatalf("%s: got %s", p, got)
 		}
 	}
@@ -36,8 +36,8 @@ func TestEngineFor(t *testing.T) {
 	if got := s2.EngineFor(TVLESS); got != "xray" {
 		t.Fatalf("legacy default: got %s", got)
 	}
-	s3 := Settings{MPCore: "xray", CoreVless: "sing-box"}
-	s3.defaults()
+	s3 := Settings{MPCore: "xray", CoreVless: "sing-box", EnginesXrayMigration: true}
+	s3.defaults() // post-migration: a deliberate per-proto choice is kept
 	if got := s3.EngineFor(TVLESS); got != "sing-box" {
 		t.Fatalf("per-proto override: got %s", got)
 	}

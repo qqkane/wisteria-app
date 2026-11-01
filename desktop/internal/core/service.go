@@ -88,6 +88,9 @@ type Settings struct {
 	CoreVless  string `json:"core_vless"`
 	CoreTrojan string `json:"core_trojan"`
 
+	// One-shot marker: engines already migrated to the xray default (v1.1.3).
+	EnginesXrayMigration bool `json:"engines_xray_migration"`
+
 	// Routing (in addition to BypassLAN): lists of domains and IP/CIDRs that
 	// bypass the tunnel or are blocked outright, one per line (or separated
 	// by commas/semicolons). Empty = no extra rules.
@@ -136,10 +139,26 @@ func (s *Settings) defaults() {
 		s.MPCore = ""
 	}
 	// Per-protocol engines default to the legacy mp_core choice (the value
-	// older builds saved) and fall back to sing-box.
+	// older builds saved) and fall back to xray.
 	for _, p := range []*string{&s.CoreSS, &s.CoreVmess, &s.CoreVless, &s.CoreTrojan} {
 		if !knownEngines[*p] {
 			*p = s.defaultEngine()
+		}
+	}
+	// One-shot migration (v1.1.3): xray is now the default engine for the
+	// multiprotocol family. Settings saved by older builds carry explicit
+	// "sing-box" values that were simply the old default — flip them once.
+	// A deliberate per-protocol choice made after the migration is never
+	// touched again (the marker short-circuits this block).
+	if !s.EnginesXrayMigration {
+		s.EnginesXrayMigration = true
+		for _, p := range []*string{&s.CoreSS, &s.CoreVmess, &s.CoreVless, &s.CoreTrojan} {
+			if *p == "" || *p == "sing-box" {
+				*p = "xray"
+			}
+		}
+		if !knownEngines[s.MPCore] || s.MPCore == "sing-box" {
+			s.MPCore = "xray"
 		}
 	}
 	if s.TunStack != "gvisor" && s.TunStack != "system" {
@@ -169,12 +188,13 @@ func validDNSAddress(a string) bool {
 }
 
 // defaultEngine is the fallback engine for the multiprotocol family when no
-// per-protocol choice is set.
+// per-protocol choice is set. xray since v1.1.3: better REALITY/XTLS
+// coverage and the engine most vless share-links are built for.
 func (s *Settings) defaultEngine() string {
 	if knownEngines[s.MPCore] {
 		return s.MPCore
 	}
-	return "sing-box"
+	return "xray"
 }
 
 // EngineFor picks the core binary family for a multiprotocol profile:
