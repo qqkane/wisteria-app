@@ -77,6 +77,24 @@
     });
   };
 
+  // Android Back button: consume it for the SPA's own layers — an open
+  // modal first, then a non-VPN tab — and only let it exit the app from
+  // the main VPN screen. MainActivity asks via evaluateJavascript and
+  // calls super.onBackPressed() unless this returns "true".
+  window.__wisteriaBack = function () {
+    const open = document.querySelector(".modal-overlay.show");
+    if (open) {
+      // Route through the modal's own close path: #cf-cancel resolves the
+      // askConfirm promise, .modal-close runs UI.closeModal().
+      const closer = open.querySelector(".modal-close, #cf-cancel");
+      if (closer) closer.click(); else open.classList.remove("show");
+      return "true";
+    }
+    const cur = document.querySelector(".sidebar-nav-item.active")?.dataset.tab;
+    if (cur && cur !== "vpn") { navTo("vpn"); return "true"; }
+    return "false";
+  };
+
   window.__PLATFORM = "android";
   document.documentElement.classList.add("platform-android");
 

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Wisteria</string>
+    <string name="status_idle">Disconnected</string>
+    <string name="status_connecting">Connecting…</string>
+    <string name="status_connected">Secured</string>
+    <string name="notif_disconnect">Disconnect</string>
+</resources>

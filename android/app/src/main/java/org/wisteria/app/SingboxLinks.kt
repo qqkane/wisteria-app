@@ -72,7 +72,7 @@ object SingboxLinks {
     private fun parseSs(link: String): JSONObject? {
         val uri = Uri.parse(link)
         val name = uri.fragment?.takeIf { it.isNotBlank() }
-        var body = (uri.schemeSpecificPart ?: return null).substringBefore("#")
+        var body = rawSsBody(link)
         val plugin = uri.getQueryParameter("plugin").orEmpty()
 
         val host: String
@@ -111,6 +111,14 @@ object SingboxLinks {
             .put("raw", link)
             .put("_plugin", plugin)
     }
+
+    /** The ss payload (userinfo@host:port) taken from the RAW link:
+     *  Android's Uri.schemeSpecificPart is percent-decoded and keeps the
+     *  leading "//" of hierarchical URIs — both corrupt base64 credentials,
+     *  and on-device every SIP002 and legacy ss:// import failed with
+     *  «не удалось разобрать ссылку». */
+    private fun rawSsBody(link: String): String =
+        link.substringAfter("://", "").substringBefore("#").substringBefore("?")
 
     /** "host:port" / "[v6]:port" → (host, port); port defaults to 443. */
     private fun splitHostPort(part0: String): Pair<String, Int> {
@@ -490,7 +498,7 @@ object SingboxLinks {
 
     private fun ssOutbound(raw: String, name: String): JSONObject {
         val uri = Uri.parse(raw)
-        var body = (uri.schemeSpecificPart ?: "").substringBefore("#").substringBefore("?")
+        var body = rawSsBody(raw)
         val o = JSONObject().put("type", "shadowsocks").put("tag", "proxy")
         if (body.contains("@")) {
             val userinfo = body.substringBeforeLast("@")

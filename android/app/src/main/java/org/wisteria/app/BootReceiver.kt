@@ -6,8 +6,8 @@ import android.content.Intent
 
 /**
  * Autostart (the desktop's "Start with Windows" counterpart): on boot,
- * when the toggle is on and there is an active wisteria profile, connect
- * right away. VPN consent persists across reboots, so no dialog is needed.
+ * when the toggle is on and there is an active profile, connect right
+ * away. VPN consent persists across reboots, so no dialog is needed.
  */
 class BootReceiver : BroadcastReceiver() {
 
@@ -17,8 +17,10 @@ class BootReceiver : BroadcastReceiver() {
         if (!store.autostart()) return
         val id = store.activeId()
         if (id.isEmpty()) return
-        val profile = store.profile(id) ?: return
-        if (profile.optString("type") != "wisteria") return
+        // Any profile type: the service itself branches to the wisteria
+        // engine or the embedded sing-box. (Used to be wisteria-only, which
+        // silently ignored vless/ss/… profiles with autostart enabled.)
+        store.profile(id) ?: return
 
         context.startForegroundService(
             Intent(context, WisteriaVpnService::class.java)

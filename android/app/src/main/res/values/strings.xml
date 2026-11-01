@@ -4,4 +4,5 @@
     <string name="status_idle">Отключено</string>
     <string name="status_connecting">Подключение…</string>
     <string name="status_connected">Защищено</string>
+    <string name="notif_disconnect">Отключить</string>
 </resources>

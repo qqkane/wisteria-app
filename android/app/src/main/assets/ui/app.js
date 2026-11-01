@@ -52,6 +52,7 @@ const I18N = {
     "vpn.noProfile": "Профиль не выбран", "vpn.clickSelect": "Нажмите, чтобы выбрать",
     "stat.uptime": "Аптайм", "stat.proxy": "Системный прокси", "stat.core": "Ядро",
     "profiles.title": "Профили", "profiles.empty": "Нет профилей — добавьте ссылку или TOML-конфиг",
+    "profiles.mirrors.one": "+1 зеркало", "profiles.mirrors.few": "+{n} зеркала", "profiles.mirrors.many": "+{n} зеркал",
     "settings.title": "Настройки", "sec.appearance": "Оформление", "sec.connection": "Соединение",
     "sec.general": "Общие", "sec.routing": "Маршрутизация и DNS", "sec.cores": "Ядра", "sec.system": "Система",
     "set.lang": "Язык", "set.socksPort": "Локальный SOCKS-порт", "set.httpPort": "Локальный HTTP-порт",
@@ -130,6 +131,7 @@ const I18N = {
     "vpn.noProfile": "No profile selected", "vpn.clickSelect": "Click to choose",
     "stat.uptime": "Uptime", "stat.proxy": "System proxy", "stat.core": "Core",
     "profiles.title": "Profiles", "profiles.empty": "No profiles yet — add a link or a TOML config",
+    "profiles.mirrors.one": "+{n} mirrors", "profiles.mirrors.few": "+{n} mirrors", "profiles.mirrors.many": "+{n} mirrors",
     "settings.title": "Settings", "sec.appearance": "Appearance", "sec.connection": "Connection",
     "sec.general": "General", "sec.routing": "Routing & DNS", "sec.cores": "Cores", "sec.system": "System",
     "set.lang": "Language", "set.socksPort": "Local SOCKS port", "set.httpPort": "Local HTTP port",
@@ -229,6 +231,18 @@ const S = {
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const typeIcon = (tp) => ({ wisteria: I.lock }[tp] || I.globe);
+// Bundle links carry mirror endpoints in p.servers; the card shows the
+// primary host:port, so name the rest — otherwise a 2-server link looks
+// like it lost the second server. Russian needs three plural forms
+// (1 зеркало / 2 зеркала / 5 зеркал); the en strings are the same for all
+// three keys, so the ru plural rule can pick a key unconditionally.
+const mirrorsLabel = (p) => {
+  const n = Array.isArray(p.servers) ? p.servers.length - 1 : 0;
+  if (n < 1) return "";
+  const k = (n % 10 === 1 && n % 100 !== 11) ? "one"
+    : (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14)) ? "few" : "many";
+  return " · " + t("profiles.mirrors." + k).replace("{n}", n);
+};
 
 function showToast(msg) {
   const el = $("toast");
@@ -319,7 +333,7 @@ function renderVpn() {
         <div class="icon-box">${typeIcon(p ? p.type : "")}</div>
         <div class="srv-info">
           <div class="srv-name">${esc(p ? p.name : t("vpn.noProfile"))}</div>
-          <div class="srv-ping">${esc(p ? p.host + ":" + p.port + (lat ? " · " + lat : "") : t("vpn.clickSelect"))}</div>
+          <div class="srv-ping">${esc(p ? p.host + ":" + p.port + (lat ? " · " + lat : "") + mirrorsLabel(p) : t("vpn.clickSelect"))}</div>
         </div>
         ${I.chev}
       </div>
@@ -361,7 +375,7 @@ function profileCard(p) {
       <div class="sli-icon">${typeIcon(p.type)}</div>
       <div class="sli-data">
         <div class="sli-name">${esc(p.name)}</div>
-        <div class="sli-addr">${esc(p.host)}:${p.port}</div>
+        <div class="sli-addr">${esc(p.host)}:${p.port}${mirrorsLabel(p)}</div>
         ${lat}
       </div>
       <button class="sli-act pingb" title="ping" data-id="${p.id}">${I.ping}</button>

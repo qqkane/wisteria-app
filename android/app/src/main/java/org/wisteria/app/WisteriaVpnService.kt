@@ -54,6 +54,10 @@ class WisteriaVpnService : VpnService() {
     private val executor = Executors.newSingleThreadExecutor()
     private var engineIsBox = false
 
+    /** True while a connect() is between its entry guard and the engine
+     *  flags being set; guarded by stateLock. */
+    private var starting = false
+
     /** Guards tun/boxTun/engineIsBox/teardownEpoch: CancelConnect tears
      *  down on its own thread even while connect() is stuck inside a
      *  blocking native engine call. */
@@ -89,38 +93,45 @@ class WisteriaVpnService : VpnService() {
 
         override fun onOpenTun(optionsJson: String?): Int {
             val opts = try { JSONObject(optionsJson ?: "{}") } catch (_: Exception) { JSONObject() }
-            val builder = Builder()
-                .setSession(EngineHub.profileName.ifEmpty { "Wisteria" })
-                .setMtu(opts.optInt("mtu", TUN_MTU))
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) builder.setMetered(false)
-            for (key in listOf("inet4", "inet6")) {
-                val arr = opts.optJSONArray(key) ?: continue
-                for (i in 0 until arr.length()) {
-                    val cidr = arr.optString(i)
-                    val slash = cidr.lastIndexOf('/')
-                    if (slash <= 0) continue
-                    val addr = cidr.substring(0, slash)
-                    val bits = cidr.substring(slash + 1).toIntOrNull() ?: continue
-                    builder.addAddress(addr, bits)
+            // Serialize with teardown: boxTun must never be assigned after a
+            // teardown already closed it (fd leak), and a Disconnect that
+            // raced the box boot must not hand the dying engine a fresh tun.
+            // The lock spans establish() — a few ms — and teardown (the
+            // other stateLock user) simply waits it out.
+            synchronized(stateLock) {
+                val builder = Builder()
+                    .setSession(EngineHub.profileName.ifEmpty { "Wisteria" })
+                    .setMtu(opts.optInt("mtu", TUN_MTU))
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) builder.setMetered(false)
+                for (key in listOf("inet4", "inet6")) {
+                    val arr = opts.optJSONArray(key) ?: continue
+                    for (i in 0 until arr.length()) {
+                        val cidr = arr.optString(i)
+                        val slash = cidr.lastIndexOf('/')
+                        if (slash <= 0) continue
+                        val addr = cidr.substring(0, slash)
+                        val bits = cidr.substring(slash + 1).toIntOrNull() ?: continue
+                        builder.addAddress(addr, bits)
+                    }
                 }
-            }
-            val routes = opts.optJSONArray("routes")
-            if (routes != null && routes.length() > 0) {
-                for (i in 0 until routes.length()) {
-                    val cidr = routes.optString(i)
-                    val slash = cidr.lastIndexOf('/')
-                    if (slash <= 0) continue
-                    val addr = cidr.substring(0, slash)
-                    val bits = cidr.substring(slash + 1).toIntOrNull() ?: continue
-                    builder.addRoute(addr, bits)
+                val routes = opts.optJSONArray("routes")
+                if (routes != null && routes.length() > 0) {
+                    for (i in 0 until routes.length()) {
+                        val cidr = routes.optString(i)
+                        val slash = cidr.lastIndexOf('/')
+                        if (slash <= 0) continue
+                        val addr = cidr.substring(0, slash)
+                        val bits = cidr.substring(slash + 1).toIntOrNull() ?: continue
+                        builder.addRoute(addr, bits)
+                    }
+                } else {
+                    builder.addRoute("0.0.0.0", 0)
                 }
-            } else {
-                builder.addRoute("0.0.0.0", 0)
+                builder.addDnsServer(DNS)
+                val pfd = builder.establish() ?: return -1
+                boxTun = pfd
+                return pfd.fd
             }
-            builder.addDnsServer(DNS)
-            val pfd = builder.establish() ?: return -1
-            boxTun = pfd
-            return pfd.fd
         }
     }
 
@@ -142,7 +153,11 @@ class WisteriaVpnService : VpnService() {
                 executor.execute { connect(id) }
             }
         }
-        return START_NOT_STICKY
+        // STICKY: if the system kills the service (memory, LMK), it comes
+        // back with a null intent and connect("") reconnects the active
+        // profile — a VPN must not die silently. Clean stopSelf() paths
+        // stay unrestarted (STICKY does not resurrect after a clean stop).
+        return START_STICKY
     }
 
     override fun onRevoke() {
@@ -163,23 +178,36 @@ class WisteriaVpnService : VpnService() {
 
     private fun connect(profileIdParam: String) {
         val myEpoch = synchronized(stateLock) {
-            if (tun != null || engineIsBox) return // already running
+            // `starting` closes the gap before the engine flags are set
+            // (startBox sets engineIsBox only after the config build,
+            // startWisteria — tun only after establish()): two rapid
+            // CONNECTs could otherwise start the engine twice.
+            if (tun != null || engineIsBox || starting) return // already running / starting
+            starting = true
             teardownEpoch
         }
+        // startForeground before anything slow: a startForegroundService
+        // (bridge, BootReceiver) must reach startForeground() even when the
+        // profile turns out to be missing and the service stops itself.
+        startForegroundWith()
+        try {
+            val store = AndroidStore(this)
+            val id = profileIdParam.ifEmpty { store.activeId() }
+            val profile = store.profile(id)
+                ?: run {
+                    EngineHub.appLog("подключение: профиль не найден")
+                    EngineHub.pushEvent("state", statusJson("disconnected", "профиль не найден"))
+                    stopSelf()
+                    return
+                }
 
-        val store = AndroidStore(this)
-        val id = profileIdParam.ifEmpty { store.activeId() }
-        val profile = store.profile(id)
-            ?: run {
-                EngineHub.appLog("подключение: профиль не найден")
-                stopSelf()
-                return
+            if (profile.optString("type") == "wisteria") {
+                startWisteria(profile, myEpoch)
+            } else {
+                startBox(profile, myEpoch)
             }
-
-        if (profile.optString("type") == "wisteria") {
-            startWisteria(profile, myEpoch)
-        } else {
-            startBox(profile, myEpoch)
+        } finally {
+            synchronized(stateLock) { starting = false }
         }
     }
 
@@ -192,6 +220,11 @@ class WisteriaVpnService : VpnService() {
         val builder = Builder()
             .addAddress(TUN_ADDRESS, TUN_PREFIX)
             .addRoute("0.0.0.0", 0)
+            // The wisteria engine relays IPv4 only. Without a v6 route the
+            // OS sends IPv6 straight out the physical interface — the
+            // tunnel would leak every dual-stack connection. Route ::/0
+            // into the TUN (no v6 address) so v6 dies inside it instead.
+            .addRoute("::", 0)
             .addDnsServer(DNS)
             .setMtu(TUN_MTU)
             .setSession(profile.optString("name").ifEmpty { "Wisteria" })
@@ -208,7 +241,6 @@ class WisteriaVpnService : VpnService() {
         EngineHub.profileName = profile.optString("name")
         EngineHub.profileType = "wisteria"
         EngineHub.appLog("подключение к «${EngineHub.profileName}»…")
-        startForegroundWith()
 
         // The engine takes the whole server list from the profile (bundle
         // links carry mirrors) and rotates targets on every attempt.
@@ -258,7 +290,6 @@ class WisteriaVpnService : VpnService() {
         EngineHub.profileName = name
         EngineHub.profileType = profile.optString("type")
         EngineHub.appLog("подключение к «$name» (${EngineHub.profileType}, sing-box ${boxVersion()})…")
-        startForegroundWith()
         EngineHub.pushEvent("state", statusJson("connecting"))
         try {
             Mobile.boxStart(config, callback)
@@ -409,6 +440,13 @@ class WisteriaVpnService : VpnService() {
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+        // The notification must carry its own Disconnect: opening the app to
+        // stop the tunnel was the only way before.
+        val disconnectIntent = PendingIntent.getService(
+            this, 1,
+            Intent(this, WisteriaVpnService::class.java).setAction(ACTION_DISCONNECT),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
         val text = when (state) {
             "connected" -> getString(R.string.status_connected)
             "connecting" -> getString(R.string.status_connecting)
@@ -419,6 +457,7 @@ class WisteriaVpnService : VpnService() {
             .setContentTitle("Wisteria")
             .setContentText(text)
             .setContentIntent(contentIntent)
+            .addAction(0, getString(R.string.notif_disconnect), disconnectIntent)
             .setOngoing(true)
             .build()
     }

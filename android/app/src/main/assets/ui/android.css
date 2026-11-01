@@ -52,7 +52,10 @@ html.platform-android .app-content { overflow-x: hidden; }
     border-bottom: 1px solid var(--border);
   }
   .sidebar-logo { margin: 0; font-size: 17px; flex-shrink: 0; }
-  .sidebar-logo img { width: 22px; height: 22px; }
+  /* Shrink the desktop .logo-icon tile itself (36px) and let its img keep
+     filling it (style.css sets 100%/100%): scaling only the img left the
+     dark tile sticking out bottom-right of the small logo. */
+  .sidebar-logo .logo-icon { width: 24px; height: 24px; border-radius: 7px; }
   .sidebar-nav {
     flex-direction: row;
     overflow-x: auto;
