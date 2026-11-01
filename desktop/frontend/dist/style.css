@@ -62,12 +62,15 @@ select option, select optgroup { background-color: var(--surface); color: var(--
 
 /* orbs: soft radial gradients instead of filter:blur — WebKit2GTK
    re-rasterizes a 120px blur on every animated frame (~10fps with it,
-   vsync-capped 60fps without) */
+   vsync-capped 60fps without). The gradients keep a wide full-alpha
+   plateau and feather out slowly: a gradient that turns transparent at
+   50-70% reads as a faint smudge and the UI goes near-black (the old
+   blur(120px) spread its alpha over the whole circle). */
 .bg-layers { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
 .orb { position: absolute; border-radius: 50%; will-change: transform; }
-.orb-1 { width: 600px; height: 600px; top: -15%; right: -10%; background: radial-gradient(circle, rgba(var(--accent-rgb), 0.3) 0%, rgba(var(--accent-rgb), 0.3) 40%, rgba(var(--accent-rgb), 0.15) 55%, transparent 70%); animation: orb-drift-1 26s ease-in-out infinite alternate; }
-.orb-2 { width: 500px; height: 500px; bottom: -20%; left: -5%; background: radial-gradient(circle, rgba(var(--accent-rgb), 0.2) 0%, rgba(var(--accent-rgb), 0.2) 35%, rgba(var(--accent-rgb), 0.1) 50%, transparent 66%); animation: orb-drift-2 34s ease-in-out infinite alternate; }
-.orb-3 { width: 300px; height: 300px; top: 40%; left: 30%; background: radial-gradient(circle, rgba(var(--accent-rgb), 0.15) 0%, rgba(var(--accent-rgb), 0.15) 15%, rgba(var(--accent-rgb), 0.07) 35%, transparent 52%); animation: orb-drift-3 22s ease-in-out infinite alternate; }
+.orb-1 { width: 600px; height: 600px; top: -15%; right: -10%; background: radial-gradient(circle, rgba(var(--accent-rgb), 0.32) 0%, rgba(var(--accent-rgb), 0.3) 48%, rgba(var(--accent-rgb), 0.16) 64%, transparent 82%); animation: orb-drift-1 26s ease-in-out infinite alternate; }
+.orb-2 { width: 500px; height: 500px; bottom: -20%; left: -5%; background: radial-gradient(circle, rgba(var(--accent-rgb), 0.22) 0%, rgba(var(--accent-rgb), 0.2) 45%, rgba(var(--accent-rgb), 0.11) 62%, transparent 80%); animation: orb-drift-2 34s ease-in-out infinite alternate; }
+.orb-3 { width: 300px; height: 300px; top: 40%; left: 30%; background: radial-gradient(circle, rgba(var(--accent-rgb), 0.16) 0%, rgba(var(--accent-rgb), 0.15) 42%, rgba(var(--accent-rgb), 0.08) 60%, transparent 78%); animation: orb-drift-3 22s ease-in-out infinite alternate; }
 @keyframes orb-drift-1 { to { transform: translate(-70px, 50px) scale(1.06); } }
 @keyframes orb-drift-2 { to { transform: translate(60px, -45px) scale(0.94); } }
 @keyframes orb-drift-3 { to { transform: translate(-45px, -55px) scale(1.08); } }

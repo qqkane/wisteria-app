@@ -141,6 +141,15 @@ html.platform-android .app-content { overflow-x: hidden; }
   .connect-btn { width: 176px; height: 176px; margin: 22px auto; }
   .connect-btn .power-icon { width: 44px; height: 44px; }
 
+  /* Hero centered: the big button sits in the middle of the screen with the
+     status label right above it; the profile card and stats go below. Auto
+     margins split the free space above the label and below the button, so
+     the hero centers itself in the space between the top bar and the cards.
+     (158px ≈ top bar + the 96px bottom reserve for the nav bar.) */
+  .vpn-screen { display: flex; flex-direction: column; min-height: calc(100vh - 158px); min-height: calc(100dvh - 158px); }
+  .vpn-screen .vpn-status { margin-top: auto; }
+  #btn-wrap { margin-bottom: auto; }
+
   .profile-card { margin-top: 18px; padding: 14px; }
   .stats-row { flex-wrap: wrap; gap: 10px; margin-top: 16px; }
   .stat-card { flex: 1 1 40%; }

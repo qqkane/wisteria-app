@@ -310,7 +310,7 @@ function renderVpn() {
   return `
     <div class="vpn-screen">
       <div class="vpn-status"><div class="label">${esc(label)}</div></div>
-      <div style="position:relative; display:flex; justify-content:center;">
+      <div id="btn-wrap" style="position:relative; display:flex; justify-content:center;">
         <button class="connect-btn ${conn ? "connected" : ""}" id="btn-toggle" ${connecting ? "disabled" : ""}>
           <div class="ring-anim"></div>
           <div class="ring-anim d2"></div>
@@ -731,7 +731,6 @@ function wireContent() {
     finally { S.busy = false; }
   });
   on("card-profile", "click", () => switchTab("profiles"));
-  on("btn-diag-logs", "click", () => switchTab("logs"));
 
   on("btn-add", "click", openModal);
   document.querySelectorAll(".server-list-item").forEach((row) => {
@@ -1228,6 +1227,13 @@ whenReady(async () => {
     S.upd = info;
     showToast(t("set.updAvail") + ": v" + (info && info.latest));
     if (S.tab === "settings") renderContent();
+  });
+  // «Открыть логи» on the diagnostics page: the 2s pullWDiag poll rebuilds
+  // #diag-root (and this button) whenever the feed changes, which strips
+  // any listener bound in wireContent — delegate at the document level
+  // instead, so the binding survives re-renders.
+  document.addEventListener("click", (ev) => {
+    if (ev.target && ev.target.closest && ev.target.closest("#btn-diag-logs")) switchTab("logs");
   });
   window.runtime.EventsOn("extip", (d) => {
     S.extIP = (d && d.ip) || "";

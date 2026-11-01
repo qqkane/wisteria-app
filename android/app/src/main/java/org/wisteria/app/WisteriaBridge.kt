@@ -514,13 +514,45 @@ class WisteriaBridge(private val activity: MainActivity) {
         val out = JSONObject()
             .put("active", active)
             .put("status", st)
-            .put("servers", JSONArray())
+            .put("servers", diagServersJson(st))
             .put("updated", System.nanoTime())
         val events = EngineHub.diagEventsJson()
         out.put("events", events)
         var lastKind = ""
         if (events.length() > 0) lastKind = events.getJSONObject(events.length() - 1).optString("kind")
         out.put("last_kind", lastKind)
+        return out
+    }
+
+    /** The diagnostics page chips (best RTT / reachable servers) are computed
+     *  from the WServerStat list the desktop core fills in; the mobile engine
+     *  has no such report, so synthesize it from the active profile: one row
+     *  per configured endpoint, with the stored ping and reachability known
+     *  only for the primary (the one host:port the engine dials). */
+    private fun diagServersJson(st: JSONObject): JSONArray {
+        if (st.optString("state") == "disconnected") return JSONArray()
+        val prof = store.profile(EngineHub.profileId) ?: return JSONArray()
+        val connected = st.optString("state") == "connected"
+        val primary = endpointOf(prof)
+        val latency = prof.optLong("latency_ms", 0)
+        val endpoints = LinkedHashSet<String>()
+        prof.optJSONArray("servers")?.let { arr ->
+            for (i in 0 until arr.length()) {
+                val ep = arr.getJSONObject(i).optString("endpoint")
+                if (ep.isNotEmpty()) endpoints.add(ep)
+            }
+        }
+        endpoints.add(primary) // sing-box profiles (no servers array) land here
+        val out = JSONArray()
+        for (ep in endpoints) {
+            out.put(
+                JSONObject()
+                    .put("endpoint", ep)
+                    .put("rtt_ms", if (ep == primary && latency > 0) latency else 0)
+                    .put("reachable", connected && ep == primary)
+                    .put("failures", if (ep == primary) EngineHub.retryEvents else 0)
+            )
+        }
         return out
     }
 

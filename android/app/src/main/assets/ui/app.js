@@ -307,7 +307,7 @@ function renderVpn() {
   return `
     <div class="vpn-screen">
       <div class="vpn-status"><div class="label">${esc(label)}</div></div>
-      <div style="position:relative; display:flex; justify-content:center;">
+      <div id="btn-wrap" style="position:relative; display:flex; justify-content:center;">
         <button class="connect-btn ${conn ? "connected" : ""}" id="btn-toggle" ${connecting ? "disabled" : ""}>
           <div class="ring-anim"></div>
           <div class="ring-anim d2"></div>
@@ -325,7 +325,7 @@ function renderVpn() {
       </div>
       <div class="stats-row">
         <div class="stat-card"><div class="stat-label">${I.clock} ${esc(t("stat.uptime"))}</div><div class="stat-value" id="stat-uptime">${uptimeHTML(st.started_at) || "—"}</div></div>
-        <div class="stat-card"><div class="stat-label">${I.globe} IP</div><div class="stat-value" style="font-size:13px; line-height:2.4;" id="stat-ip">${esc(S.extIP || "—")}</div></div>
+        <div class="stat-card"><div class="stat-label">${I.globe} IP</div><div class="stat-value" style="font-size:13px; line-height:2.4;" id="stat-ip">${esc(S.extIP || (conn && S.extIPErr ? "✕" : "—"))}</div></div>
         <div class="stat-card"><div class="stat-label">${I.globe} ${esc(t("stat.proxy"))}</div><div class="stat-value">${st.sys_proxy ? "ON" : "OFF"}</div></div>
       </div>
       ${st.tun ? `<div class="tun-note">${esc(t("vpn.tunOn"))}</div>` : ""}
@@ -711,9 +711,12 @@ function wireContent() {
   on("btn-toggle", "click", async () => {
     if (S.busy) { showToast(t("toast.busy")); return; }
     try {
-      if (S.state.state === "connected") api().Disconnect();
-      else {
+      if (S.state.state === "connected") {
+        S.extIP = ""; S.extIPErr = ""; // new session, new exit IP
+        api().Disconnect();
+      } else {
         if (!S.selected) { openModal(); return; }
+        S.extIP = ""; S.extIPErr = ""; // a previous session's IP must not stick
         S.busy = true;
         markConnecting(S.selected);
         await withTimeout(api().Connect(S.selected), 45000, t("toast.stuck"));
@@ -722,7 +725,6 @@ function wireContent() {
     finally { S.busy = false; }
   });
   on("card-profile", "click", () => switchTab("profiles"));
-  on("btn-diag-logs", "click", () => switchTab("logs"));
 
   on("btn-add", "click", openModal);
   document.querySelectorAll(".server-list-item").forEach((row) => {
@@ -1071,6 +1073,11 @@ setInterval(async () => {
   try {
     const st = await api().GetState();
     if (st && st.state && st.state !== S.state.state) renderState(st);
+    // The exit-IP check runs on the bridge's own thread and reports through
+    // the "extip" event; if that event gets lost on the webview bridge, the
+    // card would stay "—" forever. Retry while connected and empty — the
+    // bridge rate-limits the actual probes itself.
+    if (st && st.state === "connected" && !S.extIP) ensureExtIP();
   } catch (e) { /* bridge not ready yet */ }
 }, 3000);
 
@@ -1197,8 +1204,16 @@ whenReady(async () => {
     showToast(t("set.updAvail") + ": v" + (info && info.latest));
     if (S.tab === "settings") renderContent();
   });
+  // «Открыть логи» on the diagnostics page: the 2s pullWDiag poll rebuilds
+  // #diag-root (and this button) whenever the feed changes, which strips
+  // any listener bound in wireContent — delegate at the document level
+  // instead, so the binding survives re-renders.
+  document.addEventListener("click", (ev) => {
+    if (ev.target && ev.target.closest && ev.target.closest("#btn-diag-logs")) switchTab("logs");
+  });
   window.runtime.EventsOn("extip", (d) => {
     S.extIP = (d && d.ip) || "";
+    S.extIPErr = (d && d.error) || "";
     const el = $("stat-ip");
     if (el) el.textContent = S.extIP || ((d && d.error) ? "✕" : "—");
   });

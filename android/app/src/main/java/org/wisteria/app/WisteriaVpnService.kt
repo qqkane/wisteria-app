@@ -203,6 +203,7 @@ class WisteriaVpnService : VpnService() {
             return
         }
         tun = fd
+        EngineHub.resetDiag() // chips must describe this session, not the previous one
         EngineHub.profileId = profile.optString("id")
         EngineHub.profileName = profile.optString("name")
         EngineHub.profileType = "wisteria"
@@ -252,6 +253,7 @@ class WisteriaVpnService : VpnService() {
             return
         }
         engineIsBox = true
+        EngineHub.resetDiag() // chips must describe this session, not the previous one
         EngineHub.profileId = profile.optString("id")
         EngineHub.profileName = name
         EngineHub.profileType = profile.optString("type")

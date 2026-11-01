@@ -8,13 +8,15 @@ import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
-import android.view.WindowInsets
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import kotlin.math.max
 
 /**
  * Hosts the shared frontend (the desktop «Наша Сеть» UI) from assets and
@@ -82,17 +84,17 @@ class MainActivity : AppCompatActivity() {
 
         // Edge-to-edge ROMs draw the app under the status bar, which pushed
         // the logo under the clock; pad the webview by the system-bar insets
-        // instead (no-op when the decor already fits system windows).
-        web.setOnApplyWindowInsetsListener { v, insets ->
-            val (top, bottom) = if (Build.VERSION.SDK_INT >= 30) {
-                val bars = insets.getInsets(WindowInsets.Type.systemBars())
-                bars.top to bars.bottom
-            } else {
-                insets.systemWindowInsetTop to insets.systemWindowInsetBottom
-            }
-            v.setPadding(0, top, 0, bottom)
-            if (Build.VERSION.SDK_INT >= 30) WindowInsets.CONSUMED
-            else insets.consumeSystemWindowInsets()
+        // instead. The listener sits on the DECOR view — the dispatch origin
+        // — because with targetSdk 35 (enforced edge-to-edge) insets that a
+        // plain listener on the content view expects may never arrive (the
+        // v1.0.0 release rendered the header under the clock). The IME inset
+        // lifts the content above the keyboard on API 30+, where adjustResize
+        // no longer resizes the window.
+        ViewCompat.setOnApplyWindowInsetsListener(window.decorView) { _, insets ->
+            val sys = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
+            web.setPadding(sys.left, sys.top, sys.right, max(sys.bottom, ime.bottom))
+            WindowInsetsCompat.CONSUMED
         }
 
         EngineHub.emitters += { event, payload ->

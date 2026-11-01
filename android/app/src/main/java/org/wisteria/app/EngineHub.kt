@@ -29,6 +29,21 @@ object EngineHub {
     @Volatile var profileName: String = ""
     @Volatile var profileType: String = ""
 
+    /** Connect attempts that ended in a retry since the session started —
+     *  the diagnostics page's «Попыток» chip (the desktop counts the same
+     *  thing from the core's connect loop). */
+    @Volatile var retryEvents: Int = 0
+        private set
+
+    /** Clears the diagnostics feed and counters; called when a new session
+     *  starts so chips describe the current connection, not the previous. */
+    fun resetDiag() {
+        synchronized(lock) {
+            diagEvents.clear()
+            retryEvents = 0
+        }
+    }
+
     /** (event, payloadJson) push targets; the activity registers its webview. */
     val emitters = CopyOnWriteArrayList<(String, String) -> Unit>()
 
@@ -93,6 +108,7 @@ object EngineHub {
         }
         if (kind == "info") return
         synchronized(lock) {
+            if (kind == "retry") retryEvents++
             diagEvents.addLast(DiagEvent(AndroidStore.nowIso(), kind, line))
             while (diagEvents.size > MAX_DIAG) diagEvents.removeFirst()
         }
@@ -119,6 +135,7 @@ object EngineHub {
         synchronized(lock) {
             logs.clear()
             diagEvents.clear()
+            retryEvents = 0
         }
     }
 }
