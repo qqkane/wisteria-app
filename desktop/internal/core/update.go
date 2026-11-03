@@ -276,9 +276,13 @@ func zipExtract(zipPath, dir string, suffixes ...string) ([]string, error) {
 			continue
 		}
 		name := filepath.ToSlash(zf.Name)
+		base := filepath.Base(name)
 		matched := false
 		for _, suf := range suffixes {
-			if strings.HasSuffix(name, strings.TrimPrefix(suf, "/")) {
+			s := strings.TrimPrefix(suf, "/")
+			// Suffix alone would also match "EvilWisteriaDesktop.exe" for
+			// "WisteriaDesktop.exe" — the base name must match exactly.
+			if strings.HasSuffix(name, s) && base == filepath.Base(s) {
 				matched = true
 				break
 			}
@@ -286,7 +290,6 @@ func zipExtract(zipPath, dir string, suffixes ...string) ([]string, error) {
 		if !matched {
 			continue
 		}
-		base := filepath.Base(zf.Name)
 		if !safeName(base) {
 			return out, errors.New("подозрительное имя в архиве: " + zf.Name)
 		}
@@ -349,9 +352,13 @@ func tarExtract(tarPath, dir string, suffixes ...string) ([]string, error) {
 			continue
 		}
 		name := filepath.ToSlash(hdr.Name)
+		base := filepath.Base(name)
 		matched := false
 		for _, suf := range suffixes {
-			if strings.HasSuffix(name, strings.TrimPrefix(suf, "/")) {
+			s := strings.TrimPrefix(suf, "/")
+			// Same exact-name rule as zipExtract: suffix alone matches
+			// look-alike names.
+			if strings.HasSuffix(name, s) && base == filepath.Base(s) {
 				matched = true
 				break
 			}
@@ -359,7 +366,6 @@ func tarExtract(tarPath, dir string, suffixes ...string) ([]string, error) {
 		if !matched {
 			continue
 		}
-		base := filepath.Base(name)
 		if !safeName(base) {
 			return out, errors.New("подозрительное имя в архиве: " + hdr.Name)
 		}
