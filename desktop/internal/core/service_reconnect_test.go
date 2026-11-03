@@ -39,6 +39,9 @@ func TestMain(m *testing.M) {
 	tmp, err := os.MkdirTemp("", "wisteria-fakecore")
 	if err == nil {
 		fakeCorePath = filepath.Join(tmp, "fakecore")
+		if runtime.GOOS == "windows" {
+			fakeCorePath += ".exe" // CreateProcess refuses to exec an extension-less binary
+		}
 		gobin := filepath.Join(runtime.GOROOT(), "bin", "go")
 		if _, serr := os.Stat(gobin); serr != nil {
 			gobin = "go"
