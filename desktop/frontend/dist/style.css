@@ -7,7 +7,7 @@
   --accent: #f06888; --accent-rgb: 240, 104, 136;
 }
 * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color: transparent; }
-body { font-family: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif; background: #050505; color: var(--fg); height: 100vh; overflow: hidden; user-select: none; }
+body { font-family: system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background: #050505; color: var(--fg); height: 100vh; overflow: hidden; user-select: none; }
 #app { display: flex; height: 100vh; width: 100%; position: relative; overflow: hidden; transition: color .4s, background .4s; }
 
 /* themes */
@@ -95,7 +95,7 @@ select option, select optgroup { background-color: var(--surface); color: var(--
 .sf-dot.mid { background: var(--muted); animation: blink 1s infinite; }
 @keyframes blink { 50% { opacity: .3; } }
 .sf-server { font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sf-ip { font-size: 12px; color: var(--muted); font-family: 'JetBrains Mono', monospace; margin-top: 4px; }
+.sf-ip { font-size: 12px; color: var(--muted); font-family: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, 'Liberation Mono', monospace; margin-top: 4px; }
 
 /* main */
 .main-area { flex: 1; display: flex; flex-direction: column; height: 100vh; overflow: hidden; position: relative; z-index: 10; }
@@ -128,13 +128,13 @@ select option, select optgroup { background-color: var(--surface); color: var(--
 .profile-card .icon-box svg { width: 20px; height: 20px; }
 .profile-card .srv-info { flex: 1; }
 .profile-card .srv-name { font-size: 16px; font-weight: 600; }
-.profile-card .srv-ping { font-size: 12px; color: var(--muted); margin-top: 3px; font-family: 'JetBrains Mono', monospace; }
+.profile-card .srv-ping { font-size: 12px; color: var(--muted); margin-top: 3px; font-family: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, 'Liberation Mono', monospace; }
 .profile-card .chev { width: 16px; height: 16px; opacity: .4; color: var(--fg); }
 .stats-row { display: flex; gap: 16px; margin-top: 24px; width: 100%; max-width: 500px; }
 .stat-card { flex: 1; border-radius: 16px; padding: 16px; text-align: center; background: var(--card); backdrop-filter: blur(20px); border: 1px solid var(--border); }
 .stat-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; color: var(--muted); display: flex; align-items: center; justify-content: center; gap: 5px; }
 .stat-label svg { width: 11px; height: 11px; }
-.stat-value { font-size: 20px; font-weight: 700; font-family: 'JetBrains Mono', monospace; color: var(--accent); }
+.stat-value { font-size: 20px; font-weight: 700; font-family: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, 'Liberation Mono', monospace; color: var(--accent); }
 .stat-unit { font-size: 10px; font-weight: 400; color: var(--muted); }
 .error-box { margin-top: 16px; max-width: 500px; padding: 12px 16px; border-radius: 14px; background: rgba(var(--accent-rgb), .08); border: 1px solid rgba(var(--accent-rgb), .3); color: var(--fg); font-size: 13px; white-space: pre-wrap; user-select: text; }
 
@@ -150,8 +150,8 @@ select option, select optgroup { background-color: var(--surface); color: var(--
 .sli-icon svg { width: 17px; height: 17px; }
 .sli-data { flex: 1; overflow: hidden; }
 .sli-name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sli-addr { font-size: 11px; color: var(--muted); font-family: 'JetBrains Mono', monospace; margin-top: 2px; }
-.sli-lat { font-size: 10px; color: var(--muted); font-family: 'JetBrains Mono', monospace; margin-top: 2px; }
+.sli-addr { font-size: 11px; color: var(--muted); font-family: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, 'Liberation Mono', monospace; margin-top: 2px; }
+.sli-lat { font-size: 10px; color: var(--muted); font-family: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, 'Liberation Mono', monospace; margin-top: 2px; }
 .sli-lat.good { color: var(--accent); }
 .sli-act { background: none; border: none; color: var(--muted); width: 32px; height: 32px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .sli-act svg { width: 14px; height: 14px; }
@@ -166,7 +166,7 @@ select option, select optgroup { background-color: var(--surface); color: var(--
 .logs-header h2 { font-size: 28px; font-weight: 700; }
 .logs-tools { display: flex; align-items: center; gap: 14px; }
 .logs-tools label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; }
-.log-view { width: 100%; height: calc(100vh - 160px); overflow-y: auto; user-select: text; background: var(--card); backdrop-filter: blur(20px); border: 1px solid var(--border); border-radius: 16px; padding: 16px 18px; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.55; white-space: pre-wrap; word-break: break-all; color: var(--muted); }
+.log-view { width: 100%; height: calc(100vh - 160px); overflow-y: auto; user-select: text; background: var(--card); backdrop-filter: blur(20px); border: 1px solid var(--border); border-radius: 16px; padding: 16px 18px; font-family: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, 'Liberation Mono', monospace; font-size: 12px; line-height: 1.55; white-space: pre-wrap; word-break: break-all; color: var(--muted); }
 .log-view .l-app { color: var(--fg); }
 .log-view .ts { opacity: .5; }
 
@@ -187,7 +187,7 @@ select option, select optgroup { background-color: var(--surface); color: var(--
 .set-grid { display: grid; grid-template-columns: 240px 1fr; gap: 12px 16px; align-items: center; width: 100%; background: var(--card); backdrop-filter: blur(20px); border: 1px solid var(--border); border-radius: 16px; padding: 20px; }
 .set-grid label { font-size: 14px; color: var(--fg); }
 .set-note { font-size: 11px; color: var(--muted); display: block; margin-top: 2px; font-weight: 400; }
-input[type=text], input[type=number], select, textarea { width: 100%; font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--fg); background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; outline: none; user-select: text; }
+input[type=text], input[type=number], select, textarea { width: 100%; font-family: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, 'Liberation Mono', monospace; font-size: 13px; color: var(--fg); background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; outline: none; user-select: text; }
 input:focus, select:focus, textarea:focus { border-color: rgba(var(--accent-rgb), .5); }
 input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); justify-self: start; cursor: pointer; }
 textarea { resize: vertical; min-height: 80px; }
@@ -200,7 +200,7 @@ textarea { resize: vertical; min-height: 80px; }
 .ghost-btn { background: rgba(255,255,255,.06); color: var(--fg); border: 1px solid var(--border); border-radius: 12px; padding: 10px 18px; font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
 .ghost-btn:hover { background: rgba(var(--accent-rgb), .12); color: var(--accent); }
 .save-btn { width: auto; padding: 14px 40px; }
-.core-note { width: 100%; font-size: 12px; color: var(--muted); font-family: 'JetBrains Mono', monospace; user-select: text; line-height: 1.7; }
+.core-note { width: 100%; font-size: 12px; color: var(--muted); font-family: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, 'Liberation Mono', monospace; user-select: text; line-height: 1.7; }
 /* update banner on the settings → general tab */
 .upd-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; border-radius: 12px; background: rgba(var(--accent-rgb), .1); border: 1px solid rgba(var(--accent-rgb), .35); margin-top: 10px; font-size: 13.5px; }
 .upd-banner .ghost-btn { padding: 8px 14px; }
@@ -227,7 +227,7 @@ textarea { resize: vertical; min-height: 80px; }
 .submit-btn { width: 100%; padding: 15px; border-radius: 14px; border: none; background: var(--accent); color: #000; font-family: inherit; font-size: 15px; font-weight: 700; cursor: pointer; margin-top: 4px; }
 .submit-btn:hover { filter: brightness(1.08); }
 .import-errors { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
-.import-errors .err { color: #ff7b7b; font-size: 12px; font-family: 'JetBrains Mono', monospace; user-select: text; }
+.import-errors .err { color: #ff7b7b; font-size: 12px; font-family: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, 'Liberation Mono', monospace; user-select: text; }
 .import-errors .ok { color: var(--accent); font-size: 12.5px; }
 .hint { font-size: 12px; color: var(--muted); margin-bottom: 12px; line-height: 1.5; user-select: text; }
 
@@ -292,14 +292,14 @@ textarea { resize: vertical; min-height: 80px; }
 .diag-table th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--border); font-size: 12px; }
 .diag-table td { padding: 7px 8px; border-bottom: 1px solid var(--border); }
 .diag-table tr:last-child td { border-bottom: none; }
-.diag-table .mono { font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+.diag-table .mono { font-family: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, 'Liberation Mono', monospace; font-size: 12px; }
 .dg-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
 .dg-dot.on { background: #2ecc71; }
 .dg-dot.off { background: #e74c3c; }
 .diag-events { max-height: 320px; overflow-y: auto; user-select: text; font-size: 13px; }
 .diag-ev { display: flex; gap: 10px; align-items: baseline; padding: 5px 0; border-bottom: 1px dashed var(--border); }
 .diag-ev:last-child { border-bottom: none; }
-.diag-ev-time { flex: 0 0 auto; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--muted); }
+.diag-ev-time { flex: 0 0 auto; font-family: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, 'Liberation Mono', monospace; font-size: 11px; color: var(--muted); }
 .dg-k { flex: 0 0 auto; font-size: 10px; text-transform: uppercase; letter-spacing: .5px; padding: 2px 8px; border-radius: 6px; min-width: 44px; text-align: center; font-weight: 600; }
 .dg-k-up { background: rgba(46,204,113,.15); color: #2ecc71; }
 .dg-k-down { background: rgba(127,140,141,.15); color: #95a5a6; }
@@ -309,3 +309,25 @@ textarea { resize: vertical; min-height: 80px; }
 .dg-k-health, .dg-k-info { background: rgba(var(--accent-rgb), .12); color: var(--accent); }
 .diag-ev-text { word-break: break-word; }
 .diag-empty { color: var(--muted); font-size: 13px; margin: 0; }
+
+/* ---------- ambient background (canvas presets) ----------
+   One fixed canvas behind the content. rAF is capped at ~30 fps, pauses
+   on blur/hide, and off is the default. No GIFs, no external assets. */
+.bgfx { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
+.bgfx.hidden { display: none; }
+
+/* preset picker on Настройки → Внешний вид */
+.bg-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; width: 100%; }
+.bg-option { padding: 14px; border-radius: 16px; cursor: pointer; border: 1px solid var(--border); display: flex; flex-direction: column; align-items: flex-start; gap: 10px; background: var(--card); backdrop-filter: blur(20px); transition: border-color .2s; }
+.bg-option.selected { border-color: var(--accent); background: rgba(var(--accent-rgb), 0.1); }
+.bg-swatch { width: 100%; height: 34px; border-radius: 10px; border: 1px solid var(--border); }
+.bg-name { font-size: 13.5px; font-weight: 600; }
+.bg-note { font-size: 11px; color: var(--muted); margin-top: 10px; line-height: 1.5; }
+
+/* auto-reconnect note on the VPN screen (session died, shell is retrying) */
+.rec-note { display: flex; align-items: center; gap: 10px; margin-top: 16px; max-width: 500px; padding: 12px 16px; border-radius: 14px; background: rgba(241,196,15,.10); border: 1px solid rgba(241,196,15,.4); color: var(--fg); font-size: 13px; }
+.rec-note .spin-ic { width: 15px; height: 15px; flex-shrink: 0; color: #f1c40f; animation: subspin 1.6s linear infinite; }
+
+/* log line colors by tag: core chatter stays muted, tun is noticeable */
+.log-view .l-core { color: var(--muted); }
+.log-view .l-tun { color: #f1c40f; }
