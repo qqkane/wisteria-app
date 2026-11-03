@@ -6,8 +6,76 @@ package core
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
+
+// obfUintFields / obfFloatFields are the profile fields rendered into the
+// client TOML as RAW tokens after "=" (mu_log = %s). Anything that is not a
+// clean TOML number would inject or kill config tables (a percent-encoded
+// newline survives link unescaping, and Fields are also editable in the
+// manual form and by a hand-edited store) — both parsers and the renderer
+// below enforce this.
+var (
+	obfUintFields  = []string{"min_pad", "max_pad", "jitter_us", "jitter_ms", "coalesce_ms", "mimic", "filler_min", "filler_max", "filler_ratio", "rekey", "pow"}
+	obfFloatFields = []string{"obf_mu", "obf_sigma", "dir_balance"}
+)
+
+// validObfUint: non-negative int64, digits only (the TOML integer grammar).
+func validObfUint(v string) bool {
+	_, err := strconv.ParseUint(v, 10, 63)
+	return err == nil
+}
+
+// validObfFloat: strict TOML decimal float — digits [. digits] [e[+-]digits],
+// no sign, no NaN/Inf/hex/underscores (strconv.ParseFloat is looser than the
+// TOML grammar; this scanner is exactly it).
+func validObfFloat(s string) bool {
+	i := 0
+	digits := func() bool {
+		n := 0
+		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+			i++
+			n++
+		}
+		return n > 0
+	}
+	if !digits() {
+		return false
+	}
+	if i < len(s) && s[i] == '.' {
+		i++
+		if !digits() {
+			return false
+		}
+	}
+	if i < len(s) && (s[i] == 'e' || s[i] == 'E') {
+		i++
+		if i < len(s) && (s[i] == '+' || s[i] == '-') {
+			i++
+		}
+		if !digits() {
+			return false
+		}
+	}
+	return i == len(s)
+}
+
+// checkObfFields verifies every numeric obfuscation field of the profile;
+// the error names the field and the bad value.
+func checkObfFields(f map[string]string) error {
+	for _, k := range obfUintFields {
+		if v := f[k]; v != "" && !validObfUint(v) {
+			return fmt.Errorf("wisteria: %s = %q — нужно неотрицательное целое", k, v)
+		}
+	}
+	for _, k := range obfFloatFields {
+		if v := f[k]; v != "" && !validObfFloat(v) {
+			return fmt.Errorf("wisteria: %s = %q — нужно число (TOML float)", k, v)
+		}
+	}
+	return nil
+}
 
 // WisteriaTOML renders the client config. socksListen is the local SOCKS5
 // address; cachePath is the per-profile server-key cache (XX→IK pinning).
@@ -17,6 +85,11 @@ func WisteriaTOML(p Profile, socksListen, cachePath string) (string, error) {
 	}
 	if p.ClientPriv == "" {
 		return "", fmt.Errorf("у профиля нет client key (static_private)")
+	}
+	// Render-time validation, not just parse-time: the manual form and a
+	// hand-edited store put fields in without the share-link parser.
+	if err := checkObfFields(p.Fields); err != nil {
+		return "", err
 	}
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format+"\n", args...) }

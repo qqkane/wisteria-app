@@ -342,34 +342,49 @@ func parseWisteria(p Profile, userinfo string, q map[string]string) (Profile, er
 	if pub != "" {
 		p.Fields["pub"] = pub
 	}
-	if v := q["pad"]; v != "" {
-		lo, hi, ok := strings.Cut(v, "-")
+	// Numeric obfuscation fields land in the client TOML as raw tokens after
+	// "=" (wisteria_conf.go). A percent-encoded newline (%0A) survives
+	// unescape, so an unvalidated value would inject TOML tables — every
+	// field is checked here at import, and the renderer re-checks (the manual
+	// form bypasses this parser).
+	pair := func(key, lo, hi string) error {
+		v := q[key]
+		if v == "" {
+			return nil
+		}
+		a, b, ok := strings.Cut(v, "-")
 		if !ok {
-			return Profile{}, fmt.Errorf("wisteria: pad ожидался как min-max")
+			return fmt.Errorf("wisteria: %s ожидался как min-max", key)
 		}
-		p.Fields["min_pad"], p.Fields["max_pad"] = lo, hi
+		for _, x := range []string{a, b} {
+			if !validObfUint(x) {
+				return fmt.Errorf("wisteria: %s = %q — нужны неотрицательные целые min-max", key, v)
+			}
+		}
+		p.Fields[lo], p.Fields[hi] = a, b
+		return nil
 	}
-	set := func(field, key string) {
-		if v := q[key]; v != "" {
-			p.Fields[field] = v
+	if err := pair("pad", "min_pad", "max_pad"); err != nil {
+		return Profile{}, err
+	}
+	if err := pair("filler", "filler_min", "filler_max"); err != nil {
+		return Profile{}, err
+	}
+	for _, k := range obfUintFields {
+		if v := q[k]; v != "" {
+			if !validObfUint(v) {
+				return Profile{}, fmt.Errorf("wisteria: %s = %q — нужно неотрицательное целое", k, v)
+			}
+			p.Fields[k] = v
 		}
 	}
-	set("obf_mu", "obf_mu")
-	set("obf_sigma", "obf_sigma")
-	set("jitter_us", "jitter_us")
-	set("jitter_ms", "jitter_ms")
-	set("coalesce_ms", "coalesce_ms")
-	set("mimic", "mimic")
-	set("filler_ratio", "filler_ratio")
-	set("dir_balance", "dir_balance")
-	set("rekey", "rekey")
-	set("pow", "pow")
-	if v := q["filler"]; v != "" {
-		lo, hi, ok := strings.Cut(v, "-")
-		if !ok {
-			return Profile{}, fmt.Errorf("wisteria: filler ожидался как min-max")
+	for _, k := range obfFloatFields {
+		if v := q[k]; v != "" {
+			if !validObfFloat(v) {
+				return Profile{}, fmt.Errorf("wisteria: %s = %q — нужно число (TOML float)", k, v)
+			}
+			p.Fields[k] = v
 		}
-		p.Fields["filler_min"], p.Fields["filler_max"] = lo, hi
 	}
 	return p, nil
 }

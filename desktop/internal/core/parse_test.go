@@ -131,6 +131,41 @@ func TestParseWisteriaLink(t *testing.T) {
 	}
 }
 
+// Obfuscation values are rendered into the client TOML as raw tokens after
+// "=" — a percent-encoded newline (%0A survives query unescaping) would
+// inject TOML tables into the core config. Every numeric field must be a
+// clean number, rejected right at import.
+func TestParseWisteriaObfValidation(t *testing.T) {
+	pub := "q5LinLVGCGUA8WzbRTjylGRv36jrCIb+V7tH8Y5cXVo="
+	b64url := strings.NewReplacer("+", "-", "/", "_", "=", "").Replace(pub)
+	link := func(q string) string {
+		return "wisteria://" + b64url + "@w.example:47823?" + q + "#x"
+	}
+	for _, bad := range []string{
+		"obf_mu=6.7%0A%5Brouting%5D%0Amode%20%3D%20%22direct%22", // TOML-инъекция
+		"obf_sigma=0.6;jitter_us=1",                              // мусор в значении
+		"pad=64-14%0A48",                                         // инъекция внутри пары
+		"filler=80-400&rekey=NaN",
+		"mimic=1e",
+		"obf_mu=0x1p-2", // hex-float: ParseFloat бы съел, TOML — нет
+		"pow=-3",
+	} {
+		if _, err := ParseLink(link(bad)); err == nil {
+			t.Errorf("expected rejection for %q", bad)
+		}
+	}
+	// Чистые значения парсятся как раньше, включая экспоненту.
+	p, err := ParseLink(link("pad=64-1448&obf_mu=6.7e0&filler=80-400"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Fields["min_pad"] != "64" || p.Fields["max_pad"] != "1448" ||
+		p.Fields["obf_mu"] != "6.7e0" ||
+		p.Fields["filler_min"] != "80" || p.Fields["filler_max"] != "400" {
+		t.Fatalf("fields: %v", p.Fields)
+	}
+}
+
 func TestParseWisteriaTOMLImport(t *testing.T) {
 	tomlText := `
 [server]

@@ -45,6 +45,19 @@ func TestWisteriaTOMLRequiresKey(t *testing.T) {
 	}
 }
 
+// The renderer is the last line of defense against TOML injection: the
+// manual form and a hand-edited store reach it without the share-link
+// parser, so it re-checks every numeric obfuscation field itself.
+func TestWisteriaTOMLRejectsBadFields(t *testing.T) {
+	p := Profile{ID: "t3", Type: TWisteria, Host: "s.example", Port: 47823,
+		ClientPriv: "PRIVKEYBASE64==",
+		Fields:     map[string]string{"obf_mu": "6.7\n[routing]\nmode = \"direct\""}}
+	out, err := WisteriaTOML(p, "127.0.0.1:2080", "")
+	if err == nil {
+		t.Fatalf("injected field must be rejected, got:\n%s", out)
+	}
+}
+
 func singBoxOut(t *testing.T, p Profile) map[string]any {
 	t.Helper()
 	raw, err := SingBoxConfig(p, SingBoxOptions{MixedPort: 2080})
