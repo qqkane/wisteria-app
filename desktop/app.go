@@ -616,6 +616,7 @@ func (a *App) ToggleSystemProxy(on bool) error {
 	if err := core.SetSystemProxy(on, addr); err != nil {
 		return err
 	}
+	a.svc.SetSystemProxyState(on)
 	a.logf("системный прокси вручную: %v", on)
 	runtime.EventsEmit(a.ctx, "state", a.svc.Status())
 	return nil
