@@ -20,6 +20,9 @@ import org.json.JSONObject
 import org.wisteria.mobile.Callback
 import org.wisteria.mobile.Mobile
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
+import kotlin.math.min
 
 /**
  * VPN frontend for the two embedded Go engines. The wisteria engine gets
@@ -70,6 +73,80 @@ class WisteriaVpnService : VpnService() {
      *  live tunnel). */
     private var teardownEpoch = 0L
 
+    // ---- app-side reconnect parity with the desktop (v1.1.6 core fix) ----
+    // The desktop shell watches the SOCKS port every 2s and auto-reconnects
+    // with backoff when the session dies without the user asking. Android
+    // has no SOCKS port: the liveness probe is the engine's own status
+    // word, polled on the same 2s cycle — if the service still owns a tun
+    // while the engine says idle/disconnected, the engine died on its own.
+    // Reconnect runs with backoff 1→30s; only a user-initiated Disconnect
+    // (or a VPN consent revoke) cancels it.
+
+    private val watchdogExec = Executors.newSingleThreadScheduledExecutor()
+    private var watchdogFuture: ScheduledFuture<*>? = null
+    private val backoffSecs = intArrayOf(1, 2, 4, 8, 16, 30)
+    private var reconnectStep = 0
+
+    /** One reconnect may be in the queue at a time. Every teardown ends
+     *  with the engine's own onState("disconnected") callback (Stop pushes
+     *  the state), and without this gate each reconnect cycle queued the
+     *  next one: teardown → stop → "disconnected" → schedule → teardown…
+     *  an infinite flap loop that killed each freshly built session about
+     *  a second after it connected. Cleared on the next "connecting"/
+     *  "connected" so a later drop can queue again. */
+    private val reconnectQueued = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** True while teardown() runs: its engine stop must not be read as an
+     *  engine-originated death. */
+    @Volatile
+    private var tearingDown = false
+
+    /** True while no session is desired: user stop, revoke, startup. The
+     *  watchdog and the reconnect queue must stay quiet while it is set. */
+    @Volatile
+    private var userStopped = true
+
+    private fun startWatchdog() {
+        stopWatchdog()
+        watchdogFuture = watchdogExec.scheduleWithFixedDelay({
+            try {
+                if (!userStopped) {
+                    val st = JSONObject(Mobile.status()).optString("state")
+                    val running = synchronized(stateLock) { tun != null || engineIsBox }
+                    if (running && (st == "disconnected" || st == "idle")) {
+                        EngineHub.appLog("watchdog: движок упал (state=$st) — автопереподключение")
+                        scheduleReconnect()
+                    }
+                }
+            } catch (_: Throwable) {
+            }
+        }, 2000L, 2000L, TimeUnit.MILLISECONDS)
+    }
+
+    private fun stopWatchdog() {
+        watchdogFuture?.cancel(false)
+        watchdogFuture = null
+    }
+
+    /** Serialized teardown of the dead session + a delayed connect of the
+     *  active profile. connect("") re-reads the active id, so a profile
+     *  renamed/switched while offline reconnects to the current one. */
+    private fun scheduleReconnect() {
+        if (userStopped) return
+        if (!reconnectQueued.compareAndSet(false, true)) return
+        val delay = backoffSecs[min(reconnectStep, backoffSecs.size - 1)]
+        reconnectStep++
+        EngineHub.appLog("автопереподключение через ${delay}с (попытка $reconnectStep)")
+        watchdogExec.schedule({
+            if (userStopped) { reconnectQueued.set(false); return@schedule }
+            executor.execute {
+                if (userStopped) { reconnectQueued.set(false); return@execute }
+                teardown()
+                connect("")
+            }
+        }, delay.toLong(), TimeUnit.SECONDS)
+    }
+
     private val callback = object : Callback {
         override fun onLog(line: String?) {
             EngineHub.coreLog(line ?: "")
@@ -83,9 +160,17 @@ class WisteriaVpnService : VpnService() {
             }
             EngineHub.pushEvent("state", statusJson(mapped))
             if (mapped == "connected") {
+                reconnectStep = 0 // backoff chain only runs while offline
+                reconnectQueued.set(false)
                 WisteriaBridgeHolder.instance?.onConnectedCheckIP()
             }
+            if (mapped == "connecting") reconnectQueued.set(false)
             updateNotification(mapped)
+            // An engine-originated "disconnected" while the user wants the
+            // tunnel (wisteria runLoop device-dead, box core stop) is the
+            // fast path of the watchdog: react immediately, do not idle 2s.
+            // Events fired from our own teardown() are not a drop.
+            if (mapped == "disconnected" && !userStopped && !tearingDown) scheduleReconnect()
         }
 
         override fun protect(fd: Long): Boolean =
@@ -145,6 +230,8 @@ class WisteriaVpnService : VpnService() {
             // Own thread: CancelConnect must not queue behind a connect()
             // that is stuck inside a blocking native engine call.
             ACTION_DISCONNECT -> Thread({
+                userStopped = true // cancels the watchdog and the reconnect queue
+                stopWatchdog()
                 teardown()
                 stopSelf()
             }, "wisteria-disconnect").start()
@@ -162,6 +249,8 @@ class WisteriaVpnService : VpnService() {
 
     override fun onRevoke() {
         // The system (or the user in settings) revoked VPN consent.
+        userStopped = true // without consent a reconnect loop is pointless
+        stopWatchdog()
         executor.execute {
             teardown()
             stopSelf()
@@ -169,6 +258,9 @@ class WisteriaVpnService : VpnService() {
     }
 
     override fun onDestroy() {
+        userStopped = true
+        stopWatchdog()
+        watchdogExec.shutdownNow()
         executor.execute {
             teardown()
         }
@@ -197,9 +289,15 @@ class WisteriaVpnService : VpnService() {
                 ?: run {
                     EngineHub.appLog("подключение: профиль не найден")
                     EngineHub.pushEvent("state", statusJson("disconnected", "профиль не найден"))
+                    userStopped = true
                     stopSelf()
                     return
                 }
+
+            // The user wants a tunnel now: arm the watchdog / reconnect path.
+            userStopped = false
+            reconnectStep = 0
+            reconnectQueued.set(false)
 
             if (profile.optString("type") == "wisteria") {
                 startWisteria(profile, myEpoch)
@@ -260,6 +358,8 @@ class WisteriaVpnService : VpnService() {
                 EngineHub.appLog("отмена пришла во время запуска — останавливаю")
                 teardown(pushState = true)
                 stopSelf()
+            } else {
+                startWatchdog()
             }
         } catch (e: Exception) {
             EngineHub.coreLog("start failed: ${e.message}")
@@ -267,6 +367,7 @@ class WisteriaVpnService : VpnService() {
             // screen renders status.error in the red box (v0.4.2's
             // "connecting forever" looked exactly like a swallowed error).
             teardown(pushState = false)
+            userStopped = true // a failed manual connect is not a dropped session
             stopSelf()
             EngineHub.pushEvent("state", statusJson("disconnected", trimErr(e.message)))
         }
@@ -298,11 +399,14 @@ class WisteriaVpnService : VpnService() {
                 EngineHub.appLog("отмена пришла во время запуска — останавливаю")
                 teardown(pushState = true)
                 stopSelf()
+            } else {
+                startWatchdog()
             }
         } catch (e: Exception) {
             EngineHub.coreLog("sing-box: ${e.message}")
             // See startWisteria: surface the failure on the VPN screen.
             teardown(pushState = false)
+            userStopped = true // a failed manual connect is not a dropped session
             stopSelf()
             EngineHub.pushEvent("state", statusJson("disconnected", trimErr(e.message)))
         }
@@ -371,7 +475,10 @@ class WisteriaVpnService : VpnService() {
     }
 
     private fun teardown(pushState: Boolean = true) {
-        synchronized(stateLock) {
+        stopWatchdog()
+        tearingDown = true
+        try {
+            synchronized(stateLock) {
             teardownEpoch++
             if (engineIsBox) {
                 unregisterBoxNetworkMonitor()
@@ -406,6 +513,12 @@ class WisteriaVpnService : VpnService() {
         EngineHub.profileType = ""
         if (pushState) EngineHub.pushEvent("state", statusJson("disconnected"))
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        } finally {
+            // Only after the whole pass: the engine Stop() above fires
+            // onState("disconnected") synchronously — that is our teardown,
+            // not a drop, and must not queue a reconnect.
+            tearingDown = false
+        }
     }
 
     /** The desktop Status shape the frontend renders. */
