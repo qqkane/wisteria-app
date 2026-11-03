@@ -41,6 +41,29 @@ class MainActivity : AppCompatActivity() {
     @Volatile
     private var pendingConnectId: String? = null
 
+    /** Latest bottom system inset in CSS px, mirrored to the page as
+     *  --sat-bottom (see onCreate). -1 until the first insets dispatch. */
+    @Volatile
+    private var navInsetPx: Int = -1
+
+    @Volatile
+    private var pageReady = false
+
+    /** (Re)injects the inset variable: the first insets dispatch usually
+     *  lands before the page exists, and every page load wipes inline
+     *  styles, so the value is pushed on insets change AND on load finish. */
+    private fun pushSafeInsetJs() {
+        val px = navInsetPx
+        if (px < 0 || !pageReady || isFinishing || isDestroyed) return
+        runOnUiThread {
+            if (!isFinishing && !isDestroyed) {
+                web.evaluateJavascript(
+                    "document.documentElement.style.setProperty('--sat-bottom','${px}px')", null
+                )
+            }
+        }
+    }
+
     /** The strips left visible by the inset padding (status bar above the
      *  glass header, nav bar below it) must blend with them, not fight them:
      *  the accent lives in the UI itself, so both bars stay near-black.
@@ -65,6 +88,10 @@ class MainActivity : AppCompatActivity() {
             allowFileAccess = false
         }
         web.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView, url: String?) {
+                pageReady = true
+                pushSafeInsetJs()
+            }
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 // Only the bundled asset page may render here: the JS bridge
                 // is bound for it and must never be exposed to a remote
@@ -87,14 +114,19 @@ class MainActivity : AppCompatActivity() {
         bridge = WisteriaBridge(this)
         WisteriaBridgeHolder.instance = bridge
         web.addJavascriptInterface(bridge, "WisteriaAndroid")
-        // Edge-to-edge ROMs draw the app under the system bars: with
-        // targetSdk 35 (enforced edge-to-edge) the window spans the whole
-        // screen, which put the header under the clock and the bottom nav
-        // under the gesture pill. WebView ignores its own view padding, so
-        // the v1.1.4 fix that padded the WebView directly did nothing —
-        // wrap it in a frame and pad that, which insets the page viewport.
+        if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true)
+        // Edge-to-edge: with targetSdk 35 the window spans the whole screen
+        // anyway, so the app goes under the system bars on purpose. The
+        // frame is padded on the top/sides (status bar, cutout, navigation
+        // side strips) so the header and content never hide under them,
+        // while the bottom is left open: the webview reaches the physical
+        // bottom edge, its viewport carries viewport-fit=cover, and the CSS
+        // pads the bottom navigation with env(safe-area-inset-bottom). That
+        // makes the nav bar's glass blend behind the gesture pill / nav
+        // buttons instead of leaving a black strip under the app.
         // The IME inset lifts the content above the keyboard on API 30+,
         // where adjustResize no longer resizes the window.
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         val root = android.widget.FrameLayout(this)
         // API 35 ignores window.statusBarColor under enforced edge-to-edge,
         // so the padded strips show the view background of the frame — keep
@@ -114,13 +146,26 @@ class MainActivity : AppCompatActivity() {
         // The listener stays on the DECOR view — the dispatch origin —
         // because with targetSdk 35 insets that a plain content-view
         // listener expects may never arrive; the padding goes to the frame.
+        // Insets are NOT consumed: Chromium's safe-area (env(safe-area-inset-*)
+        // with viewport-fit=cover) is computed from the insets the WebView
+        // itself receives, and a CONSUMED dispatch left env() at 0 — the nav
+        // bar sat under the system buttons again. IME insets are zeroed in
+        // the forwarded copy (the frame padding already lifts the content
+        // above the keyboard; letting Chromium shrink the visual viewport
+        // too would move the page up twice). The nav-bar inset is mirrored
+        // into a CSS variable as a second belt: --sat-bottom, in CSS px.
+        val density = resources.displayMetrics.density
         ViewCompat.setOnApplyWindowInsetsListener(window.decorView) { _, insets ->
             val bars = insets.getInsets(
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
             )
             val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
-            root.setPadding(bars.left, bars.top, bars.right, max(bars.bottom, ime.bottom))
-            WindowInsetsCompat.CONSUMED
+            root.setPadding(bars.left, bars.top, bars.right, max(0, ime.bottom - bars.bottom))
+            navInsetPx = (bars.bottom / density).toInt()
+            pushSafeInsetJs()
+            WindowInsetsCompat.Builder(insets)
+                .setInsets(WindowInsetsCompat.Type.ime(), androidx.core.graphics.Insets.of(0, 0, 0, 0))
+                .build()
         }
         setContentView(root)
 
@@ -132,8 +177,13 @@ class MainActivity : AppCompatActivity() {
                     // quote() the event name: a JSON string literal is a
                     // valid JS expression even if a future pushEvent uses a
                     // name with quotes; payload is already JSON or null.
+                    // The guard: engine state events can fire while the
+                    // page is still loading — before android-shim.js has
+                    // defined __wisteriaEmit — and an uncaught TypeError
+                    // just spams the console (the frontend re-pulls state
+                    // on its 3s poll, so dropping an early event is safe).
                     web.evaluateJavascript(
-                        "window.__wisteriaEmit(${JSONObject.quote(event)}, $payload)", null
+                        "window.__wisteriaEmit && window.__wisteriaEmit(${JSONObject.quote(event)}, $payload)", null
                     )
                 }
             }

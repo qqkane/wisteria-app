@@ -104,6 +104,7 @@
   const ICONS = {
     home: svg('<path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/>'),
     back: svg('<line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>'),
+    profiles: svg('<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>'),
     logs: svg('<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>'),
     diag: svg('<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>'),
     settings: svg('<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>'),
@@ -112,7 +113,8 @@
 
   // ---------- bottom navigation ----------
   // Five items across the top of a phone are hard to reach. The bottom bar
-  // has two tabs: «Главная» (VPN view) and «Настройки» (settings view, which
+  // has three tabs: «Главная» (VPN view), «Профили» (profiles, centered —
+  // the mission's main nav entry) and «Настройки» (settings view, which
   // carries quick links to Логи and Диагностика). Clicks are forwarded to
   // the real sidebar buttons so SPA state stays desktop-identical.
   const navTo = (tab) => {
@@ -128,18 +130,20 @@
     bar.id = "android-bottom";
     bar.innerHTML =
       `<button class="ab-item" id="ab-home">${ICONS.home}<span data-i18n="ab.home">Главная</span></button>` +
+      `<button class="ab-item" id="ab-profiles">${ICONS.profiles}<span data-i18n="nav.profiles">Профили</span></button>` +
       `<button class="ab-item" id="ab-settings">${ICONS.settings}<span data-i18n="nav.settings">Настройки</span></button>`;
     app.appendChild(bar);
     bar.querySelector("#ab-home").addEventListener("click", () => navTo("vpn"));
+    bar.querySelector("#ab-profiles").addEventListener("click", () => navTo("profiles"));
     bar.querySelector("#ab-settings").addEventListener("click", () => navTo("settings"));
     // Mirror the SPA's active view onto the bottom tabs; the hidden sidebar
     // nav still owns the source of truth. Логи/Диагностика count as the
     // settings section (they are reached from it).
     const sync = () => {
-      const cur = document.querySelector(".sidebar-nav-item.active");
-      const homeActive = !cur || cur.dataset.tab === "vpn";
-      bar.querySelector("#ab-home").classList.toggle("active", homeActive);
-      bar.querySelector("#ab-settings").classList.toggle("active", !homeActive);
+      const cur = document.querySelector(".sidebar-nav-item.active")?.dataset.tab || "vpn";
+      bar.querySelector("#ab-home").classList.toggle("active", cur === "vpn");
+      bar.querySelector("#ab-profiles").classList.toggle("active", cur === "profiles");
+      bar.querySelector("#ab-settings").classList.toggle("active", cur === "settings" || cur === "logs" || cur === "diag");
     };
     new MutationObserver(sync).observe(document.querySelector(".sidebar-nav"), {
       subtree: true, attributes: true, attributeFilter: ["class"],

@@ -7,6 +7,16 @@
    everything; there is no system proxy concept). */
 html.platform-android .stats-row .stat-card:nth-child(3) { display: none; }
 
+/* Bottom system inset in CSS px: env() is the primary source (the page
+   loads with viewport-fit=cover under an edge-to-edge webview), the
+   --sat-bottom variable injected by the Kotlin insets listener is the
+   fallback for WebView builds that do not map insets to env(). max() keeps
+   the nav content above 3-button navigation on every device. */
+:root {
+  --sat-bottom: 0px;
+  --safe-b: max(env(safe-area-inset-bottom, 0px), var(--sat-bottom));
+}
+
 /* TUN note and diag "open logs" stay; the conn/cores settings tabs are
    desktop concepts (local ports, system proxy, per-protocol cores).
    Routing (bypass LAN, direct/block lists, DNS, log level) is applied to
@@ -74,7 +84,7 @@ html.platform-android .app-content { overflow-x: hidden; }
   .sidebar-footer { display: none; }
 
   .main-area { height: auto; flex: 1; }
-  .app-content { padding: 0 14px 96px; }
+  .app-content { padding: 0 14px calc(96px + var(--safe-b, 0px)); }
 
   /* ---------- bottom navigation (Hiddify-style) ---------- */
   /* The five-item top bar is unreachable on a phone; navigation moves to a
@@ -91,6 +101,13 @@ html.platform-android .app-content { overflow-x: hidden; }
     backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px);
     border-top: 1px solid var(--border);
     transition: transform .25s;
+    /* The bar's glass extends under the gesture pill / nav buttons (the
+       webview is edge-to-edge), its content is lifted by the system inset:
+       env(safe-area-inset-bottom) first, and the --sat-bottom variable the
+       Kotlin insets listener injects (CSS px) for WebView builds whose
+       insets never reach env(). Height stays constant: the inset is fixed
+       per device, tab switches never resize the bar. */
+    padding-bottom: var(--safe-b, 0px);
   }
   .ab-item {
     flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
@@ -149,7 +166,7 @@ html.platform-android .app-content { overflow-x: hidden; }
      margins split the free space above the label and below the button, so
      the hero centers itself in the space between the top bar and the cards.
      (158px ≈ top bar + the 96px bottom reserve for the nav bar.) */
-  .vpn-screen { display: flex; flex-direction: column; min-height: calc(100vh - 158px); min-height: calc(100dvh - 158px); }
+  .vpn-screen { display: flex; flex-direction: column; min-height: calc(100vh - 158px - var(--safe-b, 0px)); min-height: calc(100dvh - 158px - var(--safe-b, 0px)); }
   .vpn-screen .vpn-status { margin-top: auto; }
   #btn-wrap { margin-bottom: auto; }
 
