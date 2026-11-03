@@ -64,7 +64,7 @@ Top-opportunity по фреймворку: «Feature Gap» — ни один к�
 
 ## Чек-лист запуска (app-launch, адаптирован под GitHub Releases)
 
-- [ ] Релиз-сборка: `wisteria-client.exe` + `WisteriaDesktop.exe` в zip (workflow `desktop.yml`)
+- [ ] Релиз-сборка: `wisteria-client.exe` + `WisteriaDesktop.exe` в zip (workflow `release.yml`)
 - [ ] Подпись/хеши: прикладывать SHA256SUMS к релизу
 - [ ] Скриншоты: дашборд, импорт ссылок, логи (3–5 шт., тёмная тема)
 - [ ] Описание релиза = Short description + changelog

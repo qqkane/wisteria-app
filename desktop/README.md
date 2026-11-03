@@ -1,6 +1,7 @@
 # Wisteria Desktop
 
-Windows GUI-клиент для протокола **wisteria** (anti-DPI VPN: Noise + obfuscation + yamux)
+Кроссплатформенный GUI-клиент (Windows + Linux amd64) для протокола **wisteria**
+(anti-DPI VPN: Noise + obfuscation + yamux)
 с поддержкой популярных прокси-протоколов через ядро [sing-box](https://github.com/SagerNet/sing-box).
 
 Архитектура — «оболочка + ядра» (модель v2rayN): приложение является GUI-супервизором,
