@@ -11,162 +11,6 @@ function whenReady(fn, tries = 100) {
   setTimeout(() => whenReady(fn, tries - 1), 100);
 }
 
-// ---------- lab mode: static screenshot bridge (dev flag, never in prod) ----------
-// ?lab=<disconnected|connecting|connected|reconnecting|error> swaps the
-// Wails bindings for a deterministic mock, so every page/state renders in a
-// plain browser (chromium --headless=new for the mission screenshots).
-// ?lab=…&bg=<off|lilac|matrix|gradient> presets the ambient background;
-// ?lab=…&open=<add|confirm> opens a modal. Production builds never carry
-// the query parameter, and window.go is the real bridge.
-const LAB = new URLSearchParams(location.search).get("lab") || null;
-
-function labStatus(name) {
-  const base = {
-    profile_id: "p1", profile_name: "DE · Berlin", type: "wisteria",
-    core: "wisteria-client", socks_addr: "127.0.0.1:2080", http_addr: "127.0.0.1:2081",
-  };
-  const started = new Date(Date.now() - 372 * 1000).toISOString();
-  switch (name) {
-    case "connected": return { ...base, state: "connected", pid: 4242, started_at: started, sys_proxy: true };
-    case "connecting": return { ...base, state: "connecting" };
-    case "reconnecting": return { ...base, state: "connecting", reconnecting: true, attempt: 3, sys_proxy: true, started_at: started,
-      error: "соединение потеряно — автоматическое переподключение (задержка 4s)" };
-    case "error": return { ...base, state: "disconnected", error: "порт 127.0.0.1:2080 так и не открылся (dial tcp 95.181.160.219:48200: connect: connection refused)" };
-    default: return { state: "disconnected", socks_addr: "127.0.0.1:2080", http_addr: "127.0.0.1:2081" };
-  }
-}
-
-function labBridge() {
-  const st = labStatus(LAB);
-  const bgParam = new URLSearchParams(location.search).get("bg") || "off";
-  const profiles = [
-    { id: "p1", type: "wisteria", name: "DE · Berlin", host: "g3x.owercone.ru", port: 48200, latency_ms: 38, sub_id: "" },
-    { id: "p2", type: "wisteria", name: "FI · Helsinki", host: "3x2.owercone.ru", port: 48200, latency_ms: 91, sub_id: "" },
-    { id: "p3", type: "vless", name: "NL · Amsterdam (REALITY)", host: "nl.example.net", port: 443, latency_ms: 52, sub_id: "s1" },
-    { id: "p4", type: "ss", name: "DE · Shadowsocks", host: "de.example.net", port: 8388, latency_ms: 41, sub_id: "s1" },
-    { id: "p5", type: "trojan", name: "SE · Stockholm", host: "se.example.net", port: 443, latency_ms: 67, sub_id: "s1" },
-    { id: "p6", type: "hysteria2", name: "NL · Hy2", host: "hy.example.net", port: 443, latency_ms: -1, sub_id: "s1" },
-  ];
-  const subs = [{
-    id: "s1", name: "моя подписка", url: "https://sub.example/subscribe",
-    count: 4, updated_at: new Date(Date.now() - 3600e3).toISOString(),
-    // demo of the link masking: the observer must redact the wisteria://
-    // credential below to wisteria://•••• (the panel agent's loop-guard rule)
-    error: "wisteria://UHdWeXpqVGtOZW1Qa3ZlTlczSk9AanVzdC5leGFtcGxlOjQ4MjAw?pad=64-1448&mimic=1 — последняя ссылка из подписки",
-  }];
-  const logs = [
-    { seq: 1, at: new Date(Date.now() - 60e3).toISOString(), tag: "app", text: "Wisteria Desktop 1.1.6 запущено" },
-    { seq: 2, at: new Date(Date.now() - 52e3).toISOString(), tag: "app", text: "запуск wisteria-client (pid 4242) для g3x.owercone.ru:48200 [wisteria]" },
-    { seq: 3, at: new Date(Date.now() - 51e3).toISOString(), tag: "core", text: "connected to g3x.owercone.ru:48200" },
-    { seq: 4, at: new Date(Date.now() - 51e3).toISOString(), tag: "core", text: "SOCKS5 listening on 127.0.0.1:2080 (via g3x.owercone.ru:48200)" },
-    { seq: 5, at: new Date(Date.now() - 50e3).toISOString(), tag: "app", text: "подключено: g3x.owercone.ru:48200 [wisteria] через wisteria-client" },
-    { seq: 6, at: new Date(Date.now() - 20e3).toISOString(), tag: "core", text: "health: rtt=6ms loss=0% pings=144" },
-    { seq: 7, at: new Date(Date.now() - 5e3).toISOString(), tag: "app", text: "HTTP-мост на http://127.0.0.1:2081 → socks://127.0.0.1:2080" },
-  ];
-  const diagEvents = [
-    { at: Date.now() - 90e3, kind: "up", text: "Подключено — туннель работает", raw: "connected to g3x.owercone.ru:48200" },
-    { at: Date.now() - 60e3, kind: "health", text: "Состояние канала: rtt=6ms loss=0% pings=139", raw: "health: rtt=6ms loss=0% pings=139" },
-    { at: Date.now() - 30e3, kind: "down", text: "Сессия прервана — ядро переподключается", raw: "session to g3x.owercone.ru:48200 ended" },
-    { at: Date.now() - 29e3, kind: "retry", text: "Переподключение: retrying in 1s", raw: "dial failed: connection refused; retrying in 1s" },
-    { at: Date.now() - 27e3, kind: "up", text: "Подключено — туннель работает", raw: "CONNECTED via g3x.owercone.ru:48200" },
-  ];
-  const diag = {
-    active: st.state !== "disconnected",
-    status: st,
-    servers: [
-      { endpoint: "g3x.owercone.ru:48200", rtt_ms: 38, reachable: true, failures: 0 },
-      { endpoint: "3x2.owercone.ru:48200", rtt_ms: 91, reachable: true, failures: 1 },
-    ],
-    updated: Date.now() * 1e6,
-    events: diagEvents,
-    last_kind: st.reconnecting ? "retry" : "up",
-  };
-  const settings = {
-    language: "ru", theme: "lilac", background: bgParam,
-    local_port: 2080, http_port: 2081, sys_proxy: true, bridge_enabled: true,
-    auto_connect: "p1", start_minimized: false, confirm_exit: true, check_ext_ip: true,
-    auto_ping_sec: 60, no_update_check: false, listen_all: false, bypass_lan: true,
-    remote_dns: "tcp://8.8.8.8", log_level: "warn", mem_limit_mb: 0,
-    tun_enabled: false, tun_stack: "mixed", tun_strict_route: false,
-    route_direct: "example.local", route_block: "", mp_core: "xray",
-    core_ss: "xray", core_vmess: "xray", core_vless: "xray", core_trojan: "xray",
-  };
-  const ok = (v) => Promise.resolve(v);
-  return {
-    GetState: () => ok(st),
-    GetWisteriaDiag: () => ok(diag),
-    GetLogs: (since) => ok(logs.filter((l) => l.seq > (since || 0))),
-    ListProfiles: () => ok(profiles),
-    GetActiveID: () => ok("p1"),
-    ListSubscriptions: () => ok(subs),
-    GetSettings: () => ok(settings),
-    SaveSettings: (s) => ok(s),
-    DetectCores: () => ok({ wisteria_found: true, wisteria_path: "/opt/wisteria/bin/wisteria-client", singbox_found: false, singbox_path: "", xray_found: true, xray_path: "/opt/wisteria/bin/xray" }),
-    IsElevated: () => ok(false),
-    GetAutostart: () => ok(true),
-    SetAutostart: () => ok(null),
-    Version: () => ok("1.1.6"),
-    CheckAppUpdate: () => ok({ has_update: false, current: "1.1.6", latest: "1.1.6" }),
-    CheckCoreUpdate: () => ok({ has_update: false, current: "24.9.1" }),
-    GetExternalIP: () => ok("94.228.171.70"),
-    PingProfile: () => ok(42),
-    Connect: () => ok(null),
-    Disconnect: () => ok(null),
-    SetActive: () => ok(null),
-    DeleteProfile: () => ok(null),
-    AddLinks: () => ok({ added: [], errors: [] }),
-    ImportFromClipboard: () => Promise.reject(new Error("в буфере нет ни ссылки-подписки, ни share-ссылок")),
-  };
-}
-
-if (LAB) {
-  window.go = { main: { App: labBridge() } };
-  window.runtime = { EventsOn: () => {}, EventsEmit: () => {}, LogErrorf: () => {} };
-  // Masking for the screenshots (wisteria:// = credentials): replace, then
-  // IGNORE our own mutation — an observer reacting to its own edit is the
-  // infinite-loop trap the panel agent hit (guard flag, not debounce).
-  setTimeout(() => {
-    let redacting = false;
-    const rx = /wisteria:\/\/[^\s"'<>]+/g;
-    const doRedact = () => {
-      if (redacting) return;
-      redacting = true;
-      const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-      let n;
-      while ((n = w.nextNode())) {
-        const t2 = n.nodeValue.replace(rx, "wisteria://••••");
-        if (t2 !== n.nodeValue) n.nodeValue = t2;
-      }
-      setTimeout(() => { redacting = false; }, 0);
-    };
-    new MutationObserver(() => { if (!redacting) doRedact(); })
-      .observe(document.body, { childList: true, characterData: true, subtree: true });
-    doRedact();
-  }, 0);
-  const labOpen = new URLSearchParams(location.search).get("open");
-  if (labOpen === "add") setTimeout(() => openModal(), 400);
-  if (labOpen === "confirm") setTimeout(() => askConfirm(I18N.ru["confirm.delete"]), 400);
-  const labTab = new URLSearchParams(location.search).get("tab");
-  if (labTab) setTimeout(() => switchTab(labTab), 350);
-  // Backgrounds: advance the sim headlessly so a single headless screenshot
-  // shows a mid-motion frame (rAF is throttled/paused in the screenshot env).
-  setTimeout(() => { for (let i = 0; i < 200; i++) bgDraw(1 / 30); }, 500);
-  // ?bench=1: time the preset's draw() synchronously — the per-frame CPU
-  // cost numbers quoted in the mission journal come from these runs.
-  if (new URLSearchParams(location.search).get("bench")) {
-    setTimeout(() => {
-      // Date.now(), not performance.now(): the screenshot harness runs on a
-      // virtual clock, which freezes performance.now() inside one task.
-      const t0 = Date.now();
-      const N = 600;
-      for (let i = 0; i < N; i++) bgDraw(1 / 30);
-      const ms = (Date.now() - t0) / N;
-      const bg = new URLSearchParams(location.search).get("bg") || "off";
-      console.log("BG-BENCH " + bg + " " + ms.toFixed(3) + " ms/frame canvas=" + BG.w + "x" + BG.h + " sim=" + (BG.sim ? "ok" : "null") + " id=" + BG.id);
-    }, 700);
-  }
-}
-
 // ---------- inline svg icons (no CDN: the app must work offline) ----------
 const I = {
   shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
@@ -204,6 +48,7 @@ const I18N = {
     "brand": "Wisteria",
     "nav.vpn": "VPN", "nav.profiles": "Профили", "nav.logs": "Логи", "nav.diag": "Диагностика", "nav.settings": "Настройки",
     "vpn.unprotected": "UNPROTECTED", "vpn.protected": "SECURED", "vpn.connecting": "CONNECTING…",
+    "vpn.reconnecting": "RECONNECTING…", "vpn.attempt": "попытка {n}",
     "vpn.connect": "Connect", "vpn.disconnect": "Disconnect", "vpn.connected": "Connected",
     "vpn.noProfile": "Профиль не выбран", "vpn.clickSelect": "Нажмите, чтобы выбрать",
     "stat.uptime": "Аптайм", "stat.proxy": "Системный прокси", "stat.core": "Ядро",
@@ -276,15 +121,12 @@ const I18N = {
     "toast.busy": "Идёт подключение — секунду",
     "toast.clipSubs": "подписок: {n}", "toast.clipProfiles": "профилей: {n}", "toast.clipNone": "Ничего нового в буфере", "vpn.tunOn": "TUN активен — весь трафик системы идёт через туннель",
     "toast.stuck": "Подключение зависло — попробуйте ещё раз",
-    "vpn.reconnecting": "RECONNECTING…",
-    "vpn.autoReconnect": "Соединение потеряно — автоматическое переподключение (попытка {n})",
-    "set.bgTitle": "Фон", "bg.off": "Выключен", "bg.lilac": "Сиреневое боке", "bg.matrix": "Матрица", "bg.gradient": "Градиент",
-    "set.bgNote": "Ненавязчивая анимация с потолком ~30 fps; ставится на паузу, когда окно не в фокусе, и полностью отключается при prefers-reduced-motion.",
   },
   en: {
     "brand": "Wisteria",
     "nav.vpn": "VPN", "nav.profiles": "Profiles", "nav.logs": "Logs", "nav.diag": "Diagnostics", "nav.settings": "Settings",
     "vpn.unprotected": "UNPROTECTED", "vpn.protected": "SECURED", "vpn.connecting": "CONNECTING…",
+    "vpn.reconnecting": "RECONNECTING…", "vpn.attempt": "attempt {n}",
     "vpn.connect": "Connect", "vpn.disconnect": "Disconnect", "vpn.connected": "Connected",
     "vpn.noProfile": "No profile selected", "vpn.clickSelect": "Click to choose",
     "stat.uptime": "Uptime", "stat.proxy": "System proxy", "stat.core": "Core",
@@ -357,10 +199,6 @@ const I18N = {
     "toast.busy": "Connection in progress — one moment",
     "toast.clipSubs": "subscriptions: {n}", "toast.clipProfiles": "profiles: {n}", "toast.clipNone": "Nothing new in the clipboard", "vpn.tunOn": "TUN active — all system traffic goes through the tunnel",
     "toast.stuck": "Connection is stuck — please try again",
-    "vpn.reconnecting": "RECONNECTING…",
-    "vpn.autoReconnect": "Connection lost — auto-reconnecting (attempt {n})",
-    "set.bgTitle": "Background", "bg.off": "Off", "bg.lilac": "Lilac bokeh", "bg.matrix": "Matrix", "bg.gradient": "Gradient",
-    "set.bgNote": "Unobtrusive animation capped at ~30 fps; pauses when the window loses focus and turns off entirely under prefers-reduced-motion.",
   },
 };
 let lang = "ru";
@@ -382,7 +220,7 @@ const EXTRA = {
 
 // ---------- state ----------
 const S = {
-  tab: "vpn", setTab: "look", theme: "sunset", bg: "off", profiles: [], selected: "", lastLogSeq: 0,
+  tab: "vpn", setTab: "look", theme: "sunset", profiles: [], selected: "", lastLogSeq: 0,
   state: { state: "disconnected" }, uptimeTimer: null, extIP: "",
   subs: [], subBusy: {}, busy: false, // busy = a Connect is in flight
   version: "", upd: null, updBusy: false, updReady: false, coreUpd: {},
@@ -453,9 +291,8 @@ function renderSidebarFooter() {
   // fall back to the user's selected (active) profile so the choice made
   // on the profiles tab is visible immediately, not only after Connect.
   const p = S.profiles.find((x) => x.id === (st.profile_id || S.selected));
-  const rec = !!st.reconnecting;
-  const dot = st.state === "connected" ? "on" : st.state === "connecting" || rec ? "mid" : "";
-  const statusText = st.state === "connected" ? t("vpn.connected") : rec ? t("vpn.reconnecting") : st.state === "connecting" ? t("vpn.connecting") : t("vpn.unprotected");
+  const dot = st.state === "connected" ? "on" : (st.state === "connecting" || st.reconnecting) ? "mid" : "";
+  const statusText = st.state === "connected" ? t("vpn.connected") : st.reconnecting ? t("vpn.reconnecting") + (st.attempt ? " " + t("vpn.attempt").replace("{n}", st.attempt) : "") : st.state === "connecting" ? t("vpn.connecting") : t("vpn.unprotected");
   $("sidebar-footer").innerHTML = `
     <div class="sf-status"><div class="sf-dot ${dot}"></div> ${esc(statusText)}</div>
     <div class="sf-server">${esc(p ? p.name : (st.profile_name || "—"))}</div>
@@ -466,18 +303,18 @@ function renderVpn() {
   const st = S.state;
   const conn = st.state === "connected";
   const connecting = st.state === "connecting";
-  const rec = !!st.reconnecting; // session died; the shell is auto-retrying
+  const reconn = !!st.reconnecting;
   // Same as the sidebar footer: show the selected profile before the
   // backend status ever mentions one (i.e. before the first Connect).
   const p = S.profiles.find((x) => x.id === (st.profile_id || S.selected)) || null;
-  const label = conn ? t("vpn.protected") : rec ? t("vpn.reconnecting") : connecting ? t("vpn.connecting") : t("vpn.unprotected");
-  const btnText = conn || rec ? t("vpn.disconnect") : t("vpn.connect");
+  const label = conn ? t("vpn.protected") : reconn ? t("vpn.reconnecting") + (st.attempt ? " " + t("vpn.attempt").replace("{n}", st.attempt) : "") : connecting ? t("vpn.connecting") : t("vpn.unprotected");
+  const btnText = conn || reconn ? t("vpn.disconnect") : t("vpn.connect");
   const lat = p && p.latency_ms ? (p.latency_ms < 0 ? "n/a" : p.latency_ms + " ms") : "";
   return `
     <div class="vpn-screen">
       <div class="vpn-status"><div class="label">${esc(label)}</div></div>
       <div id="btn-wrap" style="position:relative; display:flex; justify-content:center;">
-        <button class="connect-btn ${conn ? "connected" : ""}" id="btn-toggle" ${connecting && !rec ? "disabled" : ""}>
+        <button class="connect-btn ${conn ? "connected" : ""}" id="btn-toggle" ${connecting ? "disabled" : ""}>
           <div class="ring-anim"></div>
           <div class="ring-anim d2"></div>
           ${I.power}
@@ -498,8 +335,7 @@ function renderVpn() {
         <div class="stat-card"><div class="stat-label">${I.globe} ${esc(t("stat.proxy"))}</div><div class="stat-value">${st.sys_proxy ? "ON" : "OFF"}</div></div>
       </div>
       ${st.tun ? `<div class="tun-note">${esc(t("vpn.tunOn"))}</div>` : ""}
-      ${rec ? `<div class="rec-note"><span class="spin-ic">${I.refresh}</span><span>${esc(t("vpn.autoReconnect").replace("{n}", st.attempt || 1))}</span></div>` : ""}
-      ${st.error && !rec ? `<div class="error-box">${esc(st.error)}</div>` : ""}
+      ${st.error ? `<div class="error-box">${esc(st.error)}</div>` : ""}
     </div>`;
 }
 
@@ -832,16 +668,6 @@ function renderSettings() {
         <label>${esc(t("set.lang"))}</label>
         <select id="s-lang"><option value="ru">Русский</option><option value="en">English</option></select>
       </div>
-    </div>
-    <div class="settings-section">
-      <h3>${esc(t("set.bgTitle"))}</h3>
-      <div class="bg-grid">${Object.keys(BGPRESETS).map((id) => `
-        <div class="bg-option ${S.bg === id ? "selected" : ""}" data-bg="${id}">
-          <div class="bg-swatch" style="background:${BGPRESETS[id].swatch}"></div>
-          <div class="bg-name">${esc(t(BGPRESETS[id].name))}</div>
-        </div>`).join("")}
-      </div>
-      <div class="bg-note">${esc(t("set.bgNote"))}</div>
     </div>`;
   }
   return `<div class="settings-title">${esc(t("settings.title"))}</div>${bar}${body}
@@ -855,7 +681,7 @@ function renderSettings() {
 function markConnecting(id) {
   const p = S.profiles.find((x) => x.id === id);
   if (!p) return;
-  renderState({ ...S.state, state: "connecting", reconnecting: false, attempt: 0, profile_id: p.id, profile_name: p.name, error: "" });
+  renderState({ ...S.state, state: "connecting", profile_id: p.id, profile_name: p.name, error: "" });
 }
 
 // Reject after ms so a wedged backend call can never lock the busy guard
@@ -891,9 +717,7 @@ function wireContent() {
   on("btn-toggle", "click", async () => {
     if (S.busy) { showToast(t("toast.busy")); return; }
     try {
-      // "connected" and the auto-reconnecting state both stop the engine:
-      // Disconnect also cancels the reconnect chain (user intent wins).
-      if (S.state.state === "connected" || S.state.reconnecting) api().Disconnect();
+      if (S.state.state === "connected") api().Disconnect();
       else {
         if (!S.selected) { openModal(); return; }
         S.busy = true;
@@ -1003,11 +827,6 @@ function wireContent() {
     document.querySelectorAll(".theme-option").forEach((o) => o.classList.toggle("selected", o === opt));
     await saveSettings();
   }));
-  document.querySelectorAll(".bg-option").forEach((opt) => opt.addEventListener("click", async () => {
-    applyBackground(opt.dataset.bg);
-    document.querySelectorAll(".bg-option").forEach((o) => o.classList.toggle("selected", o === opt));
-    await saveSettings();
-  }));
   on("btn-checkip", "click", async () => {
     try {
       const ip = await api().GetExternalIP();
@@ -1098,10 +917,8 @@ async function loadSettings() {
   const s = await api().GetSettings();
   S.cfg = s;
   S.theme = s.theme || "lilac";
-  S.bg = s.background || "off";
   lang = s.language || "ru";
   applyTheme();
-  applyBackground(S.bg);
   // Values are filled when the settings view renders.
   if (S.tab === "settings") { renderContent(); fillSettingsForm(s); }
   return s;
@@ -1155,7 +972,6 @@ async function saveSettings() {
   const next = {
     language: lang,
     theme: S.theme,
-    background: S.bg,
     local_port: g("s-port") ? num("s-port", 2080) : cur.local_port,
     http_port: g("s-http-port") ? num("s-http-port", 2081) : cur.http_port,
     sys_proxy: g("s-sysproxy") ? $("s-sysproxy").checked : cur.sys_proxy,
@@ -1264,236 +1080,6 @@ setInterval(() => {
   if (html) el.innerHTML = html;
 }, 1000);
 
-// ---------- state self-heal ----------
-// The state is pushed from the Go side as events; one lost event (the
-// message pump wedge noted in app.go, a webview reload, an emit before
-// EventsOn registration) used to leave the UI frozen on a stale status
-// — up to a restart. The status now mirrors the core within 5 s at worst:
-// poll the real status and reconcile whenever it differs.
-function stateSig(st) {
-  return [st.state, st.reconnecting ? 1 : 0, st.attempt || 0, st.profile_id || "",
-    st.error || "", st.tun ? 1 : 0, st.sys_proxy ? 1 : 0, st.pid || 0, st.started_at || ""].join("|");
-}
-setInterval(async () => {
-  if (S.busy || !api()) return; // an in-flight Connect owns the view
-  try {
-    const st = await api().GetState();
-    if (stateSig(st) !== stateSig(S.state)) renderState(st);
-  } catch (e) { /* backend not ready */ }
-}, 5000);
-
-// ---------- ambient background (canvas presets) ----------
-// Data-driven preset list: adding a preset means adding a row here (and a
-// settings i18n label), no engine code. Rules: rAF only, ~30 fps cap,
-// paused on window blur / hidden tab, static frame under
-// prefers-reduced-motion, off by default. No GIFs, no external assets.
-const BGPRESETS = {
-  off: {
-    name: "bg.off", kind: "none",
-    swatch: "repeating-linear-gradient(135deg, #14141a 0 8px, #101014 8px 16px)",
-  },
-  lilac: {
-    name: "bg.lilac", kind: "bokeh", scale: 0.5,
-    swatch: "radial-gradient(circle at 30% 40%, rgba(167,139,250,.55), transparent 60%), radial-gradient(circle at 70% 65%, rgba(139,92,246,.45), transparent 55%), #14101f",
-    count: 14, sizes: [50, 220], speed: 10, alpha: 0.16,
-    colors: [[167, 139, 250], [196, 181, 253], [139, 92, 246]],
-  },
-  matrix: {
-    name: "bg.matrix", kind: "rain", scale: 1.0,
-    swatch: "repeating-linear-gradient(90deg, rgba(0,255,65,.20) 0 2px, transparent 2px 10px), #031006",
-    color: "0,255,65", alpha: 0.10, fontSize: 14, speed: 55, active: 0.35,
-    glyphs: "アカサタナハマヤラワ0123456789#$%&*+=",
-  },
-  gradient: {
-    name: "bg.gradient", kind: "gradient", scale: 0.5,
-    swatch: "linear-gradient(120deg, #4c1d95, #1e3a8a, #0e7490)",
-    colors: [[88, 40, 170], [16, 110, 140], [40, 34, 96]], alpha: 0.10, speed: 0.06,
-  },
-};
-
-const BG = {
-  cv: null, cx: null, raf: 0, id: "off", sim: null,
-  w: 0, h: 0, dpr: 1, scale: 1, last: 0, running: false, fpsMs: 1000 / 30,
-};
-
-const bgMotionOK = () => !(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
-
-function bgCanvas() {
-  if (!BG.cv) {
-    BG.cv = $("bgfx");
-    BG.cx = BG.cv ? BG.cv.getContext("2d") : null;
-  }
-  return BG.cv && BG.cx;
-}
-
-function bgRunning() {
-  // The loop runs only while: a preset is on, the page is visible, the
-  // window has focus, and the OS does not ask for reduced motion.
-  return BG.id !== "off" && !document.hidden && document.hasFocus() && bgMotionOK();
-}
-
-function bgColumn(p, fs, x) {
-  return {
-    x,
-    y: -Math.random() * BG.h,
-    speed: p.speed * (0.45 + Math.random() * 0.8),
-    seed: Math.floor(Math.random() * 1000),
-    idle: Math.random() >= p.active, // quiet matrix: only a share of columns drips
-  };
-}
-
-function bgInit() {
-  const p = BGPRESETS[BG.id];
-  BG.sim = null;
-  if (!p || p.kind === "none") return;
-  if (p.kind === "bokeh") {
-    const parts = [];
-    for (let i = 0; i < p.count; i++) {
-      parts.push({
-        x: Math.random() * BG.w, y: Math.random() * BG.h,
-        vx: (Math.random() - 0.5) * p.speed * BG.dpr,
-        vy: (Math.random() - 0.5) * p.speed * BG.dpr,
-        r: (p.sizes[0] + Math.random() * (p.sizes[1] - p.sizes[0])) * BG.dpr,
-        c: p.colors[i % p.colors.length],
-        ph: Math.random() * Math.PI * 2,
-      });
-    }
-    BG.sim = { parts };
-  } else if (p.kind === "rain") {
-    const fs = p.fontSize * BG.dpr;
-    const pitch = fs * 1.4;
-    const n = Math.ceil(BG.w / pitch);
-    const cols = [];
-    for (let i = 0; i < n; i++) cols.push(bgColumn(p, fs, i * pitch));
-    BG.sim = { fs, cols };
-  } else if (p.kind === "gradient") {
-    BG.sim = { t: Math.random() * 100 };
-  }
-}
-
-function bgResize() {
-  if (!bgCanvas()) return;
-  const p = BGPRESETS[BG.id];
-  const r = BG.cv.getBoundingClientRect();
-  BG.dpr = Math.min(window.devicePixelRatio || 1, 1.5);
-  BG.scale = (p && p.scale) || 1;
-  const k = BG.dpr * BG.scale; // soft presets render half-size: 4x less fill
-  BG.w = Math.max(1, Math.round(r.width * k));
-  BG.h = Math.max(1, Math.round(r.height * k));
-  BG.cv.width = BG.w;
-  BG.cv.height = BG.h;
-  bgInit();
-  bgDraw(0); // static frame: content shows even while the loop is paused
-}
-
-function bgDraw(dt) {
-  const p = BGPRESETS[BG.id];
-  if (!p || p.kind === "none" || !BG.sim || !BG.cx) return;
-  const cx = BG.cx;
-  if (p.kind === "bokeh") {
-    cx.clearRect(0, 0, BG.w, BG.h);
-    cx.globalCompositeOperation = "lighter";
-    for (const b of BG.sim.parts) {
-      b.x += b.vx * dt; b.y += b.vy * dt; b.ph += dt * 0.4;
-      if (b.x < -b.r) b.x = BG.w + b.r; else if (b.x > BG.w + b.r) b.x = -b.r;
-      if (b.y < -b.r) b.y = BG.h + b.r; else if (b.y > BG.h + b.r) b.y = -b.r;
-      const a = p.alpha * (0.6 + 0.4 * Math.sin(b.ph));
-      const g = cx.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.r);
-      g.addColorStop(0, "rgba(" + b.c[0] + "," + b.c[1] + "," + b.c[2] + "," + a.toFixed(3) + ")");
-      g.addColorStop(1, "rgba(" + b.c[0] + "," + b.c[1] + "," + b.c[2] + ",0)");
-      cx.fillStyle = g;
-      cx.fillRect(b.x - b.r, b.y - b.r, b.r * 2, b.r * 2);
-    }
-    cx.globalCompositeOperation = "source-over";
-  } else if (p.kind === "rain") {
-    cx.fillStyle = "rgba(2,12,5,0.07)"; // trail fade
-    cx.fillRect(0, 0, BG.w, BG.h);
-    cx.font = BG.sim.fs + "px 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace";
-    for (const col of BG.sim.cols) {
-      if (col.idle) continue;
-      col.y += col.speed * dt * BG.dpr;
-      if (col.y > BG.h + BG.sim.fs * 2) { Object.assign(col, bgColumn(p, BG.sim.fs, col.x)); continue; }
-      const gy = Math.floor(col.y / BG.sim.fs);
-      const ch = (k) => p.glyphs[((gy - k) * 7 + col.seed + 1000) % p.glyphs.length];
-      cx.fillStyle = "rgba(" + p.color + "," + p.alpha + ")"; // soft tail
-      cx.fillText(ch(2), col.x, (gy - 2) * BG.sim.fs);
-      cx.fillText(ch(1), col.x, (gy - 1) * BG.sim.fs);
-      cx.fillStyle = "rgba(" + p.color + "," + (p.alpha * 2.4).toFixed(3) + ")"; // bright head
-      cx.fillText(ch(0), col.x, gy * BG.sim.fs);
-    }
-  } else if (p.kind === "gradient") {
-    BG.sim.t += dt * p.speed;
-    const t = BG.sim.t;
-    cx.globalCompositeOperation = "source-over";
-    cx.fillStyle = "rgba(8,7,12,0.30)"; // base: keeps the theme dark under the blobs
-    cx.fillRect(0, 0, BG.w, BG.h);
-    cx.globalCompositeOperation = "lighter";
-    const R = Math.max(BG.w, BG.h) * 0.6;
-    for (let i = 0; i < p.colors.length; i++) {
-      const ph = (i / p.colors.length) * Math.PI * 2;
-      const x = BG.w * (0.5 + 0.34 * Math.sin(t * 0.7 + ph));
-      const y = BG.h * (0.5 + 0.30 * Math.cos(t * 0.55 + ph * 1.3));
-      const c = p.colors[i];
-      const g = cx.createRadialGradient(x, y, 0, x, y, R);
-      g.addColorStop(0, "rgba(" + c[0] + "," + c[1] + "," + c[2] + "," + p.alpha + ")");
-      g.addColorStop(1, "rgba(" + c[0] + "," + c[1] + "," + c[2] + ",0)");
-      cx.fillStyle = g;
-      cx.fillRect(0, 0, BG.w, BG.h);
-    }
-    cx.globalCompositeOperation = "source-over";
-  }
-}
-
-// rAF with an explicit ~30 fps ceiling: on 60/120 Hz displays every second
-// (third) vsync frame is dropped, which halves the paint cost.
-function bgLoop(ts) {
-  if (!BG.running) return;
-  BG.raf = requestAnimationFrame(bgLoop);
-  const dtms = ts - BG.last;
-  if (dtms < BG.fpsMs) return;
-  BG.last = ts;
-  bgDraw(Math.min(dtms / 1000, 0.12));
-}
-
-function bgStartLoop() {
-  if (BG.running) return;
-  BG.running = true;
-  BG.last = performance.now();
-  BG.raf = requestAnimationFrame(bgLoop);
-}
-
-function bgStopLoop() {
-  BG.running = false;
-  if (BG.raf) cancelAnimationFrame(BG.raf);
-  BG.raf = 0;
-}
-
-function bgSync() {
-  if (bgRunning()) bgStartLoop();
-  else bgStopLoop(); // the last static frame stays visible: no flicker on blur
-}
-
-function applyBackground(id) {
-  if (!BGPRESETS[id]) id = "off";
-  S.bg = id;
-  BG.id = id;
-  if (!bgCanvas()) return;
-  if (id === "off") {
-    bgStopLoop();
-    BG.cx.clearRect(0, 0, BG.w, BG.h);
-    BG.cv.classList.add("hidden");
-    return;
-  }
-  BG.cv.classList.remove("hidden");
-  bgResize();
-  bgSync();
-}
-
-document.addEventListener("visibilitychange", bgSync);
-window.addEventListener("focus", bgSync);
-window.addEventListener("blur", bgSync);
-window.addEventListener("resize", () => { if (BG.id !== "off") bgResize(); });
-
 // Self-heal the external IP: the push event can be lost when the backend
 // finishes the check before the frontend has registered its listeners
 // (auto-connect at startup). If we are connected and the card is empty,
@@ -1527,9 +1113,7 @@ function renderState(st) {
     prev.profile_id !== S.state.profile_id ||
     !!prev.tun !== !!S.state.tun ||
     (prev.error || "") !== (S.state.error || "") ||
-    !!prev.sys_proxy !== !!S.state.sys_proxy ||
-    !!prev.reconnecting !== !!S.state.reconnecting ||
-    (prev.attempt || 0) !== (S.state.attempt || 0);
+    !!prev.sys_proxy !== !!S.state.sys_proxy;
   if (structural) { renderContent(); return; }
   patchVpnState();
   renderSidebarFooter();
@@ -1539,15 +1123,15 @@ function patchVpnState() {
   const st = S.state;
   const conn = st.state === "connected";
   const connecting = st.state === "connecting";
-  const rec = !!st.reconnecting;
+  const reconn = !!st.reconnecting;
   const labelEl = document.querySelector(".vpn-status .label");
-  if (labelEl) labelEl.textContent = conn ? t("vpn.protected") : rec ? t("vpn.reconnecting") : connecting ? t("vpn.connecting") : t("vpn.unprotected");
+  if (labelEl) labelEl.textContent = conn ? t("vpn.protected") : reconn ? t("vpn.reconnecting") + (st.attempt ? " " + t("vpn.attempt").replace("{n}", st.attempt) : "") : connecting ? t("vpn.connecting") : t("vpn.unprotected");
   const btn = $("btn-toggle");
   if (btn) {
     btn.classList.toggle("connected", conn);
-    btn.disabled = connecting && !rec;
+    btn.disabled = connecting;
     const txt = btn.querySelector(".connect-text");
-    if (txt) txt.textContent = conn || rec ? t("vpn.disconnect") : t("vpn.connect");
+    if (txt) txt.textContent = conn || reconn ? t("vpn.disconnect") : t("vpn.connect");
   }
 }
 
