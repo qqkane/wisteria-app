@@ -908,7 +908,6 @@ function wireContent() {
 function applyI18nEl(el) {
   const k = el.dataset.i18n;
   if (!k) return;
-  if (el.dataset.ph !== undefined || el.tagName === "TEXTAREA" && I18N[lang][k + "Ph"]) { /* handled below */ }
   el.textContent = t(k);
 }
 
