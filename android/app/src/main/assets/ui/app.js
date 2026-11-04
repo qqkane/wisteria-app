@@ -301,7 +301,10 @@ function renderContent() {
 
 function renderSidebarFooter() {
   const st = S.state;
-  const p = S.profiles.find((x) => x.id === st.profile_id);
+  // Before the first connect the backend status carries no profile_id —
+  // fall back to the profile selected on the Profiles tab, so the choice
+  // is visible immediately instead of "no profile selected".
+  const p = S.profiles.find((x) => x.id === (st.profile_id || S.selected));
   const dot = st.state === "connected" ? "on" : st.state === "connecting" ? "mid" : "";
   const statusText = st.state === "connected" ? t("vpn.connected") : st.state === "connecting" ? t("vpn.connecting") : t("vpn.unprotected");
   $("sidebar-footer").innerHTML = `
@@ -314,7 +317,7 @@ function renderVpn() {
   const st = S.state;
   const conn = st.state === "connected";
   const connecting = st.state === "connecting";
-  const p = S.profiles.find((x) => x.id === st.profile_id) || null;
+  const p = S.profiles.find((x) => x.id === (st.profile_id || S.selected)) || null;
   const label = conn ? t("vpn.protected") : connecting ? t("vpn.connecting") : t("vpn.unprotected");
   const btnText = conn ? t("vpn.disconnect") : t("vpn.connect");
   const lat = p && p.latency_ms ? (p.latency_ms < 0 ? "n/a" : p.latency_ms + " ms") : "";
