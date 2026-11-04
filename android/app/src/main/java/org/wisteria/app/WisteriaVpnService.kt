@@ -73,6 +73,23 @@ class WisteriaVpnService : VpnService() {
      *  live tunnel). */
     private var teardownEpoch = 0L
 
+    /** Unix seconds of the current session start, echoed into every pushed
+     *  state event. The desktop pushes the full core.Status (with
+     *  StartedAt); without it the frontend's uptime card never left "—"
+     *  after connect: GetState does carry started_at, but the 3 s poll only
+     *  re-renders when the state word differs. Cleared in teardown(). */
+    @Volatile
+    private var sessionStartEpoch = 0L
+
+    /** Bumped by every user-initiated Disconnect. A CONNECT captures this
+     *  generation in onStartCommand — before it is queued behind anything —
+     *  and connect() refuses to start the engine if it changed meanwhile:
+     *  a queued connect must not override a Cancel that landed while it
+     *  sat in the queue. (A plain userStopped check cannot tell "cancel
+     *  raced this connect" from "initial state" — the field starts true.) */
+    @Volatile
+    private var cancelEpoch = 0L
+
     // ---- app-side reconnect parity with the desktop (v1.1.6 core fix) ----
     // The desktop shell watches the SOCKS port every 2s and auto-reconnects
     // with backoff when the session dies without the user asking. Android
@@ -136,13 +153,19 @@ class WisteriaVpnService : VpnService() {
         if (!reconnectQueued.compareAndSet(false, true)) return
         val delay = backoffSecs[min(reconnectStep, backoffSecs.size - 1)]
         reconnectStep++
+        // Generation this reconnect attempt belongs to, sampled when the
+        // backoff is scheduled: a Cancel (or a fresh Connect, which also
+        // bumps the epoch) that lands during the delay must abort this
+        // attempt instead of letting it fire with the newest generation.
+        val epoch = cancelEpoch
         EngineHub.appLog("автопереподключение через ${delay}с (попытка $reconnectStep)")
         watchdogExec.schedule({
             if (userStopped) { reconnectQueued.set(false); return@schedule }
             executor.execute {
                 if (userStopped) { reconnectQueued.set(false); return@execute }
+                if (cancelEpoch != epoch) { reconnectQueued.set(false); return@execute }
                 teardown()
-                connect("")
+                connect("", epoch)
             }
         }, delay.toLong(), TimeUnit.SECONDS)
     }
@@ -231,13 +254,20 @@ class WisteriaVpnService : VpnService() {
             // that is stuck inside a blocking native engine call.
             ACTION_DISCONNECT -> Thread({
                 userStopped = true // cancels the watchdog and the reconnect queue
+                cancelEpoch++ // invalidates CONNECT intents queued before this cancel
                 stopWatchdog()
                 teardown()
                 stopSelf()
             }, "wisteria-disconnect").start()
             else -> {
                 val id = intent?.getStringExtra(EXTRA_PROFILE_ID).orEmpty()
-                executor.execute { connect(id) }
+                // The generation is read HERE, at submission time. Reading
+                // cancelEpoch inside the lambda would sample it when the task
+                // finally runs, i.e. after any Cancel that landed while this
+                // connect sat in the queue — the check would then compare the
+                // post-cancel value with itself and wave the Cancel through.
+                val epoch = cancelEpoch
+                executor.execute { connect(id, epoch) }
             }
         }
         // STICKY: if the system kills the service (memory, LMK), it comes
@@ -250,6 +280,7 @@ class WisteriaVpnService : VpnService() {
     override fun onRevoke() {
         // The system (or the user in settings) revoked VPN consent.
         userStopped = true // without consent a reconnect loop is pointless
+        cancelEpoch++ // a queued connect must not fight the revoked consent
         stopWatchdog()
         executor.execute {
             teardown()
@@ -268,19 +299,32 @@ class WisteriaVpnService : VpnService() {
         super.onDestroy()
     }
 
-    private fun connect(profileIdParam: String) {
+    private fun connect(profileIdParam: String, myCancelEpoch: Long) {
         val myEpoch = synchronized(stateLock) {
             // `starting` closes the gap before the engine flags are set
             // (startBox sets engineIsBox only after the config build,
             // startWisteria — tun only after establish()): two rapid
             // CONNECTs could otherwise start the engine twice.
-            if (tun != null || engineIsBox || starting) return // already running / starting
-            starting = true
-            teardownEpoch
+            if (tun != null || engineIsBox || starting) null else {
+                starting = true
+                teardownEpoch
+            }
+        }
+        if (myEpoch == null) {
+            // Duplicate CONNECT (double-tap, STICKY redelivery): the start
+            // itself is a no-op, but every startForegroundService() call
+            // must still be answered with startForeground() within the
+            // system timeout, or the app is crashed ~10 s later. Re-post
+            // the notification with the engine's current state word.
+            startForegroundWith(currentStatusWord())
+            return
         }
         // startForeground before anything slow: a startForegroundService
         // (bridge, BootReceiver) must reach startForeground() even when the
         // profile turns out to be missing and the service stops itself.
+        // The try/finally spans everything from here on: `starting` must be
+        // cleared on ANY exit path, or the next Connect would forever land
+        // in the duplicate-start branch above.
         startForegroundWith()
         try {
             val store = AndroidStore(this)
@@ -294,8 +338,17 @@ class WisteriaVpnService : VpnService() {
                     return
                 }
 
+            // A Disconnect may have landed while this connect sat queued on
+            // the executor: its cancelEpoch++ differs from the generation
+            // captured at onStartCommand, so the queued connect must not
+            // bring the tunnel up after the user pressed Cancel. (Cancels
+            // landing DURING the engine start are covered by the
+            // epochChanged() checks in startWisteria / startBox.)
+            if (cancelEpoch != myCancelEpoch) return
+
             // The user wants a tunnel now: arm the watchdog / reconnect path.
             userStopped = false
+            sessionStartEpoch = System.currentTimeMillis() / 1000
             reconnectStep = 0
             reconnectQueued.set(false)
 
@@ -304,6 +357,12 @@ class WisteriaVpnService : VpnService() {
             } else {
                 startBox(profile, myEpoch)
             }
+        } catch (e: Throwable) {
+            // establish()/store failures must not wedge `starting` (see the
+            // finally above) nor vanish silently: surface the real cause.
+            android.util.Log.d("WisteriaVpn", "connect failed", e)
+            EngineHub.appLog("подключение не удалось: ${trimErr(e.message)}")
+            EngineHub.pushEvent("state", statusJson("disconnected", trimErr(e.message)))
         } finally {
             synchronized(stateLock) { starting = false }
         }
@@ -511,6 +570,7 @@ class WisteriaVpnService : VpnService() {
         EngineHub.profileId = ""
         EngineHub.profileName = ""
         EngineHub.profileType = ""
+        sessionStartEpoch = 0 // the pushed "disconnected" must not carry a stale started_at
         if (pushState) EngineHub.pushEvent("state", statusJson("disconnected"))
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         } finally {
@@ -523,7 +583,24 @@ class WisteriaVpnService : VpnService() {
 
     /** The desktop Status shape the frontend renders. */
     private fun statusJson(state: String, error: String? = null): JSONObject =
-        WisteriaBridge.staticStatusJson(state, if (state == "disconnected") "" else EngineHub.profileType, error)
+        WisteriaBridge.staticStatusJson(
+            state,
+            if (state == "disconnected") "" else EngineHub.profileType,
+            error,
+            sessionStartEpoch,
+        )
+
+    /** The engine's current state mapped onto the notification words; used
+     *  when a duplicate CONNECT start must answer startForeground() without
+     *  clobbering the live "Secured" notification with "Подключение…". */
+    private fun currentStatusWord(): String = try {
+        when (JSONObject(Mobile.status()).optString("state")) {
+            "connected" -> "connected"
+            else -> "connecting"
+        }
+    } catch (_: Throwable) {
+        "connecting"
+    }
 
     private fun createChannel() {
         val nm = getSystemService(NotificationManager::class.java) ?: return
@@ -532,9 +609,9 @@ class WisteriaVpnService : VpnService() {
         )
     }
 
-    private fun startForegroundWith() {
+    private fun startForegroundWith(state: String = "connecting") {
         ServiceCompat.startForeground(
-            this, NOTIF_ID, buildNotification("connecting"),
+            this, NOTIF_ID, buildNotification(state),
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
             else

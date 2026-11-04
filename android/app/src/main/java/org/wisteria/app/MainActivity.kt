@@ -244,6 +244,14 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         EngineHub.emitters.clear()
         WisteriaBridgeHolder.instance = null
+        // The JS interface holds this activity through the bridge; detach it
+        // before the webview dies so a stale page can never reach a dead
+        // activity (rotation recreates the whole pair anyway).
+        try {
+            web.removeJavascriptInterface("WisteriaAndroid")
+            web.destroy()
+        } catch (_: Throwable) {
+        }
         super.onDestroy()
     }
 }

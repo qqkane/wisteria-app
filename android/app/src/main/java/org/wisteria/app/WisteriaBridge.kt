@@ -38,13 +38,17 @@ class WisteriaBridge(private val activity: MainActivity) {
         val VERSION: String = BuildConfig.VERSION_NAME
         private const val MAX_SUB_BYTES = 4 shl 20
 
-        /** Status shape shared with WisteriaVpnService (EngineHub-based). */
-        fun staticStatusJson(state: String, type: String, error: String? = null): JSONObject =
+        /** Status shape shared with WisteriaVpnService (EngineHub-based).
+         *  startedAt (unix seconds) mirrors the desktop's Status.StartedAt:
+         *  the pushed state events are what the VPN screen renders, and the
+         *  uptime card reads started_at from them. */
+        fun staticStatusJson(state: String, type: String, error: String? = null, startedAt: Long = 0): JSONObject =
             JSONObject()
                 .put("state", state)
                 .put("profile_id", EngineHub.profileId)
                 .put("profile_name", EngineHub.profileName)
                 .put("type", type)
+                .put("started_at", if (startedAt > 0) AndroidStore.epochIso(startedAt) else "")
                 .put("sys_proxy", false)
                 // An Android VPN is always TUN; the frontend shows its
                 // "tun active" note only while this is true when connected.
