@@ -2,6 +2,7 @@ package core
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"compress/gzip"
 	"os"
 	"path/filepath"
@@ -133,5 +134,73 @@ func TestTarExtract(t *testing.T) {
 		if filepath.Dir(got) != dir {
 			t.Fatalf("entry escaped the dir: %s", got)
 		}
+	}
+}
+
+// --- wisteria core channel (release-assets CI layout) --------------------
+
+func TestCoreBinaryMapping(t *testing.T) {
+	for name, want := range map[string]string{
+		"wisteria":  "wisteria-client",
+		"sing-box":  "sing-box",
+		"xray":      "xray",
+	} {
+		if got := coreBinary(name); got != want {
+			t.Errorf("coreBinary(%q) = %q, want %q", name, got, want)
+		}
+	}
+}
+
+func TestPickCoreAssetWisteria(t *testing.T) {
+	assets := []ghAsset{
+		{Name: "wisteria-server-linux-amd64.zip"},
+		{Name: "wisteria-client-linux-amd64.zip", URL: "wl"},
+		{Name: "wisteria-client-windows-amd64.zip", URL: "ww"},
+		{Name: "wisteria-client-linux-arm64.zip"},
+	}
+	want := "ww"
+	if runtime.GOOS != "windows" {
+		if runtime.GOARCH != "amd64" {
+			t.Skip("asset fixture covers amd64 only")
+		}
+		want = "wl"
+	}
+	a, err := pickCoreAsset("wisteria", assets)
+	if err != nil || a.URL != want {
+		t.Fatalf("wisteria asset = %v, %v (want %s)", a, err, want)
+	}
+	if _, err := pickCoreAsset("wisteria", assets[:1]); err == nil {
+		t.Fatal("asset list without the client archive must error")
+	}
+}
+
+func TestZipExtractWisteriaLayout(t *testing.T) {
+	// The release-assets CI job zips the binary at the archive ROOT; the
+	// updater must find it with the "/"+coreBinary(name)+exeSuffix filter.
+	dir := t.TempDir()
+	zp := filepath.Join(dir, "wisteria-client-windows-amd64.zip")
+	f, err := os.Create(zp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := zip.NewWriter(f)
+	bin := "wisteria-client" + exeSuffix
+	fw, err := w.Create(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fw.Write([]byte("fake-binary"))
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	out := t.TempDir()
+	staged, err := extractArchive(zp, out, "/"+bin)
+	if err != nil {
+		t.Fatalf("extractArchive: %v", err)
+	}
+	if len(staged) != 1 || filepath.Base(staged[0]) != bin {
+		t.Fatalf("staged = %v, want exactly %s", staged, bin)
 	}
 }

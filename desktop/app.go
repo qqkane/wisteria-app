@@ -710,15 +710,24 @@ func (a *App) RestartApp() error {
 	return nil
 }
 
-// CheckCoreUpdate reports the latest upstream version of "sing-box"/"xray".
-func (a *App) CheckCoreUpdate(name string) (core.UpdateInfo, error) {
-	explicit := ""
-	if name == "sing-box" {
-		explicit = a.svc.Settings().SingBoxCore
-	} else if name == "xray" {
-		explicit = a.svc.Settings().XrayCore
+// coreExplicitPath returns the user-configured binary path for a core
+// (empty = the app's own bin/ copy).
+func (a *App) coreExplicitPath(name string) string {
+	switch name {
+	case "sing-box":
+		return a.svc.Settings().SingBoxCore
+	case "xray":
+		return a.svc.Settings().XrayCore
+	case "wisteria":
+		return a.svc.Settings().WisteriaCore
 	}
-	return core.CoreUpdateCheck(name, explicit)
+	return ""
+}
+
+// CheckCoreUpdate reports the latest upstream version of
+// "sing-box"/"xray"/"wisteria".
+func (a *App) CheckCoreUpdate(name string) (core.UpdateInfo, error) {
+	return core.CoreUpdateCheck(name, a.coreExplicitPath(name))
 }
 
 // UpdateCore replaces the app's own bin/<name>.exe with the latest upstream
@@ -728,13 +737,7 @@ func (a *App) UpdateCore(name string) (string, error) {
 	if a.svc.RunningProfile() != "" {
 		return "", errors.New("подключение активно — сначала отключитесь")
 	}
-	explicit := ""
-	if name == "sing-box" {
-		explicit = a.svc.Settings().SingBoxCore
-	} else if name == "xray" {
-		explicit = a.svc.Settings().XrayCore
-	}
-	ver, err := core.CoreUpdateApply(name, explicit)
+	ver, err := core.CoreUpdateApply(name, a.coreExplicitPath(name))
 	if err == nil {
 		a.logf("ядро %s обновлено до v%s", name, ver)
 	}

@@ -651,6 +651,7 @@ function renderSettings() {
         <button class="ghost-btn" id="btn-detect">${esc(t("set.detect"))}</button>
         <button class="ghost-btn" id="btn-upd-singbox" ${S.coreUpd["sing-box"] ? "disabled" : ""}>${esc(t("set.updCore"))} sing-box</button>
         <button class="ghost-btn" id="btn-upd-xray" ${S.coreUpd["xray"] ? "disabled" : ""}>${esc(t("set.updCore"))} xray</button>
+        <button class="ghost-btn" id="btn-upd-wisteria" ${S.coreUpd["wisteria"] ? "disabled" : ""}>${esc(t("set.updCore"))} wisteria</button>
       </div>
       <div class="core-note" id="core-note"></div>
     </div>`;
@@ -887,15 +888,17 @@ function wireContent() {
   });
   on("btn-upd-singbox", "click", () => updateCore("sing-box"));
   on("btn-upd-xray", "click", () => updateCore("xray"));
+  on("btn-upd-wisteria", "click", () => updateCore("wisteria"));
   // Cores tab: when a third-party core is not installed at all, the
   // upstream button is a first download, not an update — say so on the
   // button ("Скачать xray") instead of the misleading "Обновить".
   if ($("btn-upd-singbox") || $("btn-upd-xray")) {
     api().DetectCores().then((info) => {
       if (!info) return;
-      const b1 = $("btn-upd-singbox"), b2 = $("btn-upd-xray");
+      const b1 = $("btn-upd-singbox"), b2 = $("btn-upd-xray"), b3 = $("btn-upd-wisteria");
       if (b1 && !info.singbox_found) b1.textContent = t("set.dlCore") + " sing-box";
       if (b2 && !info.xray_found) b2.textContent = t("set.dlCore") + " xray";
+      if (b3 && !info.wisteria_found) b3.textContent = t("set.dlCore") + " wisteria";
     }).catch(() => { /* detection is cosmetic here */ });
   }
   document.querySelectorAll(".set-tab").forEach((b) => b.addEventListener("click", () => {
