@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	repoSingBox = "SagerNet/sing-box"
-	repoXray    = "XTLS/Xray-core"
+	repoSingBox  = "SagerNet/sing-box"
+	repoXray     = "XTLS/Xray-core"
+	repoWisteria = "qqkane/wisteria"
 )
 
 // BinDir is the app's own core directory — <exe dir>/bin when that is
@@ -101,15 +102,34 @@ func pickCoreAsset(name string, assets []ghAsset) (ghAsset, error) {
 			if runtime.GOOS == "linux" && l == "xray-linux-64.zip" {
 				return a, nil
 			}
+		case "wisteria":
+			// release-assets CI job layout: wisteria-client-<goos>-<goarch>.zip
+			// with the binary at the archive root (repo qqkane/wisteria).
+			want := fmt.Sprintf("wisteria-client-%s-%s.zip", runtime.GOOS, runtime.GOARCH)
+			if l == want {
+				return a, nil
+			}
 		}
 	}
 	return ghAsset{}, fmt.Errorf("в релизе нет архива для %s amd64", runtime.GOOS)
+}
+
+// coreBinary maps a core name to the binary file it ships: the wisteria
+// core's updatable binary is wisteria-client(.exe), not <name>.exe.
+func coreBinary(name string) string {
+	if name == "wisteria" {
+		return "wisteria-client"
+	}
+	return name
 }
 
 // coreRepo maps a core name to its upstream repository.
 func coreRepo(name string) string {
 	if name == "xray" {
 		return repoXray
+	}
+	if name == "wisteria" {
+		return repoWisteria
 	}
 	return repoSingBox
 }
@@ -120,7 +140,7 @@ func coreRepo(name string) string {
 func CoreUpdateCheck(name, explicitPath string) (UpdateInfo, error) {
 	info := UpdateInfo{}
 	switch name {
-	case "sing-box", "xray":
+	case "sing-box", "xray", "wisteria":
 	default:
 		return info, errors.New("неизвестное ядро")
 	}
@@ -153,7 +173,7 @@ func corePathFor(name, explicitPath string) string {
 	if explicitPath != "" {
 		return explicitPath
 	}
-	exe := name + exeSuffix
+	exe := coreBinary(name) + exeSuffix
 	if bin := BinDir(); bin != "" {
 		p := filepath.Join(bin, exe)
 		if st, err := os.Stat(p); err == nil && !st.IsDir() {
@@ -195,7 +215,7 @@ func CoreUpdateApply(name, explicitPath string) (string, error) {
 	if err := verifyDigest(zipPath, info.Digest); err != nil {
 		return "", fmt.Errorf("%s: %v", info.AssetName, err)
 	}
-	staged, err := extractArchive(zipPath, tmp, "/"+name+exeSuffix)
+	staged, err := extractArchive(zipPath, tmp, "/"+coreBinary(name)+exeSuffix)
 	if err != nil {
 		return "", err
 	}
