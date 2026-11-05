@@ -259,14 +259,14 @@ class WisteriaBridge(private val activity: MainActivity) {
                 try {
                     val p = SingboxLinks.parseProfile(line)
                     if (p == null) {
-                        errors.put(JSONObject().put("line", line).put("error", "не удалось разобрать ссылку"))
+                        errors.put(JSONObject().put("line", shorten(line)).put("error", "не удалось разобрать ссылку"))
                     } else {
                         p.put("latency_ms", 0)
                         val saved = store.addProfile(p)
                         if (saved != null) added.put(saved)
                     }
                 } catch (e: Exception) {
-                    errors.put(JSONObject().put("line", line).put("error", e.message ?: "не распознано"))
+                    errors.put(JSONObject().put("line", shorten(line)).put("error", e.message ?: "не распознано"))
                 }
                 continue
             }
@@ -275,12 +275,12 @@ class WisteriaBridge(private val activity: MainActivity) {
                 for (j in 0 until entries.length()) {
                     val entry = entries.getJSONObject(j)
                     if (entry.optString("key").isEmpty()) {
-                        errors.put(JSONObject().put("line", line).put("error", "приглашение без ключа: Android-версия работает по ссылкам с ключом (Ссылка клиенту в панели)"))
+                        errors.put(JSONObject().put("line", shorten(line)).put("error", "приглашение без ключа: Android-версия работает по ссылкам с ключом (Ссылка клиенту в панели)"))
                         continue
                     }
                     val servers = entry.optJSONArray("servers")
                     if (servers == null || servers.length() == 0) {
-                        errors.put(JSONObject().put("line", line).put("error", "в ссылке нет серверов"))
+                        errors.put(JSONObject().put("line", shorten(line)).put("error", "в ссылке нет серверов"))
                         continue
                     }
                     val (host, port) = splitEndpoint(servers.getJSONObject(0).optString("endpoint"))
@@ -298,7 +298,7 @@ class WisteriaBridge(private val activity: MainActivity) {
                     if (saved != null) added.put(saved)
                 }
             } catch (e: Exception) {
-                errors.put(JSONObject().put("line", line).put("error", e.message ?: "не распознано"))
+                errors.put(JSONObject().put("line", shorten(line)).put("error", e.message ?: "не распознано"))
             }
         }
         if (added.length() > 0) {
@@ -627,6 +627,12 @@ class WisteriaBridge(private val activity: MainActivity) {
     /** Subscription URLs commonly carry an auth token in the query; keep
      *  it out of the log ring the Логи screen shows. */
     private fun maskUrl(u: String): String = u.substringBefore('?').substringBefore('#')
+
+    /** Import-error lines are shown verbatim in the errors box; a full
+     *  wisteria:// line would carry the whole client key there. The
+     *  desktop caps at the same 42 chars. */
+    private fun shorten(s: String): String =
+        if (s.length <= 42) s else s.take(42) + "…"
 
     /** host:port → (host, port); null when the endpoint is unusable. */
     private fun splitEndpoint(ep: String): Pair<String, Int>? {

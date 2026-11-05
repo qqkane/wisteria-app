@@ -69,7 +69,14 @@ class AndroidStore(private val context: Context) {
             } catch (e: Exception) {
                 // Never wipe silently: the user loses every profile and must be
                 // able to say why ("все профили пропали" was unreproducible).
+                // Set the raw JSON aside too — the desktop keeps a
+                // profiles.json.corrupt — so the next save() cannot destroy
+                // the last good copy forever (logcat is long gone by then).
                 android.util.Log.w("WisteriaStore", "stored JSON is corrupt, starting empty", e)
+                try {
+                    prefs.edit().putString("store.corrupt", raw).apply()
+                } catch (_: Throwable) {
+                }
                 emptyStore()
             }
         }

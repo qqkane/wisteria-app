@@ -222,7 +222,6 @@ func parseVMess(p Profile, userinfo, rest string) (Profile, error) {
 		p.Fields["path"] = v.Path
 	}
 	if v.TLS == "tls" || strings.EqualFold(v.TLS, "true") {
-		p.Fields["security"] = p.Fields["security"]
 		p.Fields["tls"] = "1"
 		p.Fields["sni"] = firstNonEmpty(v.SNI, v.Host)
 	}

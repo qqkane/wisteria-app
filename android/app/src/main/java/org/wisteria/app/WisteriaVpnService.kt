@@ -51,7 +51,15 @@ class WisteriaVpnService : VpnService() {
         private const val DNS = "8.8.8.8"
     }
 
+    // @Volatile: teardown() runs on the disconnect thread (or onDestroy)
+    // and reads these under stateLock, while the connect() executor writes
+    // them — a plain field write has no happens-before edge with the
+    // synchronized reader, so a racing teardown could see a stale null and
+    // leak the fd (or close a fresh one). boxTun is assigned under
+    // stateLock in onOpenTun; the volatile belt covers both.
+    @Volatile
     private var tun: ParcelFileDescriptor? = null
+    @Volatile
     private var boxTun: ParcelFileDescriptor? = null
     private var boxNetCallback: ConnectivityManager.NetworkCallback? = null
     private val executor = Executors.newSingleThreadExecutor()
@@ -235,7 +243,7 @@ class WisteriaVpnService : VpnService() {
                 } else {
                     builder.addRoute("0.0.0.0", 0)
                 }
-                builder.addDnsServer(DNS)
+                builder.addDnsServer(tunDns())
                 val pfd = builder.establish() ?: return -1
                 boxTun = pfd
                 return pfd.fd
@@ -382,7 +390,7 @@ class WisteriaVpnService : VpnService() {
             // tunnel would leak every dual-stack connection. Route ::/0
             // into the TUN (no v6 address) so v6 dies inside it instead.
             .addRoute("::", 0)
-            .addDnsServer(DNS)
+            .addDnsServer(tunDns())
             .setMtu(TUN_MTU)
             .setSession(profile.optString("name").ifEmpty { "Wisteria" })
         val fd = builder.establish()
@@ -600,6 +608,23 @@ class WisteriaVpnService : VpnService() {
         }
     } catch (_: Throwable) {
         "connecting"
+    }
+
+    /** TUN DNS server: the user's remote_dns when it is a plain IP (the
+     *  desktop routing setting both engines understand), else the 8.8.8.8
+     *  default. DoT/DoH forms (tls://, https://) cannot ride
+     *  addDnsServer — the box engine applies them in its own config (and
+     *  hijacks DNS anyway), so a non-IP value falls back to the default
+     *  instead of wedging the tunnel. */
+    private fun tunDns(): String {
+        val raw = AndroidStore(this).settings().optString("remote_dns", "").trim()
+        if (raw.isEmpty()) return DNS
+        val candidate = raw.substringAfter("://").substringBefore('/').trim()
+            .ifEmpty { raw }
+        if (candidate.isNotEmpty() &&
+            android.util.Patterns.IP_ADDRESS.matcher(candidate).matches()
+        ) return candidate
+        return DNS
     }
 
     private fun createChannel() {

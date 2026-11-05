@@ -324,9 +324,22 @@ func NewService(dirs Dirs, ring *LogRing, notify func()) *Service {
 func (s *Service) LoadSettings() Settings {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	data, err := os.ReadFile(filepath.Join(s.dirs.Data, "settings.json"))
+	path := filepath.Join(s.dirs.Data, "settings.json")
+	data, err := os.ReadFile(path)
 	if err == nil {
-		_ = jsonUnmarshal(data, &s.settings)
+		if err := jsonUnmarshal(data, &s.settings); err != nil {
+			// Same discipline as profiles.json (store.go): a corrupt file
+			// must not be silently overwritten by the next save — set it
+			// aside so the user can see why every setting reset.
+			s.settings = Settings{}
+			backup := path + ".corrupt"
+			_ = os.Remove(backup)
+			if rerr := os.Rename(path, backup); rerr == nil {
+				s.logf("settings.json повреждён (%v) — копия сохранена: %s", err, backup)
+			} else {
+				s.logf("settings.json повреждён (%v) и копию сохранить не удалось", err)
+			}
+		}
 	}
 	s.settings.defaults()
 	return s.settings
@@ -338,8 +351,20 @@ func (s *Service) SaveSettings(set Settings) Settings {
 	set.defaults()
 	s.settings = set
 	data, err := jsonMarshalIndent(set)
-	if err == nil {
-		_ = os.WriteFile(filepath.Join(s.dirs.Data, "settings.json"), data, 0o600)
+	if err != nil {
+		return s.settings
+	}
+	// Temp + rename, same as profiles.json: a plain WriteFile truncated the
+	// file in place, so a crash mid-write silently reset every setting
+	// (GitHub token, ports, per-protocol engines) to defaults.
+	path := filepath.Join(s.dirs.Data, "settings.json")
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return s.settings
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return s.settings
 	}
 	return s.settings
 }
@@ -353,8 +378,11 @@ func (s *Service) Settings() Settings {
 func (s *Service) Status() Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.st.SocksAddr = fmt.Sprintf("127.0.0.1:%d", s.settings.LocalPort)
-	s.st.HttpAddr = fmt.Sprintf("127.0.0.1:%d", s.settings.HttpPort)
+	// The real bind host, not a hardcoded 127.0.0.1: with ListenAll the UI
+	// must show what is actually listening (0.0.0.0 — LAN-open, warned in
+	// the log) instead of a loopback that hides the exposure.
+	s.st.SocksAddr = fmt.Sprintf("%s:%d", s.settings.ListenHost(), s.settings.LocalPort)
+	s.st.HttpAddr = fmt.Sprintf("%s:%d", s.settings.ListenHost(), s.settings.HttpPort)
 	s.st.SysProxy = s.proxySetView()
 	return s.st
 }
@@ -988,8 +1016,12 @@ func hasWintunDLL(singbox string, dirs Dirs) bool {
 }
 
 // runCoreOutput runs a core binary for its textual output (version probes).
+// Bounded: a wedged "core" binary must not hang the settings screen forever
+// (the probe runs synchronously inside CoreUpdateCheck).
 func runCoreOutput(bin string, args ...string) (string, error) {
-	cmd := exec.Command(bin, args...)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, args...)
 	hideConsole(cmd)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
