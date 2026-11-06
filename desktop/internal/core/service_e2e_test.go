@@ -280,8 +280,12 @@ func TestServiceE2EWisteriaTLS(t *testing.T) {
 		"[server]",
 		`listen = "127.0.0.1:` + strconv.Itoa(srvPort) + `"`,
 		`transport = "tls"`,
-		`tls_cert = "` + certPath + `"`,
-		`tls_key = "` + keyPath + `"`,
+		// TOML literal strings (single quotes) + forward slashes: on the
+		// Windows runner t.TempDir() is "C:\Users\..." — inside a basic
+		// string "\U" is an invalid escape and the server config would
+		// fail to load, so the TLS listener never comes up.
+		`tls_cert = '` + filepath.ToSlash(certPath) + `'`,
+		`tls_key = '` + filepath.ToSlash(keyPath) + `'`,
 		"",
 		"[crypto]",
 		`pattern = "auto"`,
