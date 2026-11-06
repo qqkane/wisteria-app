@@ -58,6 +58,157 @@ func TestWisteriaTOMLRejectsBadFields(t *testing.T) {
 	}
 }
 
+// TLS profile (wave 4): [server] and the [[servers]] row both carry
+// transport = "tls", the SNI override and the insecure flag land in the
+// pool row only when non-default.
+func TestWisteriaTOMLTLSRender(t *testing.T) {
+	p := Profile{ID: "t4", Type: TWisteria, Host: "s.example", Port: 47823,
+		ClientPriv: "PRIVKEYBASE64==", Transport: "tls", TLSSNI: "cdn.example", TLSInsecure: true,
+		Fields: map[string]string{"pub": "PUBKEYBASE64=="}}
+	out, err := WisteriaTOML(p, "127.0.0.1:2080", "cache.cache")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`[server]`, `endpoint  = "s.example:47823"`, `transport = "tls"`,
+		`public_key = "PUBKEYBASE64=="`,
+		`transport  = "tls"`, `tls_sni    = "cdn.example"`, `tls_insecure = true`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	// tls_sni equal to the endpoint host is the loader's default — omit.
+	p.TLSSNI = "s.example"
+	out2, err := WisteriaTOML(p, "127.0.0.1:2080", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out2, "tls_sni") {
+		t.Errorf("tls_sni == endpoint host must be omitted:\n%s", out2)
+	}
+	// A TLS profile without a pinned pub still needs the [[servers]] row:
+	// the legacy [server] block has no tls_sni/tls_insecure fields.
+	p.TLSSNI = "cdn.example"
+	delete(p.Fields, "pub")
+	out3, err := WisteriaTOML(p, "127.0.0.1:2080", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out3, "[[servers]]") || !strings.Contains(out3, `transport  = "tls"`) {
+		t.Errorf("TLS without pub must still render the pool row:\n%s", out3)
+	}
+	if strings.Contains(out3, "public_key") {
+		t.Errorf("no pub — no public_key row:\n%s", out3)
+	}
+}
+
+// A tcp profile must render byte-identical to the pre-wave-4 output: the
+// generated config is compared against expected text in tests and old
+// profiles must not silently change shape after an update.
+func TestWisteriaTOMLTCPSByteIdentical(t *testing.T) {
+	p := Profile{ID: "t5", Type: TWisteria, Host: "s.example", Port: 47823,
+		ClientPriv: "PRIV", Transport: "tcp",
+		Fields: map[string]string{"pub": "PUB"}}
+	out, err := WisteriaTOML(p, "127.0.0.1:2080", "cache.cache")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `[client]
+socks5_listen = "127.0.0.1:2080"
+
+[server]
+endpoint  = "s.example:47823"
+transport = "tcp"
+
+[[servers]]
+endpoint   = "s.example:47823"
+weight     = 1
+public_key = "PUB"
+
+[crypto]
+pattern              = "auto"
+static_private       = "PRIV"
+server_static_public = "PUB"
+
+[relay]
+mode = "direct"
+selection = "latency"
+backoff_initial_ms = 500
+backoff_max_ms = 30000
+probe_interval_sec = 30
+probe_timeout_sec = 3
+
+[obfuscation]
+# server defaults
+
+[routing]
+mode = "global"
+`
+	if out != want {
+		t.Fatalf("tcp output changed:\n got: %q\nwant: %q", out, want)
+	}
+	// The explicit "tcp" spelling normalizes onto the zero value.
+	p.Transport = ""
+	out2, err := WisteriaTOML(p, "127.0.0.1:2080", "cache.cache")
+	if err != nil || out2 != want {
+		t.Fatalf("tcp/empty must render identically (err=%v)", err)
+	}
+}
+
+// Build → import → same TLS fields: the TOML import must round-trip the
+// wave-4 fields without loss, including the tcp → zero-value normalization.
+func TestWisteriaTOMLTLSRoundTrip(t *testing.T) {
+	p := Profile{ID: "t6", Type: TWisteria, Host: "s.example", Port: 47823,
+		ClientPriv: "PRIVKEYBASE64==", Transport: "tls", TLSSNI: "cdn.example", TLSInsecure: true,
+		Fields: map[string]string{"pub": "PUBKEYBASE64=="}}
+	out, err := WisteriaTOML(p, "127.0.0.1:2080", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ParseWisteriaTOML(out)
+	if err != nil {
+		t.Fatalf("import: %v\n%s", err, out)
+	}
+	if got.Transport != "tls" || got.TLSSNI != "cdn.example" || !got.TLSInsecure {
+		t.Fatalf("tls fields lost: %+v", got)
+	}
+	// tcp profile: transport comes back as the zero value.
+	p.Transport, p.TLSSNI, p.TLSInsecure = "", "", false
+	out2, err := WisteriaTOML(p, "127.0.0.1:2080", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got2, err := ParseWisteriaTOML(out2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got2.Transport != "" || got2.TLSSNI != "" || got2.TLSInsecure {
+		t.Fatalf("tcp must import as the zero value: %+v", got2)
+	}
+}
+
+// The renderer re-checks the TLS fields like it re-checks the obf numbers:
+// a broken combo or a bad SNI from the manual form / hand-edited store is a
+// render error, not a silently degraded config.
+func TestWisteriaTOMLRejectsBadTLS(t *testing.T) {
+	base := Profile{ID: "t7", Type: TWisteria, Host: "s.example", Port: 47823,
+		ClientPriv: "PRIV", Fields: map[string]string{"pub": "PUB"}}
+	for name, mut := range map[string]func(*Profile){
+		"sni-without-tls":   func(p *Profile) { p.TLSSNI = "cdn.example" },
+		"insec-without-tls": func(p *Profile) { p.TLSInsecure = true },
+		"ip-sni":            func(p *Profile) { p.Transport, p.TLSSNI = "tls", "1.2.3.4" },
+		"underscore-sni":    func(p *Profile) { p.Transport, p.TLSSNI = "tls", "my_host.example" },
+		"bad-transport":     func(p *Profile) { p.Transport = "quic" },
+	} {
+		p := base
+		mut(&p)
+		if out, err := WisteriaTOML(p, "127.0.0.1:2080", ""); err == nil {
+			t.Errorf("%s: must be rejected, got:\n%s", name, out)
+		}
+	}
+}
+
 func singBoxOut(t *testing.T, p Profile) map[string]any {
 	t.Helper()
 	raw, err := SingBoxConfig(p, SingBoxOptions{MixedPort: 2080})

@@ -91,6 +91,10 @@ func WisteriaTOML(p Profile, socksListen, cachePath string) (string, error) {
 	if err := checkObfFields(p.Fields); err != nil {
 		return "", err
 	}
+	if err := p.normalizeTLS(); err != nil {
+		return "", err
+	}
+	tls := p.Transport == "tls"
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format+"\n", args...) }
 
@@ -101,16 +105,43 @@ func WisteriaTOML(p Profile, socksListen, cachePath string) (string, error) {
 	// given via [[servers]] (it validates before wrapping single entries).
 	w("[server]")
 	w("endpoint  = %q", p.Endpoint())
-	w("transport = \"tcp\"")
+	if tls {
+		w("transport = \"tls\"")
+	} else {
+		w("transport = \"tcp\"")
+	}
 	w("")
-	if pub := p.Fields["pub"]; pub != "" {
-		// A pinned key goes into the [[servers]] row (per-endpoint pin, IK
-		// from the first connect) and into crypto.server_static_public.
+	pub := p.Fields["pub"]
+	// The [[servers]] pool row carries the pinned key when the profile has
+	// one. A TLS profile without a pub still needs the row: the legacy
+	// [server] block has no tls_sni/tls_insecure fields, so the pool row is
+	// the only place the TLS settings can ride (an empty public_key keeps
+	// the XX-pin-on-first-connect behaviour).
+	if pub != "" || tls {
 		w("[[servers]]")
 		w("endpoint   = %q", p.Endpoint())
 		w("weight     = 1")
-		w("public_key = %q", pub)
+		if pub != "" {
+			w("public_key = %q", pub)
+		}
+		// TLS rows (wave 4) are emitted only when non-default, so a tcp
+		// profile renders byte-identical to the pre-wave-4 output. tls_sni
+		// is omitted when it equals the endpoint host: the loader defaults
+		// it to exactly that value.
+		if tls {
+			w("transport  = \"tls\"")
+			if sni := p.TLSSNI; sni != "" && sni != p.Host {
+				w("tls_sni    = %q", sni)
+			}
+			if p.TLSInsecure {
+				w("tls_insecure = true")
+			}
+		}
 		w("")
+	}
+	if pub != "" {
+		// A pinned key goes into the [[servers]] row (per-endpoint pin, IK
+		// from the first connect) and into crypto.server_static_public.
 		w("[crypto]")
 		w("pattern              = \"auto\"")
 		w("static_private       = %q", p.ClientPriv)

@@ -75,6 +75,22 @@
           <div class="input-group"><label data-i18n="lbl.host">Адрес</label><input id="m-host" type="text"/></div>
           <div class="input-group small"><label data-i18n="lbl.port">Порт</label><input id="m-port" type="number" min="1" max="65535"/></div>
         </div>
+        <div id="m-wst-tls" class="hidden">
+          <div class="input-row">
+            <div class="input-group small">
+              <label data-i18n="lbl.transport">Транспорт</label>
+              <select id="m-transport"><option value="tcp">TCP</option><option value="tls">TLS</option></select>
+            </div>
+            <div class="input-group hidden" id="m-tls-sni-group">
+              <label data-i18n="lbl.tlsSni">TLS SNI</label>
+              <input id="m-tls-sni" type="text" data-ph="lbl.tlsSniNote" placeholder="auto"/>
+            </div>
+          </div>
+          <label class="tls-insec hidden" id="m-tls-insec-wrap">
+            <input id="m-tls-insec" type="checkbox"/>
+            <span data-i18n="lbl.tlsInsecure">Не проверять сертификат</span>
+          </label>
+        </div>
         <div id="m-extra"></div>
         <button class="submit-btn" id="btn-add-manual" data-i18n="add.add">Добавить</button>
       </div>

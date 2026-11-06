@@ -135,8 +135,13 @@ func (s *Store) Active() (Profile, bool) {
 
 // Add stores the profile, assigning an id (and a fresh wisteria client key
 // when the profile does not carry one). Re-adding the same raw link is a
-// no-op returning the existing profile.
+// no-op returning the existing profile. Every import path funnels through
+// here, so the TLS fields are validated+canonicalized at the single choke
+// point (a manual-form or hand-edited-store profile skips the parsers).
 func (s *Store) Add(p Profile) (Profile, error) {
+	if err := p.normalizeTLS(); err != nil {
+		return Profile{}, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if p.Raw != "" {
@@ -371,6 +376,9 @@ func (s *Store) ReplaceSubscriptionProfiles(subID string, fresh []Profile) (int,
 	added := 0
 	for _, np := range fresh {
 		np.SourceID = subID
+		if err := np.normalizeTLS(); err != nil {
+			return 0, err
+		}
 		if np.Fields == nil {
 			np.Fields = map[string]string{}
 		}

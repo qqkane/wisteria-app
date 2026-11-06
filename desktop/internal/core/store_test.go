@@ -34,6 +34,69 @@ func TestOpenStoreNormalizesLegacyTypeID(t *testing.T) {
 	}
 }
 
+// TLS transport (wave 4): the three fields must survive a save/reopen cycle
+// and the bare-TCP default must persist as the zero values (old stores have
+// no keys at all and mean tcp).
+func TestStoreTLSPersistence(t *testing.T) {
+	dir := t.TempDir()
+	st, err := OpenStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tlsP, err := st.Add(Profile{Type: TWisteria, Name: "tls", Host: "s.example", Port: 1,
+		Transport: "tls", TLSSNI: "cdn.example", TLSInsecure: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Explicit tcp normalizes onto the zero value: nothing new in the JSON.
+	tcpP, err := st.Add(Profile{Type: TWisteria, Name: "tcp", Host: "t.example", Port: 2, Transport: "tcp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tcpP.Transport != "" || tcpP.TLSSNI != "" || tcpP.TLSInsecure {
+		t.Fatalf("tcp must normalize onto the zero values: %+v", tcpP)
+	}
+	st2, err := OpenStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := st2.Get(tlsP.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Transport != "tls" || got.TLSSNI != "cdn.example" || !got.TLSInsecure {
+		t.Fatalf("tls fields lost after reopen: %+v", got)
+	}
+	if got, err = st2.Get(tcpP.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got.Transport != "" || got.TLSSNI != "" || got.TLSInsecure {
+		t.Fatalf("tcp fields changed after reopen: %+v", got)
+	}
+}
+
+// Every save path validates the TLS combo rules at the store choke point:
+// a manual-form or hand-edited profile skips the link parsers but must not
+// smuggle in tls_sni/tls_insecure without transport = "tls".
+func TestStoreAddRejectsBadTLS(t *testing.T) {
+	dir := t.TempDir()
+	st, err := OpenStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad := []Profile{
+		{Type: TWisteria, Host: "h", Port: 1, TLSSNI: "cdn.example"},
+		{Type: TWisteria, Host: "h", Port: 1, TLSInsecure: true},
+		{Type: TWisteria, Host: "h", Port: 1, Transport: "quic"},
+		{Type: TWisteria, Host: "h", Port: 1, Transport: "tls", TLSSNI: "1.2.3.4"},
+	}
+	for i, p := range bad {
+		if _, err := st.Add(p); err == nil {
+			t.Errorf("case %d: expected an error", i)
+		}
+	}
+}
+
 func TestOpenStoreCorruptFileBackedUp(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "profiles.json"), []byte("{not json"), 0o600); err != nil {

@@ -153,6 +153,10 @@ select option, select optgroup { background-color: var(--surface); color: var(--
 .sli-addr { font-size: 11px; color: var(--muted); font-family: 'JetBrains Mono', monospace; margin-top: 2px; }
 .sli-lat { font-size: 10px; color: var(--muted); font-family: 'JetBrains Mono', monospace; margin-top: 2px; }
 .sli-lat.good { color: var(--accent); }
+.tls-badge { display: inline-block; font-size: 9px; font-weight: 700; letter-spacing: .5px; line-height: 1; color: var(--accent); border: 1px solid rgba(var(--accent-rgb), .6); border-radius: 4px; padding: 2px 4px; margin-left: 6px; vertical-align: 1px; font-family: 'JetBrains Mono', monospace; }
+/* manual form: the TLS transport rows (wisteria only) */
+.tls-insec { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); margin: 2px 0 10px; cursor: pointer; }
+.tls-insec input { accent-color: var(--accent); }
 .sli-act { background: none; border: none; color: var(--muted); width: 32px; height: 32px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .sli-act svg { width: 14px; height: 14px; }
 .sli-act:hover { color: var(--fg); background: rgba(255,255,255,.05); }

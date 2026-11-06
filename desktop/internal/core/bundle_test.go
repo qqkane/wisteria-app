@@ -101,6 +101,58 @@ func TestParseLinkBundleLegacySchemeAndPaddedBody(t *testing.T) {
 	}
 }
 
+// TLS transport (wave 4): per-server keys ride the JSON dialect. Absent
+// keys keep the profile bare TCP (old links unchanged); a tls server row
+// carries the transport, the optional SNI override and the insecure flag.
+func TestParseLinkBundleTLSVariant(t *testing.T) {
+	link := mintBundle(t, bundlePayload{
+		V: 1,
+		Servers: []bundleServer{
+			{EP: "203.0.113.10:8443", Pub: pub32},
+			{EP: "203.0.113.20:8443", Pub: pub32, Transport: "tcp"},
+			{EP: "203.0.113.21:8443", Pub: pub32, Transport: "tls"},
+			{EP: "203.0.113.22:8443", Pub: pub32, Transport: "tls", TLSSNI: "cdn.example", TLSInsecure: true},
+		},
+		Name: "tls-pool",
+	})
+	profs, err := ParseLinkAll(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(profs) != 4 {
+		t.Fatalf("expanded to %d profiles, want 4", len(profs))
+	}
+	for i, want := range []struct {
+		tr, sni string
+		insec   bool
+	}{
+		{"", "", false}, {"", "", false}, {"tls", "", false}, {"tls", "cdn.example", true},
+	} {
+		if profs[i].Transport != want.tr || profs[i].TLSSNI != want.sni || profs[i].TLSInsecure != want.insec {
+			t.Fatalf("server %d: got transport=%q sni=%q insecure=%v, want %+v",
+				i, profs[i].Transport, profs[i].TLSSNI, profs[i].TLSInsecure, want)
+		}
+	}
+}
+
+func TestParseLinkBundleTLSBrokenVariants(t *testing.T) {
+	cases := map[string]string{
+		"unknown transport": `{"v":1,"servers":[{"ep":"h:1","pub":"","transport":"quic"}]}`,
+		"upper transport":   `{"v":1,"servers":[{"ep":"h:1","pub":"","transport":"TLS"}]}`,
+		"sni without tls":   `{"v":1,"servers":[{"ep":"h:1","pub":"","tls_sni":"cdn.example"}]}`,
+		"insec without tls": `{"v":1,"servers":[{"ep":"h:1","pub":"","tls_insecure":true}]}`,
+		"ip sni":            `{"v":1,"servers":[{"ep":"h:1","pub":"","transport":"tls","tls_sni":"1.2.3.4"}]}`,
+		"underscore sni":    `{"v":1,"servers":[{"ep":"h:1","pub":"","transport":"tls","tls_sni":"my_host.example"}]}`,
+		"tcp with sni":      `{"v":1,"servers":[{"ep":"h:1","pub":"","transport":"tcp","tls_sni":"cdn.example"}]}`,
+	}
+	for name, payload := range cases {
+		link := "wisteria://" + base64.RawURLEncoding.EncodeToString([]byte(payload))
+		if _, err := ParseLinkAll(link); err == nil {
+			t.Errorf("%s: expected an error", name)
+		}
+	}
+}
+
 func TestParseLinkBundleBrokenVariants(t *testing.T) {
 	cases := map[string]string{
 		"version missing": `{"servers":[{"ep":"h:1","pub":""}]}`,

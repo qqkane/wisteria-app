@@ -166,6 +166,76 @@ func TestParseWisteriaObfValidation(t *testing.T) {
 	}
 }
 
+// TLS transport (wave 4) on the desktop query dialect: absent = bare TCP,
+// explicit tcp is accepted and normalized onto the zero value, tls pulls in
+// the optional sni/insecure params.
+func TestParseWisteriaTLSParams(t *testing.T) {
+	pub := "q5LinLVGCGUA8WzbRTjylGRv36jrCIb+V7tH8Y5cXVo="
+	b64url := strings.NewReplacer("+", "-", "/", "_", "=", "").Replace(pub)
+	link := func(q string) string {
+		return "wisteria://" + b64url + "@w.example:47823?" + q + "#x"
+	}
+	p, err := ParseLink(link("transport=tls&tls_sni=cdn.example&tls_insecure=1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Transport != "tls" || p.TLSSNI != "cdn.example" || !p.TLSInsecure {
+		t.Fatalf("tls fields: %+v", p)
+	}
+	// Explicit tcp with no other tls fields: lenient (normalizes to tcp).
+	p, err = ParseLink(link("transport=tcp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Transport != "" || p.TLSSNI != "" || p.TLSInsecure {
+		t.Fatalf("tcp must normalize onto the zero values: %+v", p)
+	}
+	// tls_insecure=false keeps verification on.
+	p, err = ParseLink(link("transport=tls&tls_insecure=0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Transport != "tls" || p.TLSInsecure {
+		t.Fatalf("tls_insecure=0: %+v", p)
+	}
+	// No TLS params at all: pre-wave-4 links parse unchanged.
+	p, err = ParseLink(link("pad=64-1448"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Transport != "" || p.TLSSNI != "" || p.TLSInsecure {
+		t.Fatalf("plain link must stay bare tcp: %+v", p)
+	}
+}
+
+// Broken TLS combos and values are import errors, never silent fallbacks.
+// Error strings follow the v1.1.8 rule: name the bad field, never echo
+// credentials (keys are not part of these messages).
+func TestParseWisteriaTLSRejects(t *testing.T) {
+	pub := "q5LinLVGCGUA8WzbRTjylGRv36jrCIb+V7tH8Y5cXVo="
+	b64url := strings.NewReplacer("+", "-", "/", "_", "=", "").Replace(pub)
+	link := func(q string) string {
+		return "wisteria://" + b64url + "@w.example:47823?" + q + "#x"
+	}
+	for _, bad := range []string{
+		"transport=quic",                                    // неизвестный транспорт
+		"transport=TLS",                                     // регистр важен: опечатка, не фолбэк
+		"transport=tcp&tls_insecure=1",                      // insecure только с tls
+		"tls_sni=cdn.example",                               // sni без transport=tls
+		"tls_insecure=true",                                 // insecure без transport=tls
+		"transport=tls&tls_sni=1.2.3.4",                     // IP в SNI (RFC 6066)
+		"transport=tls&tls_sni=my_host.example",             // подчёркивание
+		"transport=tls&tls_sni=two..dots.example",           // пустая метка
+		"transport=tls&tls_sni=-bad.example",                // дефис в начале метки
+		"transport=tls&tls_sni=" + strings.Repeat("a", 254), // длиннее 253
+		"transport=tls&tls_insecure=maybe",                  // мусор в булевом
+	} {
+		if _, err := ParseLink(link(bad)); err == nil {
+			t.Errorf("expected rejection for %q", bad)
+		}
+	}
+}
+
 func TestParseWisteriaTOMLImport(t *testing.T) {
 	tomlText := `
 [server]
@@ -200,6 +270,71 @@ rekey_frames = 16777216
 	}
 	if p.Fields["pub"] == "" || p.Fields["min_pad"] != "64" || p.Fields["rekey"] != "16777216" {
 		t.Fatalf("fields: %v", p.Fields)
+	}
+}
+
+// TOML import must round-trip the wave-4 TLS fields from the [[servers]]
+// row and reject broken combos, mirroring the core's config loader.
+func TestParseWisteriaTOMLTLS(t *testing.T) {
+	tomlText := `
+[server]
+endpoint = "srv.example:47823"
+
+[[servers]]
+endpoint   = "srv.example:47823"
+weight     = 1
+public_key = "q5LinLVGCGUA8WzbRTjylGRv36jrCIb+V7tH8Y5cXVo="
+transport  = "tls"
+tls_sni    = "cdn.example"
+tls_insecure = true
+
+[crypto]
+static_private = "CL1ENTPRIVATEKEYBASE64=="
+`
+	p, err := ParseWisteriaTOML(tomlText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Transport != "tls" || p.TLSSNI != "cdn.example" || !p.TLSInsecure {
+		t.Fatalf("tls fields lost: %+v", p)
+	}
+	// tcp + no tls fields: accepted, normalized onto the zero values.
+	p, err = ParseWisteriaTOML(strings.Replace(tomlText,
+		"transport  = \"tls\"\ntls_sni    = \"cdn.example\"\ntls_insecure = true\n", "transport  = \"tcp\"\n", 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Transport != "" || p.TLSSNI != "" || p.TLSInsecure {
+		t.Fatalf("tcp must normalize: %+v", p)
+	}
+	// Legacy [server]-only config: transport rides there (no sni/insecure
+	// rows exist in the legacy block).
+	p, err = ParseWisteriaTOML(`
+[server]
+endpoint = "srv.example:47823"
+transport = "tls"
+
+[crypto]
+static_private = "CL1ENTPRIVATEKEYBASE64=="
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Transport != "tls" || p.TLSSNI != "" || p.TLSInsecure {
+		t.Fatalf("legacy [server] tls: %+v", p)
+	}
+	// Broken combos and bad values are import errors.
+	for _, bad := range []string{
+		// tls_sni without transport = tls in the pool row
+		strings.Replace(tomlText, "transport  = \"tls\"\n", "", 1),
+		// unknown transport value
+		strings.Replace(tomlText, "transport  = \"tls\"", "transport  = \"quic\"", 1),
+		// IP in SNI
+		strings.Replace(tomlText, "tls_sni    = \"cdn.example\"", "tls_sni    = \"1.2.3.4\"", 1),
+	} {
+		if _, err := ParseWisteriaTOML(bad); err == nil {
+			t.Errorf("expected rejection for:\n%s", bad)
+		}
 	}
 }
 

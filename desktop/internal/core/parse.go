@@ -9,7 +9,7 @@ package core
 //	trojan://    URI, password in userinfo
 //	hysteria2:// URI (hy2:// alias), password in userinfo
 //	tuic://      URI, uuid:password in userinfo
-//	wisteria://  this app's format: base64(server pubkey)@host:port?obf params#name
+//	wisteria://  this app's format: base64(server pubkey)@host:port?obf+TLS params#name
 //
 // Parsing is done manually (not url.Parse on the whole link) because base64
 // userinfo contains '+', '/' and '=' which are not legal URL characters and
@@ -309,12 +309,15 @@ func parseTuic(p Profile, userinfo string, q map[string]string) (Profile, error)
 
 // ---- wisteria ----
 //
-//	wisteria://BASE64URL(server_pub)@host:port?obf_mu=6.7&obf_sigma=0.6&pad=64-1448&jitter_us=1&coalesce_ms=5&mimic=1&filler=80-400&filler_ratio=5&rekey=16777216#Имя
+//	wisteria://BASE64URL(server_pub)@host:port?obf_mu=6.7&obf_sigma=0.6&pad=64-1448&jitter_us=1&coalesce_ms=5&mimic=1&filler=80-400&filler_ratio=5&rekey=16777216&transport=tls&tls_sni=cdn.example&tls_insecure=1#Имя
 //
 // The server public key is optional: without it the first handshake runs XX
 // and the core pins the key itself (serverkey cache). All obfuscation
 // parameters are optional; omitted ones keep the client defaults, which
-// must match the server's config anyway.
+// must match the server's config anyway. The TLS params (wave 4) are
+// optional too: absent or transport=tcp means bare TCP; tls_sni defaults to
+// the endpoint host; tls_insecure is the lab escape hatch and only valid
+// together with transport=tls.
 
 func parseWisteria(p Profile, userinfo string, q map[string]string) (Profile, error) {
 	if p.Port == 0 {
@@ -385,6 +388,38 @@ func parseWisteria(p Profile, userinfo string, q map[string]string) (Profile, er
 			p.Fields[k] = v
 		}
 	}
+	// TLS transport (wave 4): optional query params riding the same link
+	// format. Absent = bare TCP, so pre-TLS links parse unchanged. Strict
+	// like the numeric fields above: the transport spelling is case-
+	// sensitive (same as the core's config loader) so a typo'd "TLS" must
+	// not fall back to tcp and silently change what lands on the wire.
+	switch tr := strings.TrimSpace(q["transport"]); tr {
+	case "":
+	case "tcp":
+	case "tls":
+		p.Transport = "tls"
+	default:
+		return Profile{}, fmt.Errorf("wisteria: transport = %q — нужен «tcp» или «tls»", tr)
+	}
+	if sni := strings.TrimSpace(q["tls_sni"]); sni != "" {
+		if err := ValidSNI(sni); err != nil {
+			return Profile{}, fmt.Errorf("wisteria: %v", err)
+		}
+		p.TLSSNI = sni
+	}
+	switch v := strings.ToLower(strings.TrimSpace(q["tls_insecure"])); v {
+	case "":
+	case "1", "true", "yes":
+		p.TLSInsecure = true
+	case "0", "false", "no":
+	default:
+		return Profile{}, fmt.Errorf("wisteria: tls_insecure = %q — нужен 1 или 0", q["tls_insecure"])
+	}
+	// Broken combos are import errors, never silent fallbacks: tls_sni or
+	// tls_insecure only mean something on a TLS endpoint.
+	if p.Transport != "tls" && (p.TLSSNI != "" || p.TLSInsecure) {
+		return Profile{}, errors.New(`wisteria: tls_sni/tls_insecure требуют transport = "tls"`)
+	}
 	return p, nil
 }
 
@@ -395,11 +430,15 @@ func parseWisteria(p Profile, userinfo string, q map[string]string) (Profile, er
 func ParseWisteriaTOML(text string) (Profile, error) {
 	var doc struct {
 		Server struct {
-			Endpoint string `toml:"endpoint"`
+			Endpoint  string `toml:"endpoint"`
+			Transport string `toml:"transport"`
 		} `toml:"server"`
 		Servers []struct {
-			Endpoint  string `toml:"endpoint"`
-			PublicKey string `toml:"public_key"`
+			Endpoint    string `toml:"endpoint"`
+			PublicKey   string `toml:"public_key"`
+			Transport   string `toml:"transport"`
+			TLSSNI      string `toml:"tls_sni"`
+			TLSInsecure bool   `toml:"tls_insecure"`
 		} `toml:"servers"`
 		Crypto struct {
 			StaticPrivate      string `toml:"static_private"`
@@ -442,13 +481,30 @@ func ParseWisteriaTOML(text string) (Profile, error) {
 	if err != nil {
 		return Profile{}, err
 	}
+	// TLS transport (wave 4): the [[servers]] row carries the per-endpoint
+	// fields; the legacy [server] block has only transport (no sni/insecure
+	// rows exist there). tcp + no tls fields is accepted and normalized onto
+	// the bare-TCP zero values; tls_sni/tls_insecure without transport=tls
+	// are an import error, mirroring the core's config loader.
+	transport, tlsSNI, tlsInsecure := doc.Server.Transport, "", false
+	if len(doc.Servers) > 0 && doc.Servers[0].Endpoint != "" {
+		transport = doc.Servers[0].Transport
+		tlsSNI = doc.Servers[0].TLSSNI
+		tlsInsecure = doc.Servers[0].TLSInsecure
+	}
 	p := Profile{
-		Name:       host + ":" + strconv.Itoa(port),
-		Type:       TWisteria,
-		Host:       host,
-		Port:       port,
-		ClientPriv: doc.Crypto.StaticPrivate,
-		Fields:     map[string]string{},
+		Name:        host + ":" + strconv.Itoa(port),
+		Type:        TWisteria,
+		Host:        host,
+		Port:        port,
+		ClientPriv:  doc.Crypto.StaticPrivate,
+		Transport:   transport,
+		TLSSNI:      tlsSNI,
+		TLSInsecure: tlsInsecure,
+		Fields:      map[string]string{},
+	}
+	if err := p.normalizeTLS(); err != nil {
+		return Profile{}, fmt.Errorf("toml: %v", err)
 	}
 	if pub == "" {
 		pub = doc.Crypto.ServerStaticPublic

@@ -3,7 +3,13 @@ package core
 // Wisteria bundle links: the invite/link format minted by wisteria-peer and
 // the panel (spec: internal/peers/invite.go in the main module):
 //
-//	wisteria://base64url({"v":1,"servers":[{"ep":"host:port","pub":"<b64>"}],"name":"label","key":"<b64>"})
+//	wisteria://base64url({"v":1,"servers":[{"ep":"host:port","pub":"<b64>",
+//	                   "transport":"tls?","tls_sni":"host?","tls_insecure":true?}],
+//	                   "name":"label","key":"<b64>"})
+//
+// The per-server TLS keys (wave 4) are optional and additive to v1: absent
+// or empty means the bare-TCP default, so links minted before the TLS
+// transport existed decode unchanged.
 //
 // Two variants:
 //   - invite (no "key"): public material only. The app generates a client
@@ -33,6 +39,14 @@ const (
 type bundleServer struct {
 	EP  string `json:"ep"`
 	Pub string `json:"pub"`
+	// TLS transport (wave 4): optional per-server keys, all omitempty.
+	// Absent or "tcp" = bare TCP; "tls" = the uTLS-wrapped dial. tls_sni
+	// absent when empty or equal to the endpoint host; tls_insecure only
+	// valid with transport = "tls". Old links without these keys decode to
+	// the zero values and stay bare TCP — no version bump.
+	Transport   string `json:"transport,omitempty"`
+	TLSSNI      string `json:"tls_sni,omitempty"`
+	TLSInsecure bool   `json:"tls_insecure,omitempty"`
 }
 
 type bundlePayload struct {
@@ -125,6 +139,20 @@ func ParseWisteriaBundle(raw string) ([]Profile, error) {
 			}
 			pub = base64.StdEncoding.EncodeToString(raw32)
 		}
+		// TLS transport (wave 4): same rules the link parser applies to the
+		// query dialect — a typo'd transport must not fall back to tcp, and
+		// tls_sni/tls_insecure without transport = "tls" do not import.
+		tr := strings.TrimSpace(srv.Transport)
+		if err := ValidateTransport(tr); err != nil {
+			return nil, fmt.Errorf("сервер %d (%s): %v", i+1, srv.EP, err)
+		}
+		sni := strings.TrimSpace(srv.TLSSNI)
+		if err := ValidSNI(sni); err != nil {
+			return nil, fmt.Errorf("сервер %d (%s): %v", i+1, srv.EP, err)
+		}
+		if (sni != "" || srv.TLSInsecure) && tr != "tls" {
+			return nil, fmt.Errorf(`сервер %d (%s): tls_sni/tls_insecure требуют transport = "tls"`, i+1, srv.EP)
+		}
 		pname := name
 		if pname == "" {
 			pname = host
@@ -138,6 +166,11 @@ func ParseWisteriaBundle(raw string) ([]Profile, error) {
 			Host:   host,
 			Port:   port,
 			Fields: map[string]string{},
+		}
+		if tr == "tls" {
+			p.Transport = "tls"
+			p.TLSSNI = sni
+			p.TLSInsecure = srv.TLSInsecure
 		}
 		if pub != "" {
 			p.Fields["pub"] = pub
