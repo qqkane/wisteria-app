@@ -141,9 +141,9 @@ func TestTarExtract(t *testing.T) {
 
 func TestCoreBinaryMapping(t *testing.T) {
 	for name, want := range map[string]string{
-		"wisteria":  "wisteria-client",
-		"sing-box":  "sing-box",
-		"xray":      "xray",
+		"wisteria": "wisteria-client",
+		"sing-box": "sing-box",
+		"xray":     "xray",
 	} {
 		if got := coreBinary(name); got != want {
 			t.Errorf("coreBinary(%q) = %q, want %q", name, got, want)
