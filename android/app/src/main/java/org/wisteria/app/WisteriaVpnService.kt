@@ -15,7 +15,6 @@ import android.os.Build
 import android.os.ParcelFileDescriptor
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
-import org.json.JSONArray
 import org.json.JSONObject
 import org.wisteria.mobile.Callback
 import org.wisteria.mobile.Mobile
@@ -408,12 +407,14 @@ class WisteriaVpnService : VpnService() {
         EngineHub.appLog("подключение к «${EngineHub.profileName}»…")
 
         // The engine takes the whole server list from the profile (bundle
-        // links carry mirrors) and rotates targets on every attempt.
-        val servers = profile.optJSONArray("servers") ?: JSONArray()
+        // links carry mirrors) and rotates targets on every attempt. Manual
+        // profiles have no stored list — TlsTransport builds the single dial
+        // row from host:port (+ pinned pub, + TLS transport fields, wave 4);
+        // a config with neither a server list nor an endpoint is rejected.
         val cfg = JSONObject()
             .put("priv", profile.optString("client_priv"))
             .put("name", profile.optString("name"))
-            .put("servers", servers)
+            .put("servers", TlsTransport.engineServers(profile))
             .toString()
 
         EngineHub.pushEvent("state", statusJson("connecting"))

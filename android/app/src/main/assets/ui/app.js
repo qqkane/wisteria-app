@@ -110,6 +110,9 @@ const I18N = {
     "add.namePh": "auto", "add.import": "Импортировать", "add.add": "Добавить",
     "toml.hint": "Вставьте client.toml — endpoint, ключи и обфускация переносятся; приватный ключ клиента сохраняется как есть.",
     "lbl.type": "Тип", "lbl.name": "Имя", "lbl.host": "Адрес", "lbl.port": "Порт",
+    "lbl.transport": "Транспорт", "lbl.tlsSni": "TLS SNI", "lbl.tlsSniNote": "по умолчанию — хост сервера",
+    "lbl.tlsInsecure": "Не проверять сертификат",
+    "tls.sniAuto": "SNI: хост сервера",
     "toast.added": "Добавлено", "toast.saved": "Настройки сохранены",
     "confirm.delete": "Удалить профиль?",
     "subs.title": "Подписки", "subs.ph": "URL подписки (https://…)", "subs.add": "Добавить",
@@ -189,6 +192,9 @@ const I18N = {
     "add.namePh": "auto", "add.import": "Import", "add.add": "Add",
     "toml.hint": "Paste your client.toml — endpoint, keys and obfuscation are carried over; the client private key is kept as is.",
     "lbl.type": "Type", "lbl.name": "Name", "lbl.host": "Host", "lbl.port": "Port",
+    "lbl.transport": "Transport", "lbl.tlsSni": "TLS SNI", "lbl.tlsSniNote": "defaults to the server host",
+    "lbl.tlsInsecure": "Skip certificate verification",
+    "tls.sniAuto": "SNI: server host",
     "toast.added": "Added", "toast.saved": "Settings saved",
     "confirm.delete": "Delete this profile?",
     "subs.title": "Subscriptions", "subs.ph": "Subscription URL (https://…)", "subs.add": "Add",
@@ -243,6 +249,15 @@ const mirrorsLabel = (p) => {
     : (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14)) ? "few" : "many";
   return " · " + t("profiles.mirrors." + k).replace("{n}", n);
 };
+
+// TLS badge for wisteria profiles on a real-TLS transport (wave 4). The
+// tooltip names the SNI override when one is set, otherwise the default
+// (the endpoint host).
+function tlsBadge(p) {
+  if (!p || p.type !== "wisteria" || p.transport !== "tls") return "";
+  const tip = p.tls_sni ? "SNI: " + p.tls_sni : t("tls.sniAuto");
+  return ` <span class="tls-badge" title="${esc(tip)}">TLS</span>`;
+}
 
 function showToast(msg) {
   const el = $("toast");
@@ -335,7 +350,7 @@ function renderVpn() {
       <div class="profile-card" id="card-profile">
         <div class="icon-box">${typeIcon(p ? p.type : "")}</div>
         <div class="srv-info">
-          <div class="srv-name">${esc(p ? p.name : t("vpn.noProfile"))}</div>
+          <div class="srv-name">${esc(p ? p.name : t("vpn.noProfile"))}${tlsBadge(p)}</div>
           <div class="srv-ping">${esc(p ? p.host + ":" + p.port + (lat ? " · " + lat : "") + mirrorsLabel(p) : t("vpn.clickSelect"))}</div>
         </div>
         ${I.chev}
@@ -377,7 +392,7 @@ function profileCard(p) {
     <div class="server-list-item ${active ? "active-server" : ""}" data-id="${p.id}">
       <div class="sli-icon">${typeIcon(p.type)}</div>
       <div class="sli-data">
-        <div class="sli-name">${esc(p.name)}</div>
+        <div class="sli-name">${esc(p.name)}${tlsBadge(p)}</div>
         <div class="sli-addr">${esc(p.host)}:${p.port}${mirrorsLabel(p)}</div>
         ${lat}
       </div>
@@ -1151,8 +1166,22 @@ function renderExtraFields() {
     box.insertAdjacentHTML("beforeend",
       `<div class="input-group"><label>${esc(label)}</label><input type="text" data-field="${esc(key)}"/></div>`);
   });
+  // Wisteria TLS transport (wave 4): the dedicated block replaces the
+  // generic text inputs — a select plus two rows that only make sense on TLS.
+  const wst = $("m-wst-tls");
+  if (wst) wst.classList.toggle("hidden", tp !== "wisteria");
+  syncTlsRows();
+}
+// SNI + insecure checkbox appear only when transport = TLS.
+function syncTlsRows() {
+  const tls = !!$("m-transport") && $("m-transport").value === "tls";
+  [["m-tls-sni-group"], ["m-tls-insec-wrap"]].forEach(([id]) => {
+    const el = $(id);
+    if (el) el.classList.toggle("hidden", !tls);
+  });
 }
 $("m-type").addEventListener("change", renderExtraFields);
+$("m-transport").addEventListener("change", syncTlsRows);
 
 // import handlers
 $("btn-import").addEventListener("click", async () => {
@@ -1189,13 +1218,26 @@ $("btn-import-toml").addEventListener("click", async () => {
 $("btn-add-manual").addEventListener("click", async () => {
   const fields = {};
   document.querySelectorAll("#m-extra input[data-field]").forEach((i) => { if (i.value.trim()) fields[i.dataset.field] = i.value.trim(); });
+  const payload = {
+    type: $("m-type").value, name: $("m-name").value.trim(),
+    host: $("m-host").value.trim(), port: parseInt($("m-port").value, 10) || 0,
+    fields,
+  };
+  // Wisteria TLS transport: the select sends "tcp"/"tls" (the backend
+  // normalizes tcp onto the empty default); the SNI and the insecure
+  // checkbox only carry meaning with TLS, so they ride only then.
+  if (payload.type === "wisteria" && $("m-transport")) {
+    payload.transport = $("m-transport").value;
+    if (payload.transport === "tls") {
+      payload.tls_sni = $("m-tls-sni").value.trim();
+      payload.tls_insecure = $("m-tls-insec").checked;
+    }
+  }
   try {
-    const p = await api().AddManual({
-      type: $("m-type").value, name: $("m-name").value.trim(),
-      host: $("m-host").value.trim(), port: parseInt($("m-port").value, 10) || 0,
-      fields,
-    });
+    const p = await api().AddManual(payload);
     $("m-name").value = ""; $("m-host").value = ""; $("m-port").value = "";
+    $("m-tls-sni").value = ""; $("m-tls-insec").checked = false; $("m-transport").value = "tcp";
+    syncTlsRows();
     showToast("✓ " + p.name);
     await loadProfiles();
   } catch (e) { showToast((e && e.message) || e); }

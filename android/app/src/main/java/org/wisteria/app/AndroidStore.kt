@@ -108,8 +108,14 @@ class AndroidStore(private val context: Context) {
         null
     }
 
-    /** Adds the profile, assigning id/created_at; duplicate raw+type is a no-op. */
+    /** Adds the profile, assigning id/created_at; duplicate raw+type is a no-op.
+     *  Every import path (links, manual form, subscriptions) funnels through
+     *  here, so the wisteria TLS fields are validated and canonicalized at
+     *  this single choke point — a manual-form or hand-edited-store profile
+     *  skips the parsers (same rule as the desktop's store.Add). Throws with
+     *  a user-facing message on a broken TLS combo. */
     fun addProfile(p: JSONObject): JSONObject? = synchronized(STORE_LOCK) {
+        TlsTransport.normalizeTls(p)
         val store = load()
         val arr = store.optJSONArray("profiles") ?: JSONArray()
         val raw = p.optString("raw")

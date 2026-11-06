@@ -294,6 +294,10 @@ class WisteriaBridge(private val activity: MainActivity) {
                         .put("client_priv", entry.optString("key"))
                         .put("servers", servers)
                         .put("latency_ms", 0)
+                    // Wave 4: the parsed rows carry the per-server TLS keys —
+                    // mirror the primary row onto the profile (badge + store
+                    // validation). Rows were validated by mobile.ParseLinks.
+                    TlsTransport.applyPrimaryTls(p, servers)
                     val saved = store.addProfile(p)
                     if (saved != null) added.put(saved)
                 }
@@ -316,13 +320,19 @@ class WisteriaBridge(private val activity: MainActivity) {
         val host = o.optString("host").trim()
         val port = o.optInt("port", 0)
         if (host.isEmpty() || port <= 0) throw err("укажите адрес и порт сервера")
+        // Wave 4 TLS transport: "tcp" from the form is normalized onto the
+        // absent default by the store choke point; here it only decides the
+        // dedup identity — a bare-tcp and a TLS profile on the same
+        // host:port are different endpoints and may coexist.
+        val tls = o.optString("transport").trim() == "tls"
         // Manual profiles carry no raw link, so addProfile's raw-dedup
         // never fires for them — compare by type+host+port explicitly.
         val existing = store.listProfiles()
         for (i in 0 until existing.length()) {
             val p = existing.getJSONObject(i)
             if (p.optString("type") == "wisteria" &&
-                p.optString("host") == host && p.optInt("port", 0) == port
+                p.optString("host") == host && p.optInt("port", 0) == port &&
+                (p.optString("transport") == "tls") == tls
             ) {
                 throw err("такой профиль уже есть")
             }
@@ -342,6 +352,13 @@ class WisteriaBridge(private val activity: MainActivity) {
             .put("client_priv", keypair.optString("priv"))
             .put("latency_ms", 0)
         fields.optString("pub").takeIf { it.isNotEmpty() }?.let { p.put("pub", it) }
+        // TLS fields ride the payload top-level (the select always sends
+        // "tcp"/"tls"; the SNI and the checkbox only matter with TLS).
+        // Validation+canonicalization happen in addProfile → normalizeTls:
+        // a bad SNI or sni/insecure-without-tls comes back as an error.
+        o.optString("transport").takeIf { it.isNotEmpty() }?.let { p.put("transport", it) }
+        o.optString("tls_sni").takeIf { it.isNotEmpty() }?.let { p.put("tls_sni", it.trim()) }
+        if (o.optBoolean("tls_insecure")) p.put("tls_insecure", true)
         val saved = store.addProfile(p) ?: throw err("такой профиль уже есть")
         EngineHub.appLog("профиль «${saved.optString("name")}» добавлен вручную")
         pushProfiles()
@@ -462,6 +479,9 @@ class WisteriaBridge(private val activity: MainActivity) {
                 .put("client_priv", keyByEndpoint[host + ":" + port] ?: entry.optString("key"))
                 .put("servers", servers)
                 .put("latency_ms", 0)
+            // Wave 4: mirror the primary row's TLS keys onto the profile
+            // (same rule as addLinks; rows were validated by ParseLinks).
+            TlsTransport.applyPrimaryTls(p, servers)
             store.addProfile(p)?.let { count++ }
         }
         for (p in sbProfiles) {
