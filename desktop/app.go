@@ -592,6 +592,16 @@ func (a *App) ImportFromClipboard() (ClipImport, error) {
 	if res.Subscriptions == 0 && len(res.Added) == 0 && len(res.Errors) == 0 {
 		return res, errors.New("в буфере нет ни ссылки-подписки, ни share-ссылок")
 	}
+	// The clipboard held credentials (share links carry client keys and
+	// passwords, subscription URLs the auth tokens): once the import
+	// consumed them, wipe the buffer. A failed import keeps it — the user
+	// may want to fix the link and retry. Best effort: a failed wipe must
+	// not fail the import.
+	if res.Subscriptions > 0 || len(res.Added) > 0 {
+		if err := runtime.ClipboardSetText(a.ctx, ""); err != nil {
+			a.logf("буфер обмена не очищен после импорта: %v", err)
+		}
+	}
 	return res, nil
 }
 
