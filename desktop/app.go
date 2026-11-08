@@ -181,7 +181,11 @@ func (a *App) GetExternalIP() (string, error) {
 	return core.FetchExternalIP("127.0.0.1", a.svc.Settings().LocalPort, 8*time.Second)
 }
 
-// startAutoPing runs the background TCP-ping loop over all profiles.
+// startAutoPing runs the background ping loop for the CONNECTED profile,
+// measured through the tunnel. The other profiles are pinged manually only:
+// a timed sweep over every endpoint would fire bare-TCP (or TLS) probes at
+// foreign servers on a schedule — exactly the DPI-visible pattern the
+// protocol avoids.
 func (a *App) startAutoPing() {
 	a.pingMu.Lock()
 	defer a.pingMu.Unlock()
@@ -203,14 +207,22 @@ func (a *App) startAutoPing() {
 			case <-stop:
 				return
 			case <-t.C:
-				// One batched store write per cycle: per-profile SetLatency
-				// would rewrite profiles.json N times per tick.
-				lat := make(map[string]int64)
-				for _, p := range a.store.List() {
-					ms, _ := core.PingEndpoint(p.Host, p.Port, 3*time.Second)
-					lat[p.ID] = ms
+				st := a.svc.Status()
+				if st.State != core.StateConnected {
+					continue
 				}
-				a.store.SetLatencies(lat)
+				p, err := a.store.Get(st.ProfileID)
+				if err != nil {
+					continue
+				}
+				ms, _ := core.PingEndpoint(core.PingTarget{
+					Host:      p.Host,
+					Port:      p.Port,
+					Transport: p.Transport,
+					TLSSNI:    p.TLSSNI,
+					ViaSocks:  fmt.Sprintf("127.0.0.1:%d", a.svc.Settings().LocalPort),
+				}, 3*time.Second)
+				a.store.SetLatencies(map[string]int64{p.ID: ms})
 				runtime.EventsEmit(a.ctx, "profiles")
 			}
 		}
@@ -452,7 +464,14 @@ func (a *App) PingProfile(id string) (int64, error) {
 	if err != nil {
 		return -1, err
 	}
-	ms, err := core.PingEndpoint(p.Host, p.Port, 3*time.Second)
+	// The connected profile is measured through the tunnel (the server sees
+	// only tunnel traffic); the rest from here — TLS profiles get a real
+	// handshake, legacy bare-TCP the old raw dial.
+	tgt := core.PingTarget{Host: p.Host, Port: p.Port, Transport: p.Transport, TLSSNI: p.TLSSNI}
+	if st := a.svc.Status(); st.State == core.StateConnected && st.ProfileID == id {
+		tgt.ViaSocks = fmt.Sprintf("127.0.0.1:%d", a.svc.Settings().LocalPort)
+	}
+	ms, err := core.PingEndpoint(tgt, 3*time.Second)
 	a.store.SetLatency(id, ms)
 	return ms, err
 }

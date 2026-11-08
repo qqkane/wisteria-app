@@ -80,7 +80,7 @@ type Settings struct {
 	StartMinimized bool `json:"start_minimized"` // hide the window at launch
 	ConfirmExit    bool `json:"confirm_exit"`    // ask before quitting while connected
 	CheckExtIP     bool `json:"check_ext_ip"`    // resolve the external IP after connect
-	AutoPingSec    int  `json:"auto_ping_sec"`   // background TCP ping interval, 0 = off
+	AutoPingSec    int  `json:"auto_ping_sec"`   // background ping interval for the connected profile (through the tunnel), 0 = off
 
 	// Updates: the zero value keeps the check on (so old configs stay in it).
 	NoUpdateCheck bool `json:"no_update_check"`
