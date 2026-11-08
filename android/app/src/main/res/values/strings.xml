@@ -5,4 +5,5 @@
     <string name="status_connecting">Подключение…</string>
     <string name="status_connected">Защищено</string>
     <string name="notif_disconnect">Отключить</string>
+    <string name="error_http_cleartext">HTTP запрещён: подписки с ключами передаются открытым текстом, используйте https://</string>
 </resources>

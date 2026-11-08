@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Subscription providers legitimately serve plain http:// lists, so
-     cleartext stays permitted for the app's own HTTP stack; everything
-     else the app talks to (ipify, GitHub) is https. This replaces the
-     global android:usesCleartextTraffic flag, which meant the same thing
-     but left no place to tighten specific hosts later. -->
+<!-- Cleartext is forbidden: wisteria:// subscription bodies embed client
+     private keys, and over http:// they would travel in plaintext (visible
+     to the ISP and on-path observers). Subscription URLs must be https://
+     (the HTTP stack rejects http:// with a localized error before it ever
+     dials); everything else the app talks to (ipify, GitHub) is https too.
+     This replaced the global android:usesCleartextTraffic flag, which meant
+     the same thing but left no place to tighten specific hosts later. -->
 <network-security-config>
-    <base-config cleartextTrafficPermitted="true" />
+    <base-config cleartextTrafficPermitted="false" />
 </network-security-config>

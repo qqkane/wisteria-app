@@ -666,6 +666,14 @@ class WisteriaBridge(private val activity: MainActivity) {
     }
 
     private fun httpGet(url: String, maxBytes: Int, timeoutMs: Int): String {
+        // Subscription bodies embed client private keys; over http:// they
+        // would travel in plaintext (visible to the ISP and on-path
+        // observers). Rejected before the request — here, centrally, so
+        // every httpGet caller is covered (the extIP mirrors are https
+        // constants and never hit this).
+        if (url.trim().startsWith("http://", ignoreCase = true)) {
+            throw err(context.getString(R.string.error_http_cleartext))
+        }
         val conn = URL(url).openConnection() as HttpURLConnection
         conn.connectTimeout = timeoutMs
         conn.readTimeout = timeoutMs
