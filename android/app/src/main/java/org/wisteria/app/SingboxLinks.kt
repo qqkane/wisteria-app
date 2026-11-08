@@ -168,6 +168,30 @@ object SingboxLinks {
 
     // ---- config builder ---------------------------------------------------
 
+    /** TLS info of the outbound buildOutbound(raw) would hand to the
+     *  engine, for the reachability probe: (usesTls, serverName).
+     *  serverName is the exact server_name the outbound's tls block
+     *  carries — the explicit sni/server_name parameter, or the host
+     *  where the builder defaults to it (the uri-style blocks). An empty
+     *  string means the block leaves server_name unset (vmess without
+     *  sni): what the engine then presents on the wire is its own
+     *  decision the model does not pin down, so the probe must not fall
+     *  back to the host on its own. (false, null) when the outbound has
+     *  no enabled tls block or the link does not parse — such a probe
+     *  keeps the plain connect. */
+    fun outboundTls(raw: String): Pair<Boolean, String?> {
+        return try {
+            val tls = buildOutbound(raw, "probe").optJSONObject("tls")
+            if (tls != null && tls.optBoolean("enabled", false)) {
+                true to tls.optString("server_name")
+            } else {
+                false to null
+            }
+        } catch (_: Exception) {
+            false to null
+        }
+    }
+
     /** Private ranges for the bypass-LAN rule (applied before the proxy). */
     private val PRIVATE_CIDRS = listOf(
         "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8",

@@ -12,6 +12,10 @@ import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Base64
+import javax.net.ssl.SNIServerName
+import javax.net.ssl.SNIHostName
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.SSLSocketFactory
 
 /**
  * The desktop App API re-implemented over the mobile engine: one
@@ -237,7 +241,14 @@ class WisteriaBridge(private val activity: MainActivity) {
                 if (p.optString("type") == "wisteria") {
                     Mobile.ping(endpointOf(p))
                 } else {
-                    tcpPing(p.optString("host"), p.optInt("port", 443))
+                    // A TLS outbound must be probed with a TLS handshake:
+                    // a bare TCP connect to a TLS endpoint is a fingerprint
+                    // the real client never produces (and dangerous while
+                    // disconnected, when the probe does not ride the
+                    // tunnel). Plain outbounds keep the raw connect.
+                    val (tls, sni) = SingboxLinks.outboundTls(p.optString("raw"))
+                    if (tls) tlsPing(p.optString("host"), p.optInt("port", 443), sni)
+                    else tcpPing(p.optString("host"), p.optInt("port", 443))
                 }
             } catch (e: Exception) {
                 -1L
@@ -629,11 +640,37 @@ class WisteriaBridge(private val activity: MainActivity) {
         EngineHub.pushEvent("profiles", null)
     }
 
-    /** TCP connect RTT for sing-box-protocol profiles (no engine ping). */
+    /** TCP connect RTT for plain (non-TLS) sing-box-protocol profiles
+     *  (no engine ping). */
     private fun tcpPing(host: String, port: Int): Long {
         val start = System.nanoTime()
         java.net.Socket().use { s ->
             s.connect(java.net.InetSocketAddress(host, if (port in 1..65535) port else 443), 3000)
+        }
+        return (System.nanoTime() - start) / 1_000_000
+    }
+
+    /** TLS handshake RTT for TLS-enabled sing-box outbounds. The probe
+     *  must look like the connection it previews, so it presents exactly
+     *  the server_name the outbound block carries (null = none — never
+     *  an implicit host SNI the config did not ask for) and uses the
+     *  default factory: no trust or hostname-verification overrides, a
+     *  failed handshake counts as unreachable. */
+    private fun tlsPing(host: String, port: Int, sni: String?): Long {
+        val start = System.nanoTime()
+        val factory = SSLSocketFactory.getDefault() as SSLSocketFactory
+        factory.createSocket().use { s ->
+            val ssl = s as SSLSocket
+            ssl.connect(java.net.InetSocketAddress(host, if (port in 1..65535) port else 443), 3000)
+            ssl.soTimeout = 3000
+            // An empty serverNames list sends no SNI extension; a named
+            // one pins what the config carries. Default JSSE behavior
+            // (implicit SNI from the connect address) is never relied on.
+            val params = ssl.sslParameters
+            params.serverNames = if (sni.isNullOrEmpty()) emptyList<SNIServerName>()
+            else listOf<SNIServerName>(SNIHostName(sni))
+            ssl.sslParameters = params
+            ssl.startHandshake()
         }
         return (System.nanoTime() - start) / 1_000_000
     }
