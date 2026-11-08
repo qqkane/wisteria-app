@@ -5,4 +5,5 @@
     <string name="status_connecting">Connecting…</string>
     <string name="status_connected">Secured</string>
     <string name="notif_disconnect">Disconnect</string>
+    <string name="error_http_cleartext">HTTP is forbidden: subscriptions carry private keys in plaintext — use https://</string>
 </resources>
