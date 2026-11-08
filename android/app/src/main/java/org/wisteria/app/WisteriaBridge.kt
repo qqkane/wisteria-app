@@ -1,5 +1,6 @@
 package org.wisteria.app
 
+import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -532,7 +533,23 @@ class WisteriaBridge(private val activity: MainActivity) {
         }
         val res = if (links.isNotEmpty()) addLinks(links.toString())
         else JSONObject().put("added", JSONArray()).put("errors", JSONArray())
+        clearClipboard(cm)
         return res.put("subscriptions", subCount)
+    }
+
+    /** The imported line carries the client private key; once consumed it
+     *  must not linger in the clipboard for the next reader. Overwriting
+     *  runs in the foreground right after the user action, so the
+     *  background-clipboard restriction does not apply on supported API
+     *  levels — still best-effort: a failure to clear must never fail the
+     *  import. Skipped when the import itself threw (nothing was
+     *  consumed, the user may still want the content). */
+    private fun clearClipboard(cm: ClipboardManager?) {
+        if (cm == null) return
+        try {
+            cm.setPrimaryClip(ClipData.newPlainText("", ""))
+        } catch (_: Exception) {
+        }
     }
 
     // ---- external IP / diag ----
