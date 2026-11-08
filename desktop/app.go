@@ -125,6 +125,7 @@ func (a *App) startup(ctx context.Context) {
 			BridgeEnabled: true,
 			SysProxy:      true,
 			CheckExtIP:    true,
+			KillSwitch:    true, // ship-default; the zero value would persist an explicit off
 		})
 		a.svc.LoadSettings()
 	}

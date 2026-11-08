@@ -83,7 +83,8 @@ func gnomeSetProxy(on bool, addr string) error {
 func SystemProxySupported() bool { return len(availableProxyBackends()) > 0 }
 
 // gnomeClearStale disables the GNOME proxy when it points at our own HTTP
-// port. Reports whether a stale entry was cleared.
+// port or at the kill-switch blackhole. Reports whether a stale entry was
+// cleared.
 func gnomeClearStale(localPort int) bool {
 	if !gsettingsAvailable() {
 		return false
@@ -104,7 +105,8 @@ func gnomeClearStale(localPort int) bool {
 	if h != "127.0.0.1" && h != "localhost" && h != "::1" {
 		return false
 	}
-	if strings.TrimSpace(port) != strconv.Itoa(localPort) {
+	// Our own footprint: the bridge port or the kill-switch blackhole.
+	if p := strings.TrimSpace(port); p != strconv.Itoa(localPort) && p != sysProxyBlackholePort {
 		return false
 	}
 	return gnomeSetProxy(false, "") == nil

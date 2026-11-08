@@ -57,6 +57,7 @@ const I18N = {
     "sec.general": "Общие", "sec.routing": "Маршрутизация и DNS", "sec.cores": "Ядра", "sec.system": "Система",
     "set.lang": "Язык", "set.socksPort": "Локальный SOCKS-порт", "set.httpPort": "Локальный HTTP-порт",
     "set.sysproxy": "Системный прокси при подключении", "set.bridge": "HTTP-мост (нужен для системного прокси)",
+    "set.killSwitch": "Kill switch (анти-утечка)", "set.killSwitchNote": "при обрыве туннеля не по вине пользователя системный прокси указывает на заглушку — трафик блокируется вместо утечки, пока соединение не восстановится",
     "set.autoconnect": "Автоподключение при старте", "set.autostart": "Запускать при входе в Windows",
     "set.wisteriaCore": "Путь к wisteria-client", "set.singboxCore": "Путь к sing-box",
     "set.detect": "Найти ядра", "set.save": "Сохранить настройки",
@@ -138,6 +139,7 @@ const I18N = {
     "sec.general": "General", "sec.routing": "Routing & DNS", "sec.cores": "Cores", "sec.system": "System",
     "set.lang": "Language", "set.socksPort": "Local SOCKS port", "set.httpPort": "Local HTTP port",
     "set.sysproxy": "Set system proxy on connect", "set.bridge": "HTTP bridge (required for the system proxy)",
+    "set.killSwitch": "Kill switch (leak protection)", "set.killSwitchNote": "if the tunnel dies unexpectedly, the system proxy points at a blackhole — traffic is blocked instead of leaking until the connection is restored",
     "set.autoconnect": "Auto-connect on start", "set.autostart": "Start with Windows",
     "set.wisteriaCore": "Path to wisteria-client", "set.singboxCore": "Path to sing-box",
     "set.detect": "Detect cores", "set.save": "Save settings",
@@ -603,6 +605,8 @@ function renderSettings() {
         <label class="switch"><input id="s-bridge" type="checkbox"/><span class="slider"></span></label>
         <label>${esc(t("set.sysproxy"))}</label>
         <label class="switch"><input id="s-sysproxy" type="checkbox"/><span class="slider"></span></label>
+        <label>${esc(t("set.killSwitch"))}<span class="set-note">${esc(t("set.killSwitchNote"))}</span></label>
+        <label class="switch"><input id="s-killswitch" type="checkbox"/><span class="slider"></span></label>
         <label>${esc(t("set.listenAll"))}<span class="set-note">${esc(t("set.listenAllNote"))}</span></label>
         <label class="switch"><input id="s-listenall" type="checkbox"/><span class="slider"></span></label>
         <label>${esc(t("set.tun"))}<span class="set-note">${esc(t("set.tunNote"))}</span></label>
@@ -950,6 +954,7 @@ async function fillSettingsForm(s) {
   setv("s-port", s.local_port || 2080);
   setv("s-http-port", s.http_port || 2081);
   setc("s-sysproxy", s.sys_proxy);
+  setc("s-killswitch", s.kill_switch);
   setc("s-bridge", s.bridge_enabled);
   setv("s-wisteria", s.wisteria_core || "");
   setv("s-singbox", s.singbox_core || "");
@@ -992,6 +997,7 @@ async function saveSettings() {
     local_port: g("s-port") ? num("s-port", 2080) : cur.local_port,
     http_port: g("s-http-port") ? num("s-http-port", 2081) : cur.http_port,
     sys_proxy: g("s-sysproxy") ? $("s-sysproxy").checked : cur.sys_proxy,
+    kill_switch: g("s-killswitch") ? $("s-killswitch").checked : cur.kill_switch,
     bridge_enabled: g("s-bridge") ? $("s-bridge").checked : cur.bridge_enabled,
     auto_connect: g("s-autoconnect") ? $("s-autoconnect").value : cur.auto_connect,
     wisteria_core: g("s-wisteria") ? $("s-wisteria").value.trim() : cur.wisteria_core,

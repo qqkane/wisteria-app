@@ -2,6 +2,8 @@ package core
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -115,6 +117,46 @@ func contains(s, sub string) bool {
 		}
 		return false
 	})()
+}
+
+func TestKillSwitchDefault(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+
+	// A settings.json written before the kill switch existed: the field is
+	// absent, so the new ship-default (on) applies.
+	if err := os.WriteFile(path, []byte(`{"local_port":2080}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(Dirs{Data: dir}, NewLogRing(16), nil)
+	if !svc.LoadSettings().KillSwitch {
+		t.Fatal("kill_switch must default to on for settings that never stored a choice")
+	}
+
+	// An explicit user choice survives the default merge…
+	if err := os.WriteFile(path, []byte(`{"kill_switch":false}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	svc = NewService(Dirs{Data: dir}, NewLogRing(16), nil)
+	if svc.LoadSettings().KillSwitch {
+		t.Fatal("an explicit kill_switch=false must not be flipped by the default")
+	}
+	// …including a save round-trip of the stored settings.
+	if svc.SaveSettings(svc.Settings()).KillSwitch {
+		t.Fatal("SaveSettings must not re-enable an explicitly disabled kill switch")
+	}
+	if svc.LoadSettings().KillSwitch {
+		t.Fatal("kill_switch=false did not survive the save/reload round-trip")
+	}
+
+	// A save that explicitly enables it (the first-run onboarding path).
+	svc = NewService(Dirs{Data: dir}, NewLogRing(16), nil)
+	if !svc.SaveSettings(Settings{KillSwitch: true}).KillSwitch {
+		t.Fatal("SaveSettings must store an explicit kill_switch=true")
+	}
+	if !svc.LoadSettings().KillSwitch {
+		t.Fatal("kill_switch=true did not survive the save/reload round-trip")
+	}
 }
 
 func TestTunConfigStackAndStrict(t *testing.T) {

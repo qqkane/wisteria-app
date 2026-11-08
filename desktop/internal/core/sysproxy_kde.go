@@ -100,7 +100,8 @@ func kdeSetProxy(on bool, addr string) error {
 }
 
 // kdeClearStale disables the KDE proxy when its httpProxy points at our own
-// HTTP port. Reports whether a stale entry was cleared.
+// HTTP port or at the kill-switch blackhole. Reports whether a stale entry
+// was cleared.
 func kdeClearStale(localPort int) bool {
 	rcfg := ktool("kreadconfig")
 	if rcfg == "" {
@@ -117,7 +118,8 @@ func kdeClearStale(localPort int) bool {
 	if host != "127.0.0.1" && host != "localhost" && host != "::1" {
 		return false
 	}
-	if port != strconv.Itoa(localPort) {
+	// Our own footprint: the bridge port or the kill-switch blackhole.
+	if port != strconv.Itoa(localPort) && port != sysProxyBlackholePort {
 		return false
 	}
 	wcfg := ktool("kwriteconfig")
