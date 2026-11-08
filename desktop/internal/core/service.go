@@ -121,7 +121,7 @@ type Settings struct {
 	// Inbound: TUN
 	TunEnabled     bool   `json:"tun_enabled"`      // route all system traffic via a sing-box tun helper
 	TunStack       string `json:"tun_stack"`        // "mixed" (default) | "gvisor" | "system"
-	TunStrictRoute bool   `json:"tun_strict_route"` // tighter leak protection, may break LAN access
+	TunStrictRoute bool   `json:"tun_strict_route"` // tighter leak protection, may break LAN access; on by default for settings that never stored a choice
 }
 
 var knownThemes = map[string]bool{
@@ -170,6 +170,11 @@ func applyNewSettingsDefaults(data []byte, s *Settings) {
 	}
 	if _, ok := probe["kill_switch"]; !ok {
 		s.KillSwitch = true
+	}
+	// strict_route used to default to off; leak protection ships enabled
+	// now, but a stored false (a deliberate LAN-access choice) is kept.
+	if _, ok := probe["tun_strict_route"]; !ok {
+		s.TunStrictRoute = true
 	}
 }
 

@@ -176,3 +176,60 @@ func TestTunConfigStackAndStrict(t *testing.T) {
 		t.Fatal("bad stack did not fall back to mixed")
 	}
 }
+
+// TestTunConfigIPv6: the adapter carries both families, so auto_route
+// captures IPv6 too — a v4-only TUN left ::/0 leaking around the tunnel.
+func TestTunConfigIPv6(t *testing.T) {
+	conf, err := TunConfig(TunOptions{SocksAddr: "127.0.0.1:2080"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(conf, &m); err != nil {
+		t.Fatal(err)
+	}
+	in := m["inbounds"].([]any)[0].(map[string]any)
+	addrs, ok := in["address"].([]any)
+	if !ok || len(addrs) != 2 {
+		t.Fatalf("address = %v, want one v4 and one v6 prefix", in["address"])
+	}
+	got := map[string]bool{}
+	for _, a := range addrs {
+		got[a.(string)] = true
+	}
+	if !got["172.19.0.1/30"] || !got["fdfe:dcba:9876::1/126"] {
+		t.Fatalf("address = %v, want 172.19.0.1/30 + fdfe:dcba:9876::1/126", addrs)
+	}
+	if in["auto_route"] != true {
+		t.Fatalf("auto_route = %v", in["auto_route"])
+	}
+}
+
+// TestStrictRouteDefault: the ship-default flipped to on, but only for
+// settings that never stored a choice (mirrors TestKillSwitchDefault).
+func TestStrictRouteDefault(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+
+	if err := os.WriteFile(path, []byte(`{"local_port":2080}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(Dirs{Data: dir}, NewLogRing(16), nil)
+	if !svc.LoadSettings().TunStrictRoute {
+		t.Fatal("tun_strict_route must default to on for settings that never stored a choice")
+	}
+
+	if err := os.WriteFile(path, []byte(`{"tun_strict_route":false}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	svc = NewService(Dirs{Data: dir}, NewLogRing(16), nil)
+	if svc.LoadSettings().TunStrictRoute {
+		t.Fatal("an explicit tun_strict_route=false must not be flipped by the default")
+	}
+	if svc.SaveSettings(svc.Settings()).TunStrictRoute {
+		t.Fatal("SaveSettings must not re-enable an explicitly disabled strict route")
+	}
+	if svc.LoadSettings().TunStrictRoute {
+		t.Fatal("tun_strict_route=false did not survive the save/reload round-trip")
+	}
+}

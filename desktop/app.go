@@ -122,10 +122,11 @@ func (a *App) startup(ctx context.Context) {
 	setPath := filepath.Join(d.Data, "settings.json")
 	if _, err := os.Stat(setPath); os.IsNotExist(err) {
 		_ = a.svc.SaveSettings(core.Settings{
-			BridgeEnabled: true,
-			SysProxy:      true,
-			CheckExtIP:    true,
-			KillSwitch:    true, // ship-default; the zero value would persist an explicit off
+			BridgeEnabled:  true,
+			SysProxy:       true,
+			CheckExtIP:     true,
+			KillSwitch:     true, // ship-default; the zero value would persist an explicit off
+			TunStrictRoute: true, // same for the strict-route ship-default
 		})
 		a.svc.LoadSettings()
 	}
