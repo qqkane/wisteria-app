@@ -22,13 +22,13 @@ jobs:
       # from its checkout, never committed to this repo. The same bind
       # carries the embedded sing-box core (BoxStart facade) — a mobile app
       # can host exactly one gomobile runtime, so both protocol families
-      # ship in this single AAR. Built from main since wisteria PR #13
-      # (mobile/) merged.
+      # ship in this single AAR. Pinned to the released core tag v0.9.10
+      # (mobile/ merged since PR #13) so releases are reproducible.
       - name: Checkout wisteria protocol repo
         uses: actions/checkout@v4
         with:
           repository: qqkane/wisteria
-          ref: main
+          ref: v0.9.10
           token: ${{ secrets.WISTERIA_TOKEN }}
           path: wisteria
 
@@ -118,7 +118,7 @@ jobs:
           # arm64 + arm only: the x86 ABIs exist for emulators and doubled
           # the AAR (a 186 MB APK); every real device is one of the two.
           gomobile bind -target=android/arm64,android/arm -androidapi 24 -javapkg=org.wisteria \
-            -ldflags="-checklinkname=0 -s -w -X github.com/sagernet/sing-box/constant.Version=${SBVER}" \
+            -ldflags="-checklinkname=0 -s -w -X github.com/sagernet/sing-box/constant.Version=${SBVER} -X github.com/qqkane/wisteria/internal/version.Version=v0.9.10" \
             -tags='with_conntrack,with_quic,with_dhcp,with_wireguard,with_utls,with_gvisor' \
             -o "$GITHUB_WORKSPACE/android/app/libs/wisteria.aar" ./mobile
 
