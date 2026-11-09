@@ -1,5 +1,6 @@
 package org.wisteria.app
 
+import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -101,6 +102,7 @@ class WisteriaBridge(private val activity: MainActivity) {
         "RefreshSubscription" -> refreshSubscription(args.getString(0))
         "DeleteSubscription" -> { deleteSubscription(args.getString(0)); null }
         "ImportFromClipboard" -> importFromClipboard()
+        "CopyToClipboard" -> { copyToClipboard(args.optString(0)); null }
 
         // ---- settings ----
         "GetSettings" -> store.settings()
@@ -522,6 +524,16 @@ class WisteriaBridge(private val activity: MainActivity) {
         val res = if (links.isNotEmpty()) addLinks(links.toString())
         else JSONObject().put("added", JSONArray()).put("errors", JSONArray())
         return res.put("subscriptions", subCount)
+    }
+
+    // Clipboard writes must happen on the UI thread: @JavascriptInterface calls
+    // arrive on a private WebView thread, and Android 10+ only honours the write
+    // from the focused activity.
+    private fun copyToClipboard(text: String) {
+        if (text.isEmpty()) return
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
+        val clip = ClipData.newPlainText("Wisteria logs", text)
+        activity.runOnUiThread { cm.setPrimaryClip(clip) }
     }
 
     // ---- external IP / diag ----

@@ -19,7 +19,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const appVersion = "1.1.11"
+const appVersion = "1.1.12"
 
 type App struct {
 	ctx      context.Context
@@ -512,6 +512,12 @@ func (a *App) DeleteSubscription(id string) error {
 		a.logf("подписка удалена вместе с её профилями")
 	}
 	return err
+}
+
+// CopyToClipboard puts text on the system clipboard. The Logs screen uses it
+// so a user can send a full log instead of a stack of screenshots.
+func (a *App) CopyToClipboard(text string) error {
+	return runtime.ClipboardSetText(a.ctx, text)
 }
 
 // ClipImport is the summary of one paste-import from the clipboard.

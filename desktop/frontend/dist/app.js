@@ -71,6 +71,7 @@ const I18N = {
     "set.memLimit": "Лимит памяти ядра, МБ", "set.memLimitNote": "0 — без лимита",
     "set.checkIpNow": "Проверить IP сейчас",
     "toast.ipFail": "Не удалось определить IP",
+    "toast.ipRetry": "Туннель переподключается — IP появится через несколько секунд",
     "set.tun": "Режим TUN (весь трафик системы)",
     "set.tunNote": "маршрутизирует всё через туннель; нужен sing-box и wintun.dll; системный прокси при этом не используется",
     "set.tunStack": "Стек TUN",
@@ -93,6 +94,8 @@ const I18N = {
     "set.mpCore": "Ядро для ss/vmess/vless/trojan",
     "set.xrayCore": "Путь к xray",
     "logs.title": "Логи", "logs.follow": "Автопрокрутка", "logs.clear": "Очистить",
+    "logs.copy": "Скопировать", "logs.copied": "Логи скопированы ({n} строк)",
+    "logs.copyFail": "Не удалось скопировать логи", "logs.copyEmpty": "Логов пока нет",
     "diag.title": "Диагностика wisteria", "diag.inactive": "Диагностика работает только для профилей wisteria",
     "diag.inactiveHint": "Подключитесь к профилю wisteria — здесь появится причина сбоя: заблокировали, упал интернет или ключ не принят.",
     "diag.bUp": "Туннель работает",
@@ -152,6 +155,7 @@ const I18N = {
     "set.memLimit": "Core memory limit, MB", "set.memLimitNote": "0 — unlimited",
     "set.checkIpNow": "Check IP now",
     "toast.ipFail": "Could not determine the IP",
+    "toast.ipRetry": "Tunnel is reconnecting — the IP will appear in a few seconds",
     "set.tun": "TUN mode (all system traffic)",
     "set.tunNote": "routes everything through the tunnel; needs sing-box and wintun.dll; the system proxy is not used",
     "set.tunStack": "TUN stack",
@@ -174,6 +178,8 @@ const I18N = {
     "set.mpCore": "Engine for ss/vmess/vless/trojan",
     "set.xrayCore": "Path to xray",
     "logs.title": "Logs", "logs.follow": "Auto-scroll", "logs.clear": "Clear",
+    "logs.copy": "Copy", "logs.copied": "Logs copied ({n} lines)",
+    "logs.copyFail": "Could not copy the logs", "logs.copyEmpty": "No logs yet",
     "diag.title": "Wisteria diagnostics", "diag.inactive": "Diagnostics only works for wisteria profiles",
     "diag.inactiveHint": "Connect to a wisteria profile — the failure reason will show up here: server blocked, internet down, or the key was rejected.",
     "diag.bUp": "Tunnel is working",
@@ -448,6 +454,7 @@ function renderLogs() {
       <h2>${esc(t("logs.title"))}</h2>
       <div class="logs-tools">
         <label><input type="checkbox" id="log-follow" checked/> ${esc(t("logs.follow"))}</label>
+        <button class="ghost-btn" id="btn-copy-logs">${esc(t("logs.copy"))}</button>
         <button class="ghost-btn" id="btn-clear-logs">${esc(t("logs.clear"))}</button>
       </div>
     </div>
@@ -836,6 +843,26 @@ function wireContent() {
     // whole ring and re-add the history that was just cleared.
     $("log-view").textContent = "";
   });
+  // Copy is for support: the log alone says nothing about the build or the
+  // state, so prepend a small header with both.
+  on("btn-copy-logs", "click", async () => {
+    const view = $("log-view");
+    const body = view ? view.innerText.replace(/\s+$/, "") : "";
+    if (!body) { showToast(t("logs.copyEmpty")); return; }
+    const st = S.state || {};
+    const head = "Wisteria " + (S.version || "") + " · " + (navigator.userAgent || "") + "\n" +
+                 new Date().toISOString() + " state=" + (st.state || "?") +
+                 (st.endpoint ? " endpoint=" + st.endpoint : "") + "\n--- logs ---\n";
+    const text = head + body;
+    const n = body.split("\n").length;
+    try {
+      await api().CopyToClipboard(text);
+      showToast(t("logs.copied").replace("{n}", String(n)));
+    } catch (e) {
+      try { await navigator.clipboard.writeText(text); showToast(t("logs.copied").replace("{n}", String(n))); }
+      catch (_) { showToast(t("logs.copyFail")); }
+    }
+  });
 
   document.querySelectorAll(".theme-option").forEach((opt) => opt.addEventListener("click", async () => {
     S.theme = opt.dataset.theme;
@@ -851,7 +878,12 @@ function wireContent() {
       if (el) el.textContent = ip;
       showToast("IP: " + ip);
     } catch (e) {
-      showToast("✕ " + t("toast.ipFail") + ": " + ((e && e.message) || e));
+      const msg = (e && e.message) || String(e);
+      // A reconnect is not a failure: the core has no live session yet and the
+      // SOCKS layer reports that as "host unreachable".
+      showToast(msg.indexOf("туннель переподключается") >= 0
+        ? t("toast.ipRetry")
+        : "✕ " + t("toast.ipFail") + ": " + msg);
     }
   });
   document.querySelectorAll("[data-i18n]").forEach(applyI18nEl);
@@ -1287,6 +1319,11 @@ whenReady(async () => {
     S.extIP = (d && d.ip) || "";
     const el = $("stat-ip");
     if (el) el.textContent = S.extIP || ((d && d.error) ? "✕" : "—");
+    // The probe fires right after connect, when the core may still be
+    // reconnecting: explain it instead of showing a scary ✕.
+    if (!S.extIP && d && d.error && String(d.error).indexOf("туннель переподключается") >= 0) {
+      showToast(t("toast.ipRetry"));
+    }
   });
   // The backend auto-pinger emits this; don't wipe an open settings form.
   window.runtime.EventsOn("profiles", async () => {
