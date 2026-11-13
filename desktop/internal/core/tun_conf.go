@@ -6,6 +6,10 @@ package core
 // native wysteria core, which has no TUN of its own. The server's own
 // addresses are excluded from the tunnel, otherwise the main core's
 // upstream connection would loop back into the TUN.
+//
+// Both address families are assigned to the adapter (a ULA for IPv6); with
+// auto_route sing-box installs a default route per configured family, so
+// IPv6 traffic is captured too instead of leaking around the tunnel.
 
 import (
 	"encoding/json"
@@ -48,11 +52,14 @@ func TunConfig(o TunOptions) ([]byte, error) {
 		"type":           "tun",
 		"tag":            "tun-in",
 		"interface_name": tunInterfaceName,
-		"address":        []string{"172.19.0.1/30"},
-		"mtu":            9000,
-		"auto_route":     true,
-		"strict_route":   o.StrictRoute,
-		"stack":          stack,
+		// sing-box 1.10+ merged inet4_address/inet6_address into this array;
+		// auto_route turns each configured family into its default route
+		// (0.0.0.0/0 and ::/0) pointed at the adapter.
+		"address":      []string{"172.19.0.1/30", "fdfe:dcba:9876::1/126"},
+		"mtu":          9000,
+		"auto_route":   true,
+		"strict_route": o.StrictRoute,
+		"stack":        stack,
 	}
 	// Legacy sing-box needs inbound sniffing for the dns protocol rule;
 	// modern ones sniff via the route rule action below.

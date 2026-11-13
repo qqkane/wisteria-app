@@ -122,9 +122,11 @@ func (a *App) startup(ctx context.Context) {
 	setPath := filepath.Join(d.Data, "settings.json")
 	if _, err := os.Stat(setPath); os.IsNotExist(err) {
 		_ = a.svc.SaveSettings(core.Settings{
-			BridgeEnabled: true,
-			SysProxy:      true,
-			CheckExtIP:    true,
+			BridgeEnabled:  true,
+			SysProxy:       true,
+			CheckExtIP:     true,
+			KillSwitch:     true, // ship-default; the zero value would persist an explicit off
+			TunStrictRoute: true, // same for the strict-route ship-default
 		})
 		a.svc.LoadSettings()
 	}
@@ -179,7 +181,11 @@ func (a *App) GetExternalIP() (string, error) {
 	return core.FetchExternalIP("127.0.0.1", a.svc.Settings().LocalPort, 8*time.Second)
 }
 
-// startAutoPing runs the background TCP-ping loop over all profiles.
+// startAutoPing runs the background ping loop for the CONNECTED profile,
+// measured through the tunnel. The other profiles are pinged manually only:
+// a timed sweep over every endpoint would fire bare-TCP (or TLS) probes at
+// foreign servers on a schedule — exactly the DPI-visible pattern the
+// protocol avoids.
 func (a *App) startAutoPing() {
 	a.pingMu.Lock()
 	defer a.pingMu.Unlock()
@@ -201,14 +207,22 @@ func (a *App) startAutoPing() {
 			case <-stop:
 				return
 			case <-t.C:
-				// One batched store write per cycle: per-profile SetLatency
-				// would rewrite profiles.json N times per tick.
-				lat := make(map[string]int64)
-				for _, p := range a.store.List() {
-					ms, _ := core.PingEndpoint(p.Host, p.Port, 3*time.Second)
-					lat[p.ID] = ms
+				st := a.svc.Status()
+				if st.State != core.StateConnected {
+					continue
 				}
-				a.store.SetLatencies(lat)
+				p, err := a.store.Get(st.ProfileID)
+				if err != nil {
+					continue
+				}
+				ms, _ := core.PingEndpoint(core.PingTarget{
+					Host:      p.Host,
+					Port:      p.Port,
+					Transport: p.Transport,
+					TLSSNI:    p.TLSSNI,
+					ViaSocks:  fmt.Sprintf("127.0.0.1:%d", a.svc.Settings().LocalPort),
+				}, 3*time.Second)
+				a.store.SetLatencies(map[string]int64{p.ID: ms})
 				runtime.EventsEmit(a.ctx, "profiles")
 			}
 		}
@@ -450,7 +464,14 @@ func (a *App) PingProfile(id string) (int64, error) {
 	if err != nil {
 		return -1, err
 	}
-	ms, err := core.PingEndpoint(p.Host, p.Port, 3*time.Second)
+	// The connected profile is measured through the tunnel (the server sees
+	// only tunnel traffic); the rest from here — TLS profiles get a real
+	// handshake, legacy bare-TCP the old raw dial.
+	tgt := core.PingTarget{Host: p.Host, Port: p.Port, Transport: p.Transport, TLSSNI: p.TLSSNI}
+	if st := a.svc.Status(); st.State == core.StateConnected && st.ProfileID == id {
+		tgt.ViaSocks = fmt.Sprintf("127.0.0.1:%d", a.svc.Settings().LocalPort)
+	}
+	ms, err := core.PingEndpoint(tgt, 3*time.Second)
 	a.store.SetLatency(id, ms)
 	return ms, err
 }
@@ -576,6 +597,16 @@ func (a *App) ImportFromClipboard() (ClipImport, error) {
 	}
 	if res.Subscriptions == 0 && len(res.Added) == 0 && len(res.Errors) == 0 {
 		return res, errors.New("в буфере нет ни ссылки-подписки, ни share-ссылок")
+	}
+	// The clipboard held credentials (share links carry client keys and
+	// passwords, subscription URLs the auth tokens): once the import
+	// consumed them, wipe the buffer. A failed import keeps it — the user
+	// may want to fix the link and retry. Best effort: a failed wipe must
+	// not fail the import.
+	if res.Subscriptions > 0 || len(res.Added) > 0 {
+		if err := runtime.ClipboardSetText(a.ctx, ""); err != nil {
+			a.logf("буфер обмена не очищен после импорта: %v", err)
+		}
 	}
 	return res, nil
 }

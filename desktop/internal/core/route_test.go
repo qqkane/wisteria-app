@@ -2,6 +2,8 @@ package core
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -117,6 +119,46 @@ func contains(s, sub string) bool {
 	})()
 }
 
+func TestKillSwitchDefault(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+
+	// A settings.json written before the kill switch existed: the field is
+	// absent, so the new ship-default (on) applies.
+	if err := os.WriteFile(path, []byte(`{"local_port":2080}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(Dirs{Data: dir}, NewLogRing(16), nil)
+	if !svc.LoadSettings().KillSwitch {
+		t.Fatal("kill_switch must default to on for settings that never stored a choice")
+	}
+
+	// An explicit user choice survives the default merge…
+	if err := os.WriteFile(path, []byte(`{"kill_switch":false}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	svc = NewService(Dirs{Data: dir}, NewLogRing(16), nil)
+	if svc.LoadSettings().KillSwitch {
+		t.Fatal("an explicit kill_switch=false must not be flipped by the default")
+	}
+	// …including a save round-trip of the stored settings.
+	if svc.SaveSettings(svc.Settings()).KillSwitch {
+		t.Fatal("SaveSettings must not re-enable an explicitly disabled kill switch")
+	}
+	if svc.LoadSettings().KillSwitch {
+		t.Fatal("kill_switch=false did not survive the save/reload round-trip")
+	}
+
+	// A save that explicitly enables it (the first-run onboarding path).
+	svc = NewService(Dirs{Data: dir}, NewLogRing(16), nil)
+	if !svc.SaveSettings(Settings{KillSwitch: true}).KillSwitch {
+		t.Fatal("SaveSettings must store an explicit kill_switch=true")
+	}
+	if !svc.LoadSettings().KillSwitch {
+		t.Fatal("kill_switch=true did not survive the save/reload round-trip")
+	}
+}
+
 func TestTunConfigStackAndStrict(t *testing.T) {
 	conf, err := TunConfig(TunOptions{SocksAddr: "127.0.0.1:2080", Stack: "system", StrictRoute: true})
 	if err != nil {
@@ -132,5 +174,62 @@ func TestTunConfigStackAndStrict(t *testing.T) {
 	}
 	if !contains(string(conf), `"stack": "mixed"`) {
 		t.Fatal("bad stack did not fall back to mixed")
+	}
+}
+
+// TestTunConfigIPv6: the adapter carries both families, so auto_route
+// captures IPv6 too — a v4-only TUN left ::/0 leaking around the tunnel.
+func TestTunConfigIPv6(t *testing.T) {
+	conf, err := TunConfig(TunOptions{SocksAddr: "127.0.0.1:2080"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(conf, &m); err != nil {
+		t.Fatal(err)
+	}
+	in := m["inbounds"].([]any)[0].(map[string]any)
+	addrs, ok := in["address"].([]any)
+	if !ok || len(addrs) != 2 {
+		t.Fatalf("address = %v, want one v4 and one v6 prefix", in["address"])
+	}
+	got := map[string]bool{}
+	for _, a := range addrs {
+		got[a.(string)] = true
+	}
+	if !got["172.19.0.1/30"] || !got["fdfe:dcba:9876::1/126"] {
+		t.Fatalf("address = %v, want 172.19.0.1/30 + fdfe:dcba:9876::1/126", addrs)
+	}
+	if in["auto_route"] != true {
+		t.Fatalf("auto_route = %v", in["auto_route"])
+	}
+}
+
+// TestStrictRouteDefault: the ship-default flipped to on, but only for
+// settings that never stored a choice (mirrors TestKillSwitchDefault).
+func TestStrictRouteDefault(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+
+	if err := os.WriteFile(path, []byte(`{"local_port":2080}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(Dirs{Data: dir}, NewLogRing(16), nil)
+	if !svc.LoadSettings().TunStrictRoute {
+		t.Fatal("tun_strict_route must default to on for settings that never stored a choice")
+	}
+
+	if err := os.WriteFile(path, []byte(`{"tun_strict_route":false}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	svc = NewService(Dirs{Data: dir}, NewLogRing(16), nil)
+	if svc.LoadSettings().TunStrictRoute {
+		t.Fatal("an explicit tun_strict_route=false must not be flipped by the default")
+	}
+	if svc.SaveSettings(svc.Settings()).TunStrictRoute {
+		t.Fatal("SaveSettings must not re-enable an explicitly disabled strict route")
+	}
+	if svc.LoadSettings().TunStrictRoute {
+		t.Fatal("tun_strict_route=false did not survive the save/reload round-trip")
 	}
 }

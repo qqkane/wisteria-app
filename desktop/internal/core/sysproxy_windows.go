@@ -78,10 +78,11 @@ func SetSystemProxy(on bool, addr string) error {
 func SystemProxySupported() bool { return true }
 
 // ClearStaleSystemProxy disables the system proxy when it points at our own
-// local HTTP port — the footprint of a previous run that died without
-// teardown (crash, Task Manager kill), leaving browsers routed into a dead
-// port. The host part is matched loosely (127.0.0.1 or the 0.0.0.0 the
-// bridge binds with listen_all); foreign proxy settings are left untouched.
+// local HTTP port — or at the kill-switch blackhole — the footprint of a
+// previous run that died without teardown (crash, Task Manager kill),
+// leaving browsers routed into a dead port. The host part is matched loosely
+// (127.0.0.1 or the 0.0.0.0 the bridge binds with listen_all); foreign proxy
+// settings are left untouched.
 // Reports whether a stale entry was cleared.
 func ClearStaleSystemProxy(localPort int) bool {
 	k, err := registry.OpenKey(registry.CURRENT_USER,
@@ -100,12 +101,16 @@ func ClearStaleSystemProxy(localPort int) bool {
 		return false
 	}
 	host, port, err := net.SplitHostPort(server)
-	if err != nil || port != strconv.Itoa(localPort) {
+	if err != nil {
 		return false
 	}
 	switch host {
 	case "127.0.0.1", "localhost", "::1", "0.0.0.0", "::":
 	default:
+		return false
+	}
+	// Our own footprint: the bridge port or the kill-switch blackhole.
+	if port != strconv.Itoa(localPort) && port != sysProxyBlackholePort {
 		return false
 	}
 	return SetSystemProxy(false, "") == nil

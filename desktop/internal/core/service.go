@@ -25,6 +25,7 @@ package core
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -70,6 +71,7 @@ type Settings struct {
 	HttpPort      int    `json:"http_port"`
 	SysProxy      bool   `json:"sys_proxy"`      // set the Windows proxy on connect
 	BridgeEnabled bool   `json:"bridge_enabled"` // local HTTP bridge (needed for the system proxy)
+	KillSwitch    bool   `json:"kill_switch"`    // on a non-user teardown, point the system proxy at a blackhole instead of direct (fail closed)
 	AutoConnect   string `json:"auto_connect"`   // profile id to connect at startup, "" = off
 	WisteriaCore  string `json:"wisteria_core"`  // explicit paths (else bin/ next to the exe)
 	SingBoxCore   string `json:"singbox_core"`
@@ -78,7 +80,7 @@ type Settings struct {
 	StartMinimized bool `json:"start_minimized"` // hide the window at launch
 	ConfirmExit    bool `json:"confirm_exit"`    // ask before quitting while connected
 	CheckExtIP     bool `json:"check_ext_ip"`    // resolve the external IP after connect
-	AutoPingSec    int  `json:"auto_ping_sec"`   // background TCP ping interval, 0 = off
+	AutoPingSec    int  `json:"auto_ping_sec"`   // background ping interval for the connected profile (through the tunnel), 0 = off
 
 	// Updates: the zero value keeps the check on (so old configs stay in it).
 	NoUpdateCheck bool `json:"no_update_check"`
@@ -119,7 +121,7 @@ type Settings struct {
 	// Inbound: TUN
 	TunEnabled     bool   `json:"tun_enabled"`      // route all system traffic via a sing-box tun helper
 	TunStack       string `json:"tun_stack"`        // "mixed" (default) | "gvisor" | "system"
-	TunStrictRoute bool   `json:"tun_strict_route"` // tighter leak protection, may break LAN access
+	TunStrictRoute bool   `json:"tun_strict_route"` // tighter leak protection, may break LAN access; on by default for settings that never stored a choice
 }
 
 var knownThemes = map[string]bool{
@@ -140,6 +142,40 @@ var knownLogLevels = map[string]bool{
 
 var knownEngines = map[string]bool{
 	"sing-box": true, "xray": true,
+}
+
+// sysProxyBlackhole is the fail-closed system proxy target of the kill
+// switch: loopback port 1 is a closed port, so every proxied connection
+// fails instantly — traffic is blocked instead of leaking around a dead
+// tunnel during the reconnect backoff. The normal set/reset code paths are
+// reused, so the override list behaves exactly as with the real bridge.
+const sysProxyBlackhole = "127.0.0.1:1"
+
+// sysProxyBlackholePort is the port part of sysProxyBlackhole; the
+// stale-proxy cleanup of the next launch must recognize it as our own
+// footprint and clear it.
+const sysProxyBlackholePort = "1"
+
+// applyNewSettingsDefaults fills settings that ship with a non-zero default
+// but are absent in settings.json files written by older builds. A plain
+// bool cannot distinguish "field absent" from "explicit false" after the
+// unmarshal, so the raw JSON is probed for the key: absent = the user never
+// stored a choice → the new default applies; present = the stored value
+// wins. Extend the probe (and the first-run save in app.go) with every new
+// default-on setting.
+func applyNewSettingsDefaults(data []byte, s *Settings) {
+	var probe map[string]json.RawMessage
+	if jsonUnmarshal(data, &probe) != nil {
+		return // corrupt file: the caller replaces the settings anyway
+	}
+	if _, ok := probe["kill_switch"]; !ok {
+		s.KillSwitch = true
+	}
+	// strict_route used to default to off; leak protection ships enabled
+	// now, but a stored false (a deliberate LAN-access choice) is kept.
+	if _, ok := probe["tun_strict_route"]; !ok {
+		s.TunStrictRoute = true
+	}
 }
 
 func (s *Settings) defaults() {
@@ -339,6 +375,10 @@ func (s *Service) LoadSettings() Settings {
 			} else {
 				s.logf("settings.json повреждён (%v) и копию сохранить не удалось", err)
 			}
+		} else {
+			// Stored choices always win; only keys the file has never heard
+			// of pick up their new ship-default.
+			applyNewSettingsDefaults(data, &s.settings)
 		}
 	}
 	s.settings.defaults()
@@ -797,9 +837,23 @@ func (s *Service) teardownSession(sess *session, waitErr error) {
 		s.st.PID = 0
 		s.st.StartedAt = time.Time{}
 		auto := !s.userStop
+		killSwitch := s.settings.KillSwitch
 		s.mu.Unlock()
 		if proxyWas {
-			if err := SetSystemProxy(false, ""); err != nil {
+			// Kill switch: an unexpected death (server gone, core crash,
+			// watchdog kill) must not hand the traffic back to the open
+			// network while the reconnect backoff runs — point the system
+			// proxy at a closed loopback port instead, so everything fails
+			// closed. A manual user stop keeps the old behaviour: that is
+			// the user asking for direct access. The next successful
+			// connect (auto-reconnect included) sets the real proxy again.
+			if auto && killSwitch {
+				if err := SetSystemProxy(true, sysProxyBlackhole); err != nil {
+					s.logf("kill switch: системный прокси не переключён на заглушку: %v", err)
+				} else {
+					s.logf("kill switch: системный прокси → %s — трафик заблокирован до переподключения", sysProxyBlackhole)
+				}
+			} else if err := SetSystemProxy(false, ""); err != nil {
 				s.logf("системный прокси не сбросился: %v", err)
 			} else {
 				s.logf("системный прокси отключён")
