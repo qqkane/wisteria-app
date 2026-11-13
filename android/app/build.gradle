@@ -11,8 +11,8 @@ android {
         applicationId "org.wisteria.app"
         minSdk 24
         targetSdk 35
-        versionCode 23
-        versionName "1.1.12"
+        versionCode 24
+        versionName "1.1.13"
     }
 
     // WisteriaBridge.VERSION reads BuildConfig.VERSION_NAME so the version

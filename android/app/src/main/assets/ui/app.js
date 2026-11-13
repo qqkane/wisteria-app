@@ -66,6 +66,9 @@ const I18N = {
     "set.autoping": "Автопинг серверов, сек", "set.autopingNote": "0 — выключено",
     "set.listenAll": "Разрешить доступ из локальной сети", "set.listenAllNote": "прокси слушает 0.0.0.0 вместо 127.0.0.1",
     "set.bypassLan": "Обходить локальные адреса",
+    "sec.wistRouting": "Маршрутизация wisteria",
+    "set.bypassRu": "Не проксировать российские сайты",
+    "set.bypassRuNote": "сайты из РФ увидят реальный IP; нужен Android 13+",
     "set.remoteDns": "Удалённый DNS", "set.remoteDnsNote": "например tcp://8.8.8.8",
     "set.logLevel": "Уровень логирования",
     "set.memLimit": "Лимит памяти ядра, МБ", "set.memLimitNote": "0 — без лимита",
@@ -151,6 +154,9 @@ const I18N = {
     "set.autoping": "Auto-ping servers, sec", "set.autopingNote": "0 — disabled",
     "set.listenAll": "Allow LAN access", "set.listenAllNote": "proxy listens on 0.0.0.0 instead of 127.0.0.1",
     "set.bypassLan": "Bypass local addresses",
+    "sec.wistRouting": "Wisteria routing",
+    "set.bypassRu": "Do not proxy Russian sites",
+    "set.bypassRuNote": "Russian sites see your real IP; needs Android 13+",
     "set.remoteDns": "Remote DNS", "set.remoteDnsNote": "e.g. tcp://8.8.8.8",
     "set.logLevel": "Log level",
     "set.memLimit": "Core memory limit, MB", "set.memLimitNote": "0 — unlimited",
@@ -655,6 +661,13 @@ function renderSettings() {
           <option value="error">error</option>
         </select>
       </div>
+    </div>
+    <div class="settings-section">
+      <h3>${esc(t("sec.wistRouting"))} <span class="sec-note">wisteria</span></h3>
+      <div class="set-grid">
+        <label>${esc(t("set.bypassRu"))}<span class="set-note">${esc(t("set.bypassRuNote"))}</span></label>
+        <label class="switch"><input id="s-bypassru" type="checkbox"/><span class="slider"></span></label>
+      </div>
     </div>`;
   } else if (S.setTab === "cores") {
     body = `
@@ -989,6 +1002,7 @@ async function fillSettingsForm(s) {
   setv("s-autoping", s.auto_ping_sec || 0);
   setc("s-listenall", s.listen_all);
   setc("s-bypasslan", s.bypass_lan);
+  setc("s-bypassru", !s.no_bypass_ru); // checkbox states the feature, the flag states the opt-out
   setv("s-remotedns", s.remote_dns || "");
   setv("s-loglevel", s.log_level || "warn");
   setv("s-memlimit", s.mem_limit_mb || 0);
@@ -1031,6 +1045,7 @@ async function saveSettings() {
     auto_ping_sec: g("s-autoping") ? Math.max(0, num("s-autoping", 0)) : cur.auto_ping_sec,
     listen_all: g("s-listenall") ? $("s-listenall").checked : cur.listen_all,
     bypass_lan: g("s-bypasslan") ? $("s-bypasslan").checked : cur.bypass_lan,
+    no_bypass_ru: g("s-bypassru") ? !$("s-bypassru").checked : cur.no_bypass_ru,
     remote_dns: g("s-remotedns") ? $("s-remotedns").value.trim() : cur.remote_dns,
     log_level: g("s-loglevel") ? $("s-loglevel").value : cur.log_level,
     mem_limit_mb: g("s-memlimit") ? Math.max(0, num("s-memlimit", 0)) : cur.mem_limit_mb,

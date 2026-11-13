@@ -392,6 +392,38 @@ class WisteriaVpnService : VpnService() {
             .addDnsServer(tunDns())
             .setMtu(TUN_MTU)
             .setSession(profile.optString("name").ifEmpty { "Wisteria" })
+        // "Do not proxy Russian sites" — the Android counterpart of the
+        // desktop routing.mode=bypass_ru. VpnService cannot match domains,
+        // so the RU CIDR list is subtracted from the 0.0.0.0/0 route and the
+        // OS sends those destinations out the physical interface.
+        // A prefix the framework refuses must not kill the tunnel: losing
+        // one RU site to the tunnel is cheaper than losing the VPN.
+        val bypassRU = !AndroidStore(this).settings().optBoolean("no_bypass_ru", false)
+        if (bypassRU && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val started = System.currentTimeMillis()
+            var added = 0
+            for (prefix in RuRoutes.ipv4(this)) {
+                try {
+                    builder.excludeRoute(prefix)
+                    added++
+                } catch (e: Exception) {
+                    android.util.Log.w("WisteriaVpn", "excludeRoute $prefix", e)
+                }
+            }
+            EngineHub.appLog(
+                "маршрутизация: $added RU-подсетей идут напрямую " +
+                    "(${System.currentTimeMillis() - started} мс)"
+            )
+        } else if (bypassRU) {
+            // Say it out loud instead of silently ignoring the checkbox:
+            // excludeRoute appeared in Android 13, and a user who ticks the
+            // box on Android 12 must not wonder why their bank still sees
+            // a foreign IP.
+            EngineHub.appLog(
+                "маршрутизация: обход РФ-сайтов требует Android 13+ " +
+                    "(на этом устройстве весь трафик идёт в туннель)"
+            )
+        }
         val fd = builder.establish()
         if (fd == null) {
             EngineHub.appLog("VpnService.establish() вернул null — согласие на VPN отозвано?")
