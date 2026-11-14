@@ -69,6 +69,8 @@ const I18N = {
     "sec.wistRouting": "Маршрутизация wisteria",
     "set.bypassRu": "Не проксировать российские сайты",
     "set.bypassRuNote": "сайты из РФ увидят реальный IP; нужен Android 13+",
+    "set.wistDirect": "Свои подсети напрямую",
+    "set.wistDirectNote": "CIDR, по одному в строке; домены на Android не поддерживаются",
     "set.remoteDns": "Удалённый DNS", "set.remoteDnsNote": "например tcp://8.8.8.8",
     "set.logLevel": "Уровень логирования",
     "set.memLimit": "Лимит памяти ядра, МБ", "set.memLimitNote": "0 — без лимита",
@@ -81,8 +83,8 @@ const I18N = {
     "set.tunStack": "Стек TUN",
     "set.tunStrict": "Строгий маршрут (strict route)", "set.tunStrictNote": "надёжнее против утечек; может мешать доступу к локальной сети",
     "set.tabLook": "Внешний вид", "set.tabGeneral": "Основные", "set.tabConn": "Подключение", "set.tabRouting": "Маршрутизация", "set.tabCores": "Ядра",
-    "set.routeDirect": "Напрямую, минуя прокси", "set.routeDirectNote": "домены и IP через туннель не пойдут; по одному в строке",
-    "set.routeBlock": "Блокировать", "set.routeBlockNote": "эти домены и IP будут недоступны",
+    "set.routeDirect": "Напрямую, минуя прокси", "set.routeDirectNote": "домены, CIDR, geoip:ru, geosite:ru — по одному в строке",
+    "set.routeBlock": "Блокировать", "set.routeBlockNote": "домены, CIDR, geosite:category-ads-all — будут недоступны",
     "set.coreSS": "Ядро для Shadowsocks", "set.coreVmess": "Ядро для VMess", "set.coreVless": "Ядро для VLESS", "set.coreTrojan": "Ядро для Trojan",
     "sec.engines": "Ядро по протоколу",
     "sec.updates": "Обновления",
@@ -157,6 +159,8 @@ const I18N = {
     "sec.wistRouting": "Wisteria routing",
     "set.bypassRu": "Do not proxy Russian sites",
     "set.bypassRuNote": "Russian sites see your real IP; needs Android 13+",
+    "set.wistDirect": "Custom direct routes",
+    "set.wistDirectNote": "CIDRs, one per line; domains are not supported on Android",
     "set.remoteDns": "Remote DNS", "set.remoteDnsNote": "e.g. tcp://8.8.8.8",
     "set.logLevel": "Log level",
     "set.memLimit": "Core memory limit, MB", "set.memLimitNote": "0 — unlimited",
@@ -169,8 +173,8 @@ const I18N = {
     "set.tunStack": "TUN stack",
     "set.tunStrict": "Strict route", "set.tunStrictNote": "stronger leak protection; may break LAN access",
     "set.tabLook": "Appearance", "set.tabGeneral": "General", "set.tabConn": "Connection", "set.tabRouting": "Routing", "set.tabCores": "Cores",
-    "set.routeDirect": "Direct, bypassing the tunnel", "set.routeDirectNote": "domains and IPs that skip the tunnel; one per line",
-    "set.routeBlock": "Blocked", "set.routeBlockNote": "these domains and IPs become unreachable",
+    "set.routeDirect": "Direct, bypassing the tunnel", "set.routeDirectNote": "domains, CIDRs, geoip:ru, geosite:ru — one per line",
+    "set.routeBlock": "Blocked", "set.routeBlockNote": "domains, CIDRs, geosite:category-ads-all — become unreachable",
     "set.coreSS": "Engine for Shadowsocks", "set.coreVmess": "Engine for VMess", "set.coreVless": "Engine for VLESS", "set.coreTrojan": "Engine for Trojan",
     "sec.engines": "Engine per protocol",
     "sec.updates": "Updates",
@@ -667,6 +671,8 @@ function renderSettings() {
       <div class="set-grid">
         <label>${esc(t("set.bypassRu"))}<span class="set-note">${esc(t("set.bypassRuNote"))}</span></label>
         <label class="switch"><input id="s-bypassru" type="checkbox"/><span class="slider"></span></label>
+        <label>${esc(t("set.wistDirect"))}<span class="set-note">${esc(t("set.wistDirectNote"))}</span></label>
+        <textarea id="s-wistcidrs" rows="3" placeholder="203.0.113.0/24"></textarea>
       </div>
     </div>`;
   } else if (S.setTab === "cores") {
@@ -1003,6 +1009,7 @@ async function fillSettingsForm(s) {
   setc("s-listenall", s.listen_all);
   setc("s-bypasslan", s.bypass_lan);
   setc("s-bypassru", !s.no_bypass_ru); // checkbox states the feature, the flag states the opt-out
+  setv("s-wistcidrs", s.wisteria_direct_cidrs || "");
   setv("s-remotedns", s.remote_dns || "");
   setv("s-loglevel", s.log_level || "warn");
   setv("s-memlimit", s.mem_limit_mb || 0);
@@ -1046,6 +1053,7 @@ async function saveSettings() {
     listen_all: g("s-listenall") ? $("s-listenall").checked : cur.listen_all,
     bypass_lan: g("s-bypasslan") ? $("s-bypasslan").checked : cur.bypass_lan,
     no_bypass_ru: g("s-bypassru") ? !$("s-bypassru").checked : cur.no_bypass_ru,
+    wisteria_direct_cidrs: g("s-wistcidrs") ? $("s-wistcidrs").value.trim() : cur.wisteria_direct_cidrs,
     remote_dns: g("s-remotedns") ? $("s-remotedns").value.trim() : cur.remote_dns,
     log_level: g("s-loglevel") ? $("s-loglevel").value : cur.log_level,
     mem_limit_mb: g("s-memlimit") ? Math.max(0, num("s-memlimit", 0)) : cur.mem_limit_mb,

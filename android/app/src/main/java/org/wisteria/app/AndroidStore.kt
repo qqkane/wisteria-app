@@ -46,7 +46,7 @@ class AndroidStore(private val context: Context) {
                "wisteria_core":"","singbox_core":"","start_minimized":false,
                "confirm_exit":false,"check_ext_ip":true,"auto_ping_sec":0,
                "no_update_check":false,"listen_all":false,"bypass_lan":false,
-               "no_bypass_ru":false,
+               "no_bypass_ru":false,"wisteria_direct_cidrs":"",
                "remote_dns":"","log_level":"warn","mem_limit_mb":0,"mp_core":"",
                "core_ss":"sing-box","core_vmess":"sing-box","core_vless":"sing-box",
                "core_trojan":"sing-box","xray_core":"","route_direct":"",

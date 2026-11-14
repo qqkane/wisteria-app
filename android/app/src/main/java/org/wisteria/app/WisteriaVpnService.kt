@@ -398,29 +398,47 @@ class WisteriaVpnService : VpnService() {
         // OS sends those destinations out the physical interface.
         // A prefix the framework refuses must not kill the tunnel: losing
         // one RU site to the tunnel is cheaper than losing the VPN.
-        val bypassRU = !AndroidStore(this).settings().optBoolean("no_bypass_ru", false)
-        if (bypassRU && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        val settings = AndroidStore(this).settings()
+        val bypassRU = !settings.optBoolean("no_bypass_ru", false)
+        val customCidrs = settings.optString("wisteria_direct_cidrs")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val started = System.currentTimeMillis()
-            var added = 0
-            for (prefix in RuRoutes.ipv4(this)) {
+            var ruAdded = 0
+            if (bypassRU) {
+                for (prefix in RuRoutes.ipv4(this)) {
+                    try {
+                        builder.excludeRoute(prefix)
+                        ruAdded++
+                    } catch (e: Exception) {
+                        android.util.Log.w("WisteriaVpn", "excludeRoute $prefix", e)
+                    }
+                }
+            }
+            var customAdded = 0
+            for (prefix in RuRoutes.parseList(customCidrs)) {
                 try {
                     builder.excludeRoute(prefix)
-                    added++
+                    customAdded++
                 } catch (e: Exception) {
                     android.util.Log.w("WisteriaVpn", "excludeRoute $prefix", e)
                 }
             }
-            EngineHub.appLog(
-                "маршрутизация: $added RU-подсетей идут напрямую " +
-                    "(${System.currentTimeMillis() - started} мс)"
-            )
-        } else if (bypassRU) {
+            val parts = ArrayList<String>(2)
+            if (bypassRU) parts.add("$ruAdded RU-подсетей")
+            if (customAdded > 0) parts.add("$customAdded своих")
+            if (parts.isNotEmpty()) {
+                EngineHub.appLog(
+                    "маршрутизация: ${parts.joinToString(" + ")} идут напрямую " +
+                        "(${System.currentTimeMillis() - started} мс)"
+                )
+            }
+        } else if (bypassRU || customCidrs.isNotBlank()) {
             // Say it out loud instead of silently ignoring the checkbox:
             // excludeRoute appeared in Android 13, and a user who ticks the
             // box on Android 12 must not wonder why their bank still sees
             // a foreign IP.
             EngineHub.appLog(
-                "маршрутизация: обход РФ-сайтов требует Android 13+ " +
+                "маршрутизация: обход по подсетям требует Android 13+ " +
                     "(на этом устройстве весь трафик идёт в туннель)"
             )
         }
@@ -478,7 +496,13 @@ class WisteriaVpnService : VpnService() {
         val raw = profile.optString("raw")
         val name = profile.optString("name").ifEmpty { "Wisteria" }
         val config = try {
-            SingboxLinks.buildConfig(raw, name, AndroidStore(this).settings(), cachePath = "${filesDir.absolutePath}/cache.db")
+            SingboxLinks.buildConfig(
+                raw,
+                name,
+                AndroidStore(this).settings(),
+                cachePath = "${filesDir.absolutePath}/cache.db",
+                rulesetPaths = Rulesets.paths(this),
+            )
         } catch (e: Exception) {
             EngineHub.appLog("профиль повреждён: ${e.message}")
             EngineHub.pushEvent("state", statusJson("disconnected", "профиль повреждён: ${trimErr(e.message)}"))

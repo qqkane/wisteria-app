@@ -60,6 +60,28 @@ object RuRoutes {
         }
     }
 
+    /**
+     * User-supplied IPv4 routes ("203.0.113.0/24" or a bare address), one per
+     * line, comma or semicolon; '#' starts a comment. Only IPv4: the engine
+     * relays IPv4, and an excluded v6 prefix would silently un-tunnel it.
+     * Requires API 33 (IpPrefix).
+     */
+    @RequiresApi(33)
+    fun parseList(text: String): List<IpPrefix> {
+        val out = ArrayList<IpPrefix>()
+        for (raw in text.split('\n', ',', ';')) {
+            val line = raw.substringBefore('#').trim()
+            if (line.isEmpty()) continue
+            val slash = line.indexOf('/')
+            val addr = if (slash > 0) line.substring(0, slash) else line
+            val bytes = parseIPv4(addr.trim()) ?: continue
+            val bits = if (slash > 0) line.substring(slash + 1).trim().toIntOrNull() ?: continue else 32
+            if (bits !in 0..32) continue
+            out.add(IpPrefix(InetAddress.getByAddress(bytes), bits))
+        }
+        return out
+    }
+
     /** Dotted-quad to 4 bytes, or null when the string is not a plain IPv4. */
     private fun parseIPv4(s: String): ByteArray? {
         val parts = s.split('.')

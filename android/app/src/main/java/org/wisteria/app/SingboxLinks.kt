@@ -179,21 +179,44 @@ object SingboxLinks {
      *  parsed outbound, DNS and route. The optional settings carry the
      *  routing tab (bypass_lan, route_direct, route_block, remote_dns,
      *  log_level) — the same keys the desktop saves. */
-    fun buildConfig(raw: String, name: String, settings: JSONObject? = null, cachePath: String? = null): String {
+    fun buildConfig(
+        raw: String,
+        name: String,
+        settings: JSONObject? = null,
+        cachePath: String? = null,
+        rulesetPaths: Map<String, String> = emptyMap(),
+    ): String {
         val s = settings ?: JSONObject()
         val outbound = buildOutbound(raw, name)
 
         val blockDomains = JSONArray()
         val blockIps = JSONArray()
+        val blockSets = JSONArray()
         val directDomains = JSONArray()
         val directIps = JSONArray()
-        for ((value, isIp) in parseRouteList(s.optString("route_block"))) {
-            (if (isIp) blockIps else blockDomains).put(value)
+        val directSets = JSONArray()
+        // tag → route.rule_set entry, filled only for the tags actually used,
+        // so a plain domain/CIDR list still renders the same config as before.
+        val setDefs = LinkedHashMap<String, JSONObject>()
+        fun useSet(tag: String): String {
+            setDefs.getOrPut(tag) { ruleSetDef(tag, rulesetPaths) }
+            return tag
         }
-        for ((value, isIp) in parseRouteList(s.optString("route_direct"))) {
-            (if (isIp) directIps else directDomains).put(value)
+        for (e in parseRouteList(s.optString("route_block"))) {
+            when (e.kind) {
+                RouteKind.CIDR -> blockIps.put(e.value)
+                RouteKind.DOMAIN -> blockDomains.put(e.value)
+                RouteKind.GEOIP, RouteKind.GEOSITE -> blockSets.put(useSet(e.value))
+            }
         }
-        val hasBlock = blockDomains.length() > 0 || blockIps.length() > 0
+        for (e in parseRouteList(s.optString("route_direct"))) {
+            when (e.kind) {
+                RouteKind.CIDR -> directIps.put(e.value)
+                RouteKind.DOMAIN -> directDomains.put(e.value)
+                RouteKind.GEOIP, RouteKind.GEOSITE -> directSets.put(useSet(e.value))
+            }
+        }
+        val hasBlock = blockDomains.length() > 0 || blockIps.length() > 0 || blockSets.length() > 0
 
         val rules = JSONArray()
             .put(JSONObject().put("action", "sniff"))
@@ -202,12 +225,14 @@ object SingboxLinks {
             rules.put(JSONObject().put("outbound", "block").apply {
                 if (blockDomains.length() > 0) put("domain_suffix", blockDomains)
                 if (blockIps.length() > 0) put("ip_cidr", blockIps)
+                if (blockSets.length() > 0) put("rule_set", blockSets)
             })
         }
-        if (directDomains.length() > 0 || directIps.length() > 0) {
+        if (directDomains.length() > 0 || directIps.length() > 0 || directSets.length() > 0) {
             rules.put(JSONObject().put("outbound", "direct").apply {
                 if (directDomains.length() > 0) put("domain_suffix", directDomains)
                 if (directIps.length() > 0) put("ip_cidr", directIps)
+                if (directSets.length() > 0) put("rule_set", directSets)
             })
         }
         if (s.optBoolean("bypass_lan", false)) {
@@ -257,7 +282,12 @@ object SingboxLinks {
                 JSONObject()
                     .put("auto_detect_interface", true)
                     .put("rules", rules)
-                    .put("final", "proxy"),
+                    .put("final", "proxy")
+                    .apply {
+                        if (setDefs.isNotEmpty()) {
+                            put("rule_set", JSONArray().apply { setDefs.values.forEach { put(it) } })
+                        }
+                    },
             )
         // sing-box creates the cache file whenever a PlatformLogWriter is
         // set (box.go: PlatformLogWriter != nil → needCacheFile), and the
@@ -291,17 +321,47 @@ object SingboxLinks {
         return JSONObject().put("type", type).put("tag", "dns-remote").put("server", server)
     }
 
+    /** One entry of a route list, classified by what it matches. */
+    private enum class RouteKind { DOMAIN, CIDR, GEOIP, GEOSITE }
+
+    private data class RouteEntry(val value: String, val kind: RouteKind)
+
     /** Route lists: one entry per line (or comma/semicolon), # and //
-     *  comments stripped. Returns value + whether it's an IP/CIDR. */
-    private fun parseRouteList(text: String): List<Pair<String, Boolean>> {
-        val out = mutableListOf<Pair<String, Boolean>>()
+     *  comments stripped. Recognises the xray/v2rayN spellings geoip:xx and
+     *  geosite:xx, and normalises the "*.example.com" suffix form users bring
+     *  from there (sing-box wants the bare suffix: "example.com"). */
+    private fun parseRouteList(text: String): List<RouteEntry> {
+        val out = mutableListOf<RouteEntry>()
         val ipLike = Regex("^[0-9a-fA-F:.]+(/\\d{1,3})?$")
         for (rawLine in text.split("\n", ",", ";")) {
             var line = rawLine.substringBefore("#").substringBefore("//").trim()
             if (line.isEmpty()) continue
-            out.add(line.lowercase() to ipLike.matches(line))
+            val lower = line.lowercase()
+            when {
+                lower.startsWith("geoip:") && lower.length > 6 ->
+                    out.add(RouteEntry("geoip-" + lower.substring(6), RouteKind.GEOIP))
+                lower.startsWith("geosite:") && lower.length > 8 ->
+                    out.add(RouteEntry("geosite-" + lower.substring(8), RouteKind.GEOSITE))
+                else -> {
+                    if (line.startsWith("*.")) line = line.substring(2)
+                    out.add(RouteEntry(line.lowercase(), if (ipLike.matches(line)) RouteKind.CIDR else RouteKind.DOMAIN))
+                }
+            }
         }
         return out
+    }
+
+    /** A remote rule-set definition. Bundled tags get initial_path, so the
+     *  router has data before the first download; everything else downloads
+     *  from jsDelivr (raw.githubusercontent is often unreachable from RU). */
+    private fun ruleSetDef(tag: String, initial: Map<String, String>): JSONObject {
+        val repo = if (tag.startsWith("geosite-")) "sing-geosite" else "sing-geoip"
+        return JSONObject()
+            .put("type", "remote")
+            .put("tag", tag)
+            .put("format", "binary")
+            .put("url", "https://cdn.jsdelivr.net/gh/SagerNet/$repo@rule-set/$tag.srs")
+            .apply { initial[tag]?.let { put("initial_path", it) } }
     }
 
     private fun buildOutbound(raw: String, name: String): JSONObject {
