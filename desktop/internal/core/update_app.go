@@ -1,9 +1,11 @@
 package core
 
-// App self-update: the release zip produced by CI (WisteriaDesktop.exe +
-// bin/wisteria-client.exe + README), checksummed by a sibling .sha256 asset.
-// The running exe is staged via the rename trick; the user restarts from the
-// UI afterwards.
+// App self-update: the release bundle produced by CI, checksummed by a
+// sibling .sha256 asset. Which bundle the app picks depends on how it is
+// installed: a zip/tar.gz unpacked on a writable disk (stage the binary in
+// place) or an AppImage (stage the image file itself — the mount the binary
+// reports is squashfs and read-only). The user restarts from the UI
+// afterwards.
 
 import (
 	"errors"
@@ -16,14 +18,42 @@ import (
 
 const repoApp = "qqkane/wisteria-app"
 
-// Release asset and binary naming, per platform: CI publishes a zip bundle
-// for windows and a tar.gz bundle for linux, the updater picks its own.
-func appAssetName() string {
-	if runtime.GOOS == "windows" {
+// AppImagePath returns the .AppImage file this process was launched from, or
+// "" when the app runs unpacked. The AppImage runtime exports APPIMAGE with
+// the absolute path; inside the image os.Executable() reports
+// /tmp/.mount_*/usr/bin/WisteriaDesktop, which lives on a read-only squashfs
+// mount — every write there fails with EROFS, so the file to replace is the
+// image itself, not the path the binary reports. Renamed images are fine:
+// the runtime still points APPIMAGE at the real file.
+func AppImagePath() string {
+	p := strings.TrimSpace(os.Getenv("APPIMAGE"))
+	if p == "" {
+		return ""
+	}
+	st, err := os.Stat(p)
+	if err != nil || st.IsDir() {
+		return ""
+	}
+	return p
+}
+
+// Release asset and binary naming, per platform and install layout: CI
+// publishes a zip for windows, a tar.gz and an AppImage for linux, and the
+// updater picks the one it can actually write to.
+//
+// appAssetFor is a pure function of (goos, appImagePath) so the choice is
+// testable without an AppImage mount.
+func appAssetFor(goos, appImagePath string) string {
+	switch {
+	case goos == "windows":
 		return "WisteriaDesktop-windows-amd64.zip"
+	case goos == "linux" && appImagePath != "":
+		return "WisteriaDesktop-linux-x86_64.AppImage"
 	}
 	return "WisteriaDesktop-linux-amd64.tar.gz"
 }
+
+func appAssetName() string { return appAssetFor(runtime.GOOS, AppImagePath()) }
 
 func appBinName() string {
 	if runtime.GOOS == "windows" {
@@ -64,9 +94,9 @@ func AppUpdateCheck(current string) (UpdateInfo, error) {
 	return info, nil
 }
 
-// AppUpdateApply re-checks, downloads the release zip, verifies the sha256
-// and stages WisteriaDesktop.exe (and the bundled wisteria core, when the
-// zip carries it) next to the running files. Returns the new version; the
+// AppUpdateApply re-checks, downloads the release bundle, verifies the sha256
+// and stages the new app in place of the running one (plus the bundled
+// wisteria core, when the bundle carries it). Returns the new version; the
 // caller restarts to switch to it.
 func AppUpdateApply(current string) (string, error) {
 	info, err := AppUpdateCheck(current)
@@ -94,6 +124,14 @@ func AppUpdateApply(current string) (string, error) {
 	if err := verifySHA256(zipPath, shaPath); err != nil {
 		return "", err
 	}
+	// An AppImage is not an archive: the image file itself is the new app,
+	// and it already carries the new core inside.
+	if img := AppImagePath(); img != "" && strings.HasSuffix(info.AssetName, ".AppImage") {
+		if err := stageAppBinary(zipPath, img, info.AssetName); err != nil {
+			return "", err
+		}
+		return info.Latest, nil
+	}
 	staged, err := extractArchive(zipPath, tmp, appBinName(), coreBinName())
 	if err != nil {
 		return "", err
@@ -105,7 +143,7 @@ func AppUpdateApply(current string) (string, error) {
 	for _, src := range staged {
 		switch base := filepath.Base(src); base {
 		case appBinName():
-			if err := stageReplace(src, exe); err != nil {
+			if err := stageAppBinary(src, exe, info.AssetName); err != nil {
 				return "", err
 			}
 		case coreBinName():
@@ -119,11 +157,30 @@ func AppUpdateApply(current string) (string, error) {
 	return info.Latest, nil
 }
 
+// stageAppBinary puts the freshly verified app binary (or image) in place of
+// dst, but refuses first when dst's directory takes no writes: an AppImage
+// mount, a system-wide install dir or a read-only volume all used to fail
+// deep inside stageReplace with "переименование …: read-only file system",
+// which tells the user nothing they could act on.
+func stageAppBinary(src, dst, assetName string) error {
+	dir := filepath.Dir(dst)
+	if !dirWritable(dir) {
+		return fmt.Errorf("каталог %s доступен только на чтение — отсюда приложение себя обновить не может. Скачайте %s со страницы релиза и замените файл вручную", dir, assetName)
+	}
+	return stageReplace(src, dst)
+}
+
 // CleanupOldUpdate removes the .old copies staged by a previous update.
 func CleanupOldUpdate() {
 	exe, err := os.Executable()
 	if err == nil {
 		_ = os.Remove(exe + ".old")
+	}
+	// An AppImage update renames the running image aside; its mount keeps
+	// working off that inode until the app restarts, so this is the first
+	// moment the leftover is safe to delete.
+	if img := AppImagePath(); img != "" {
+		_ = os.Remove(img + ".old")
 	}
 	if bin := BinDir(); bin != "" {
 		entries, _ := os.ReadDir(bin)

@@ -698,13 +698,20 @@ func (a *App) ApplyAppUpdate() (string, error) {
 }
 
 // RestartApp relaunches the (already staged) binary and quits this instance.
+// On an AppImage the staged file is the image, not the path the process
+// reports: os.Executable() there is the old squashfs mount, which would
+// relaunch the previous version (and vanish with this process).
 func (a *App) RestartApp() error {
-	exe, err := os.Executable()
-	if err != nil {
-		return err
+	target := core.AppImagePath()
+	if target == "" {
+		exe, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		target = exe
 	}
-	cmd := exec.Command(exe)
-	cmd.Dir = filepath.Dir(exe)
+	cmd := exec.Command(target)
+	cmd.Dir = filepath.Dir(target)
 	if err := cmd.Start(); err != nil {
 		return err
 	}
