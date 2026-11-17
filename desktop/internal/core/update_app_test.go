@@ -7,6 +7,7 @@ package core
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -61,6 +62,10 @@ func TestAppImagePathOnlyExistingFile(t *testing.T) {
 // The bug this guards: an AppImage reports os.Executable() inside its
 // read-only squashfs mount, so staging there died with
 // "переименование …: read-only file system" — a message with no way out.
+//
+// chmod is not advisory on every OS (Windows ignores it for this), so the
+// test first proves it really made the directory unwritable and skips
+// otherwise rather than asserting a platform behaviour that does not exist.
 func TestStageAppBinaryRefusesReadOnlyDir(t *testing.T) {
 	src := filepath.Join(t.TempDir(), "WisteriaDesktop")
 	if err := os.WriteFile(src, []byte("new"), 0o755); err != nil {
@@ -75,6 +80,9 @@ func TestStageAppBinaryRefusesReadOnlyDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	if dirWritable(dir) {
+		t.Skipf("%s still takes writes after chmod 0555 on %s — nothing to refuse here", dir, runtime.GOOS)
+	}
 
 	err := stageAppBinary(src, dst, "WisteriaDesktop-linux-x86_64.AppImage")
 	if err == nil {
@@ -112,8 +120,11 @@ func TestStageAppBinaryWritesToWritableDir(t *testing.T) {
 	if err != nil || string(data) != "new" {
 		t.Fatalf("staged file = %q (%v), want \"new\"", data, err)
 	}
-	if st, err := os.Stat(dst); err != nil || st.Mode().Perm()&0o111 == 0 {
-		t.Errorf("staged app binary must stay executable, got %v (%v)", st.Mode(), err)
+	// The exec bit is a POSIX concept; Windows file modes carry none of it.
+	if runtime.GOOS != "windows" {
+		if st, err := os.Stat(dst); err != nil || st.Mode().Perm()&0o111 == 0 {
+			t.Errorf("staged app binary must stay executable, got %v (%v)", st.Mode(), err)
+		}
 	}
 	if _, err := os.Stat(dst + ".old"); err != nil {
 		t.Errorf("previous binary should be kept as .old for rollback/cleanup: %v", err)
