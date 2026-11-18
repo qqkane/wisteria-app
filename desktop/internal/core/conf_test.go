@@ -15,7 +15,7 @@ func TestWisteriaTOMLRender(t *testing.T) {
 			"mimic": "1", "filler_min": "80", "filler_max": "400",
 		},
 	}
-	out, err := WisteriaTOML(p, "127.0.0.1:2080", "cache.cache")
+	out, err := WisteriaTOML(p, "127.0.0.1:2080", "cache.cache", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +27,7 @@ func TestWisteriaTOMLRender(t *testing.T) {
 		`server_static_public = "PUBKEYBASE64=="`,
 		"min_pad = 64", "max_pad = 1448", "mimic_tls = 1",
 		"filler_min = 80", "filler_max = 400",
-		`mode = "global"`,
+		`mode = "bypass_ru"`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
@@ -40,8 +40,48 @@ func TestWisteriaTOMLRender(t *testing.T) {
 
 func TestWisteriaTOMLRequiresKey(t *testing.T) {
 	p := Profile{ID: "t2", Type: TWisteria, Host: "s", Port: 1}
-	if _, err := WisteriaTOML(p, "127.0.0.1:2080", ""); err == nil {
+	if _, err := WisteriaTOML(p, "127.0.0.1:2080", "", true); err == nil {
 		t.Fatal("missing client key must error")
+	}
+}
+
+// Routing mode defaults to bypass_ru (RU domains/networks direct, the rest
+// tunneled); the no_bypass_ru opt-out renders the old global mode. Only the
+// mode line may differ — the rest of the TOML is byte-identical, and the
+// default Settings (zero value) must keep bypass_ru on.
+func TestWisteriaTOMLRoutingMode(t *testing.T) {
+	var s Settings
+	s.defaults()
+	if s.NoBypassRU {
+		t.Fatal("zero-value Settings must keep bypass_ru enabled")
+	}
+	p := Profile{ID: "t8", Type: TWisteria, Host: "s.example", Port: 47823,
+		ClientPriv: "PRIV", Fields: map[string]string{"pub": "PUB"}}
+	// Settings persists as JSON: the flag must survive a round-trip.
+	raw, err := json.Marshal(Settings{NoBypassRU: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rt Settings
+	if err := json.Unmarshal(raw, &rt); err != nil || !rt.NoBypassRU {
+		t.Fatalf("no_bypass_ru json round-trip: %v %+v", err, rt)
+	}
+	bypass, err := WisteriaTOML(p, "127.0.0.1:2080", "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(bypass, `mode = "bypass_ru"`) {
+		t.Errorf("default routing must be bypass_ru:\n%s", bypass)
+	}
+	global, err := WisteriaTOML(p, "127.0.0.1:2080", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(global, `mode = "global"`) {
+		t.Errorf("opt-out routing must be global:\n%s", global)
+	}
+	if strings.Replace(bypass, `mode = "bypass_ru"`, `mode = "global"`, 1) != global {
+		t.Error("only the routing mode may differ between the two renders")
 	}
 }
 
@@ -52,7 +92,7 @@ func TestWisteriaTOMLRejectsBadFields(t *testing.T) {
 	p := Profile{ID: "t3", Type: TWisteria, Host: "s.example", Port: 47823,
 		ClientPriv: "PRIVKEYBASE64==",
 		Fields:     map[string]string{"obf_mu": "6.7\n[routing]\nmode = \"direct\""}}
-	out, err := WisteriaTOML(p, "127.0.0.1:2080", "")
+	out, err := WisteriaTOML(p, "127.0.0.1:2080", "", true)
 	if err == nil {
 		t.Fatalf("injected field must be rejected, got:\n%s", out)
 	}
@@ -65,7 +105,7 @@ func TestWisteriaTOMLTLSRender(t *testing.T) {
 	p := Profile{ID: "t4", Type: TWisteria, Host: "s.example", Port: 47823,
 		ClientPriv: "PRIVKEYBASE64==", Transport: "tls", TLSSNI: "cdn.example", TLSInsecure: true,
 		Fields: map[string]string{"pub": "PUBKEYBASE64=="}}
-	out, err := WisteriaTOML(p, "127.0.0.1:2080", "cache.cache")
+	out, err := WisteriaTOML(p, "127.0.0.1:2080", "cache.cache", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +120,7 @@ func TestWisteriaTOMLTLSRender(t *testing.T) {
 	}
 	// tls_sni equal to the endpoint host is the loader's default — omit.
 	p.TLSSNI = "s.example"
-	out2, err := WisteriaTOML(p, "127.0.0.1:2080", "")
+	out2, err := WisteriaTOML(p, "127.0.0.1:2080", "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +131,7 @@ func TestWisteriaTOMLTLSRender(t *testing.T) {
 	// the legacy [server] block has no tls_sni/tls_insecure fields.
 	p.TLSSNI = "cdn.example"
 	delete(p.Fields, "pub")
-	out3, err := WisteriaTOML(p, "127.0.0.1:2080", "")
+	out3, err := WisteriaTOML(p, "127.0.0.1:2080", "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,12 +145,14 @@ func TestWisteriaTOMLTLSRender(t *testing.T) {
 
 // A tcp profile must render byte-identical to the pre-wave-4 output: the
 // generated config is compared against expected text in tests and old
-// profiles must not silently change shape after an update.
+// profiles must not silently change shape after an update. The pinned text
+// already carries the one sanctioned change since then: [routing] mode
+// follows the bypassRU flag and the expected text records the new default.
 func TestWisteriaTOMLTCPSByteIdentical(t *testing.T) {
 	p := Profile{ID: "t5", Type: TWisteria, Host: "s.example", Port: 47823,
 		ClientPriv: "PRIV", Transport: "tcp",
 		Fields: map[string]string{"pub": "PUB"}}
-	out, err := WisteriaTOML(p, "127.0.0.1:2080", "cache.cache")
+	out, err := WisteriaTOML(p, "127.0.0.1:2080", "cache.cache", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,14 +185,14 @@ probe_timeout_sec = 3
 # server defaults
 
 [routing]
-mode = "global"
+mode = "bypass_ru"
 `
 	if out != want {
 		t.Fatalf("tcp output changed:\n got: %q\nwant: %q", out, want)
 	}
 	// The explicit "tcp" spelling normalizes onto the zero value.
 	p.Transport = ""
-	out2, err := WisteriaTOML(p, "127.0.0.1:2080", "cache.cache")
+	out2, err := WisteriaTOML(p, "127.0.0.1:2080", "cache.cache", true)
 	if err != nil || out2 != want {
 		t.Fatalf("tcp/empty must render identically (err=%v)", err)
 	}
@@ -162,7 +204,7 @@ func TestWisteriaTOMLTLSRoundTrip(t *testing.T) {
 	p := Profile{ID: "t6", Type: TWisteria, Host: "s.example", Port: 47823,
 		ClientPriv: "PRIVKEYBASE64==", Transport: "tls", TLSSNI: "cdn.example", TLSInsecure: true,
 		Fields: map[string]string{"pub": "PUBKEYBASE64=="}}
-	out, err := WisteriaTOML(p, "127.0.0.1:2080", "")
+	out, err := WisteriaTOML(p, "127.0.0.1:2080", "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +217,7 @@ func TestWisteriaTOMLTLSRoundTrip(t *testing.T) {
 	}
 	// tcp profile: transport comes back as the zero value.
 	p.Transport, p.TLSSNI, p.TLSInsecure = "", "", false
-	out2, err := WisteriaTOML(p, "127.0.0.1:2080", "")
+	out2, err := WisteriaTOML(p, "127.0.0.1:2080", "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +245,7 @@ func TestWisteriaTOMLRejectsBadTLS(t *testing.T) {
 	} {
 		p := base
 		mut(&p)
-		if out, err := WisteriaTOML(p, "127.0.0.1:2080", ""); err == nil {
+		if out, err := WisteriaTOML(p, "127.0.0.1:2080", "", true); err == nil {
 			t.Errorf("%s: must be rejected, got:\n%s", name, out)
 		}
 	}

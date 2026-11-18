@@ -227,7 +227,7 @@ func TestParseManualWisteriaFieldsRoundTrip(t *testing.T) {
 	// The GUI manual form edits Fields directly; render must accept it.
 	p := Profile{ID: "m", Type: TWisteria, Host: "h", Port: 1, ClientPriv: "K==",
 		Fields: map[string]string{}}
-	out, err := WisteriaTOML(p, "127.0.0.1:2080", "")
+	out, err := WisteriaTOML(p, "127.0.0.1:2080", "", true)
 	if err != nil {
 		t.Fatal(err)
 	}

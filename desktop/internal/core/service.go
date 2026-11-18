@@ -94,6 +94,11 @@ type Settings struct {
 	BypassLAN bool   `json:"bypass_lan"` // private ranges go direct
 	RemoteDNS string `json:"remote_dns"` // resolver for the outbound server name, "" = system
 
+	// Routing for wisteria profiles. The zero value keeps bypass_ru on (RU
+	// domains/networks go direct, same idiom as NoUpdateCheck — old configs
+	// upgrade into the new default without a migration flag).
+	NoBypassRU bool `json:"no_bypass_ru"`
+
 	// Cores
 	MemLimitMB int    `json:"mem_limit_mb"` // GOMEMLIMIT for the core process, 0 = off
 	LogLevel   string `json:"log_level"`    // sing-box log level
@@ -544,7 +549,7 @@ func (s *Service) prepareCore(p Profile) (core string, args []string, confFile s
 			return "", nil, "", fmt.Errorf("ядро wisteria-client не найдено — положите его в bin/ рядом с приложением или укажите путь в настройках")
 		}
 		tomlText, err := WisteriaTOML(p, fmt.Sprintf("%s:%d", s.settings.ListenHost(), s.settings.LocalPort),
-			filepath.Join(s.dirs.Data, "serverkey-"+p.ID+".cache"))
+			filepath.Join(s.dirs.Data, "serverkey-"+p.ID+".cache"), !s.settings.NoBypassRU)
 		if err != nil {
 			return "", nil, "", err
 		}

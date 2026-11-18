@@ -356,7 +356,7 @@ func TestServiceE2EWisteriaTLS(t *testing.T) {
 	}
 	// Sanity: the profile must be renderable — this is the TOML the core
 	// will load (generated, not hand-written).
-	if _, err := WisteriaTOML(profile, "127.0.0.1:21082", ""); err != nil {
+	if _, err := WisteriaTOML(profile, "127.0.0.1:21082", "", true); err != nil {
 		t.Fatalf("tls profile render: %v", err)
 	}
 	if err := svc.Start(profile); err != nil {

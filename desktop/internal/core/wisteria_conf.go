@@ -79,7 +79,8 @@ func checkObfFields(f map[string]string) error {
 
 // WisteriaTOML renders the client config. socksListen is the local SOCKS5
 // address; cachePath is the per-profile server-key cache (XX→IK pinning).
-func WisteriaTOML(p Profile, socksListen, cachePath string) (string, error) {
+// bypassRU picks the routing mode: RU domains/networks direct, rest tunneled.
+func WisteriaTOML(p Profile, socksListen, cachePath string, bypassRU bool) (string, error) {
 	if p.Type != TWisteria {
 		return "", fmt.Errorf("профиль %q не wisteria", p.ID)
 	}
@@ -213,7 +214,15 @@ func WisteriaTOML(p Profile, socksListen, cachePath string) (string, error) {
 	}
 	w("")
 	w("[routing]")
-	w("mode = \"global\"")
+	// bypass_ru: the core sends .ru/.su/.рф domains and RU networks direct
+	// (it owns the lists) and tunnels the rest — the sane default for a
+	// mixed RU/foreign setup. false keeps the old catch-all global mode for
+	// users who refuse to expose their IP to Russian sites.
+	if bypassRU {
+		w("mode = \"bypass_ru\"")
+	} else {
+		w("mode = \"global\"")
+	}
 	_ = cachePath // passed to the core as --serverkey-cache, not via TOML
 	return b.String(), nil
 }
