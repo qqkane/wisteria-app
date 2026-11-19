@@ -38,8 +38,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var web: WebView
     private lateinit var bridge: WisteriaBridge
 
-    @Volatile
-    private var pendingConnectId: String? = null
+    /** This activity's own event emitter — onDestroy removes exactly it,
+     *  never the whole registry: restartApp() creates the new activity
+     *  BEFORE the old one is destroyed, and a blanket clear() wiped the
+     *  fresh emitter (push events died until the next recreation). */
+    private var emitter: ((String, String) -> Unit)? = null
 
     /** Latest bottom system inset in CSS px, mirrored to the page as
      *  --sat-bottom (see onCreate). -1 until the first insets dispatch. */
@@ -169,7 +172,7 @@ class MainActivity : AppCompatActivity() {
         }
         setContentView(root)
 
-        EngineHub.emitters += { event, payload ->
+        emitter = { event, payload ->
             // evaluateJavascript must run on the UI thread; skip silently
             // when the webview is gone (activity finishing).
             runOnUiThread {
@@ -188,6 +191,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+        EngineHub.emitters += emitter!!
 
         web.loadUrl("file:///android_asset/ui/index.html")
         applyThemeFromSettings()
@@ -201,22 +205,27 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** The bridge asks for VPN consent mid-Connect; the retry follows here. */
+    /** The bridge asks for VPN consent mid-Connect; the retry follows here.
+     *  Called from the WebView bridge thread — the dialog must be launched
+     *  on the UI thread. The pending id lives in VpnConsentHolder so a
+     *  recreation while the dialog is up does not lose the grant. */
     fun requestVpnConsent(profileId: String) {
-        val intent = VpnService.prepare(this) ?: run {
-            bridge.onVpnConsentGranted(profileId)
-            return
+        runOnUiThread {
+            if (isFinishing || isDestroyed) return@runOnUiThread
+            val intent = VpnService.prepare(this) ?: run {
+                bridge.onVpnConsentGranted(profileId)
+                return@runOnUiThread
+            }
+            startActivityForResult(intent, REQ_VPN)
         }
-        pendingConnectId = profileId
-        startActivityForResult(intent, REQ_VPN)
     }
 
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == REQ_VPN) {
-            val id = pendingConnectId
-            pendingConnectId = null
+            val id = VpnConsentHolder.pendingId
+            VpnConsentHolder.pendingId = null
             if (resultCode == RESULT_OK && id != null) {
                 bridge.onVpnConsentGranted(id)
             } else {
@@ -242,8 +251,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        EngineHub.emitters.clear()
-        WisteriaBridgeHolder.instance = null
+        // Remove ONLY this activity's emitter and holder slot: with
+        // restartApp() the successor is already registered when this runs,
+        // and a blanket clear()/null used to kill its event feed.
+        emitter?.let { EngineHub.emitters -= it }
+        emitter = null
+        if (WisteriaBridgeHolder.instance === bridge) {
+            WisteriaBridgeHolder.instance = null
+        }
         // The JS interface holds this activity through the bridge; detach it
         // before the webview dies so a stale page can never reach a dead
         // activity (rotation recreates the whole pair anyway).

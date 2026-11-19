@@ -170,7 +170,7 @@ select option, select optgroup { background-color: var(--surface); color: var(--
 .logs-header h2 { font-size: 28px; font-weight: 700; }
 .logs-tools { display: flex; align-items: center; gap: 14px; }
 .logs-tools label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; }
-.log-view { width: 100%; height: calc(100vh - 160px); overflow-y: auto; user-select: text; background: var(--card); backdrop-filter: blur(20px); border: 1px solid var(--border); border-radius: 16px; padding: 16px 18px; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.55; white-space: pre-wrap; word-break: break-all; color: var(--muted); }
+.log-view { width: 100%; height: calc(100vh - 215px); overflow-y: auto; user-select: text; background: var(--card); backdrop-filter: blur(20px); border: 1px solid var(--border); border-radius: 16px; padding: 16px 18px; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.55; white-space: pre-wrap; word-break: break-all; color: var(--muted); }
 .log-view .l-app { color: var(--fg); }
 .log-view .ts { opacity: .5; }
 
@@ -313,3 +313,50 @@ textarea { resize: vertical; min-height: 80px; }
 .dg-k-health, .dg-k-info { background: rgba(var(--accent-rgb), .12); color: var(--accent); }
 .diag-ev-text { word-break: break-word; }
 .diag-empty { color: var(--muted); font-size: 13px; margin: 0; }
+
+/* ---------- connect button state machine ---------- */
+/* Icon crossfade: power → check on connect (springy scale), reverse on
+   disconnect. Transform/opacity only — compositor work, no per-frame
+   raster. */
+.connect-btn .btn-icons { position: relative; width: 48px; height: 48px; margin-bottom: 8px; }
+.connect-btn .btn-icons .power-icon { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; transition: opacity .3s, transform .45s cubic-bezier(.34,1.56,.64,1); }
+.connect-btn .icon-check { position: absolute; inset: 0; display: flex; opacity: 0; transform: scale(.4) rotate(-45deg); transition: opacity .25s, transform .45s cubic-bezier(.34,1.56,.64,1); }
+.connect-btn .icon-check svg { width: 100%; height: 100%; }
+.connect-btn.connected .btn-icons .power-icon { opacity: 0; transform: scale(.4) rotate(45deg); }
+.connect-btn.connected .icon-check { opacity: 1; transform: scale(1) rotate(0deg); }
+/* Connecting: a rotating arc around the rim + a breathing power glyph.
+   The arc is one dasharray circle rotated as a whole layer. */
+.connect-btn .spin-arc { position: absolute; inset: -3px; width: calc(100% + 6px); height: calc(100% + 6px); opacity: 0; transition: opacity .3s; pointer-events: none; }
+.connect-btn .spin-arc circle { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 72 217; }
+.connect-btn.connecting .spin-arc { opacity: 1; animation: arc-spin 1.1s linear infinite; }
+.connect-btn.connecting .btn-icons .power-icon { animation: power-breathe 1.6s ease-in-out infinite; }
+.connect-btn.connecting:disabled { opacity: .85; }
+@keyframes arc-spin { to { transform: rotate(360deg); } }
+@keyframes power-breathe { 0%, 100% { opacity: .5; transform: scale(.94); } 50% { opacity: 1; transform: scale(1.05); } }
+/* The connect moment: one springy pop (plays on class add / rebuild). */
+.connect-btn.connected { animation: btn-pop .5s cubic-bezier(.34,1.56,.64,1); }
+@keyframes btn-pop { 0% { transform: scale(.93); } 100% { transform: scale(1); } }
+/* The status word reacts to the state too. */
+.vpn-status .label { transition: color .3s; }
+.vpn-status.on .label { color: var(--accent); }
+.vpn-status.mid .label { color: var(--fg); animation: blink 1.4s ease-in-out infinite; }
+/* A surfaced failure shakes the error box once. */
+.error-box { animation: err-shake .4s; }
+@keyframes err-shake { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-6px); } 40% { transform: translateX(5px); } 60% { transform: translateX(-3px); } 80% { transform: translateX(2px); } }
+
+/* ---------- logs screen: controls bar + live health line ---------- */
+.logs-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; width: 100%; margin: 0 0 10px; }
+.log-follow { display: flex; align-items: center; gap: 9px; font-size: 12.5px; color: var(--muted); cursor: pointer; }
+.log-follow .switch { width: 38px; height: 22px; }
+.log-follow .switch .slider:before { height: 16px; width: 16px; }
+.log-follow .switch input:checked + .slider:before { transform: translateX(16px); }
+.log-health { display: flex; align-items: center; gap: 8px; min-width: 0; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--muted); background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 6px 12px; transition: color .3s, border-color .3s; }
+.log-health .lh-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex-shrink: 0; transition: background .3s, box-shadow .3s; }
+.log-health.live { color: var(--fg); border-color: rgba(var(--accent-rgb), .3); }
+.log-health.live .lh-dot { background: #2ecc71; box-shadow: 0 0 8px rgba(46, 204, 113, .6); }
+
+/* Respect the OS "reduce motion" setting: drop the infinite loops. */
+@media (prefers-reduced-motion: reduce) {
+  .connect-btn.connecting .spin-arc, .connect-btn.connecting .btn-icons .power-icon,
+  .vpn-status.mid .label, .orb, .sf-dot.mid { animation: none; }
+}

@@ -29,6 +29,17 @@ object EngineHub {
     @Volatile var profileName: String = ""
     @Volatile var profileType: String = ""
 
+    /** Latest "health: rtt=… loss=… pings=…" slice from the engine. Those
+     *  lines arrive every few seconds and used to flood the log ring (the
+     *  whole Логи screen was them). They are consumed here instead: the
+     *  frontend shows the freshest slice on its own live line above the
+     *  logs, the ring keeps only actionable lines. Same shape as the
+     *  desktop's core.CoreHealth. */
+    @Volatile var lastHealth: JSONObject? = null
+        private set
+
+    private val HEALTH_RE = Regex("""health: rtt=(\d+)ms loss=(\d+)% pings=(\d+)""")
+
     /** Connect attempts that ended in a retry since the session started —
      *  the diagnostics page's «Попыток» chip (the desktop counts the same
      *  thing from the core's connect loop). */
@@ -42,6 +53,7 @@ object EngineHub {
             diagEvents.clear()
             retryEvents = 0
         }
+        lastHealth = null
     }
 
     /** (event, payloadJson) push targets; the activity registers its webview. */
@@ -62,6 +74,17 @@ object EngineHub {
     }
 
     fun coreLog(line: String) {
+        val m = HEALTH_RE.find(line)
+        if (m != null) {
+            val (rtt, loss, pings) = m.destructured
+            lastHealth = JSONObject()
+                .put("active", true)
+                .put("rtt_ms", rtt.toLong())
+                .put("loss_pct", loss.toLong())
+                .put("pings", pings.toLong())
+                .put("at", AndroidStore.nowIso())
+            return // consumed: not a log line, no "log" event spam either
+        }
         addLog(LogLine(0, "core", line, AndroidStore.nowIso()))
         classify(line)
         pushEvent("log", null)

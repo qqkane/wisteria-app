@@ -4,14 +4,20 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.net.VpnService
+import android.os.Build
+import android.provider.Settings
 import android.webkit.JavascriptInterface
+import androidx.core.content.FileProvider
 import org.json.JSONArray
 import org.json.JSONObject
 import org.wisteria.mobile.Mobile
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
 import java.util.Base64
 
 /**
@@ -27,10 +33,11 @@ class WisteriaBridge(private val activity: MainActivity) {
     private val context: Context get() = activity.applicationContext
     private val store by lazy { AndroidStore(context) }
 
-    // The profile waiting for the system VPN consent dialog. Cancel clears
-    // it: after a reinstall consent is revoked, so «Отмена» pressed while
-    // the dialog is up must not be undone by the user then granting it.
-    @Volatile private var consentPending: String? = null
+    // The profile waiting for the system VPN consent dialog lives in
+    // VpnConsentHolder (process-wide, survives activity recreation).
+    // Cancel clears it: after a reinstall consent is revoked, so «Отмена»
+    // pressed while the dialog is up must not be undone by the user then
+    // granting it.
 
     companion object {
         /** Mirrors build.gradle's versionName so the version the settings
@@ -78,6 +85,7 @@ class WisteriaBridge(private val activity: MainActivity) {
         // ---- state / logs ----
         "GetState" -> statusJson()
         "GetLogs" -> EngineHub.logsSince(args.optLong(0))
+        "GetCoreHealth" -> EngineHub.lastHealth ?: JSONObject().put("active", false)
         "GetWisteriaDiag" -> diagJson()
         // JSON-encode the version string: the frontend's boot chain does
         // JSON.parse on every reply, and a bare 0.4.2 is not valid JSON.
@@ -120,8 +128,8 @@ class WisteriaBridge(private val activity: MainActivity) {
             .put("wisteria_found", false).put("wisteria_path", "")
             .put("singbox_found", false).put("singbox_path", "")
             .put("xray_found", false).put("xray_path", "")
-        "CheckAppUpdate" -> JSONObject().put("current", VERSION).put("latest", VERSION).put("has_update", false)
-        "ApplyAppUpdate" -> throw err("Обновление APK ставится вручную — скачайте новый из релиза")
+        "CheckAppUpdate" -> checkAppUpdate()
+        "ApplyAppUpdate" -> { startApkUpdate(); null }
         "RestartApp" -> { activity.restartApp(); null }
         "CheckCoreUpdate" -> JSONObject().put("current", "-").put("latest", "-").put("has_update", false)
         "UpdateCore" -> throw err("Ядра встроены в приложение (sing-box) — обновление не требуется")
@@ -135,7 +143,14 @@ class WisteriaBridge(private val activity: MainActivity) {
      *  engines report through Mobile.status(): the sing-box facade shares
      *  the same status word set as the wisteria engine. */
     fun statusJson(): JSONObject {
-        val engine = JSONObject(Mobile.status())
+        // The engine library may be unavailable (failed load, stub build):
+        // the UI must still render a disconnected screen instead of every
+        // GetState rejecting and blanking the whole app.
+        val engine = try {
+            JSONObject(Mobile.status())
+        } catch (t: Throwable) {
+            JSONObject().put("state", "idle")
+        }
         val running = isRunning(engine)
         val out = JSONObject()
         out.put("state", mapState(engine.optString("state")))
@@ -168,7 +183,7 @@ class WisteriaBridge(private val activity: MainActivity) {
         store.setActive(id)
         val consent = VpnService.prepare(activity)
         if (consent != null) {
-            consentPending = id
+            VpnConsentHolder.pendingId = id
             activity.requestVpnConsent(id)
             return
         }
@@ -179,11 +194,19 @@ class WisteriaBridge(private val activity: MainActivity) {
         val intent = Intent(context, WisteriaVpnService::class.java)
             .setAction(WisteriaVpnService.ACTION_CONNECT)
             .putExtra(WisteriaVpnService.EXTRA_PROFILE_ID, id)
-        context.startForegroundService(intent)
+        try {
+            context.startForegroundService(intent)
+        } catch (t: Throwable) {
+            // Android 12+ refuses background FGS starts; the UI must see
+            // the failure instead of sitting on the optimistic connecting
+            // screen forever.
+            EngineHub.appLog("запуск VPN-сервиса: ${t.message}")
+            EngineHub.pushEvent("state", WisteriaBridge.staticStatusJson("disconnected", "откройте приложение и повторите подключение"))
+        }
     }
 
     private fun disconnect() {
-        consentPending = null // «Отмена» beats a later grant of the dialog
+        VpnConsentHolder.pendingId = null // «Отмена» beats a later grant of the dialog
         context.startService(
             Intent(context, WisteriaVpnService::class.java)
                 .setAction(WisteriaVpnService.ACTION_DISCONNECT)
@@ -192,11 +215,11 @@ class WisteriaBridge(private val activity: MainActivity) {
 
     /** Called by the activity after the VPN consent dialog resolved OK. */
     fun onVpnConsentGranted(profileId: String) {
-        if (consentPending != profileId) { // canceled meanwhile
-            consentPending = null
+        if (VpnConsentHolder.pendingId != profileId) { // canceled meanwhile
+            VpnConsentHolder.pendingId = null
             return
         }
-        consentPending = null
+        VpnConsentHolder.pendingId = null
         startConnectService(profileId)
     }
 
@@ -675,6 +698,121 @@ class WisteriaBridge(private val activity: MainActivity) {
         val host = ep.substring(0, idx).removePrefix("[").removeSuffix("]")
         if (host.isEmpty()) return null
         return host to port
+    }
+
+    // ---- app self-update: APK from the public GitHub release ----
+
+    /** Numeric per-segment comparison of dotted versions ("1.1.16"). */
+    private fun cmpVersions(a: String, b: String): Int {
+        val pa = a.trim().removePrefix("v").split(".")
+        val pb = b.trim().removePrefix("v").split(".")
+        for (i in 0 until maxOf(pa.size, pb.size)) {
+            val x = pa.getOrNull(i)?.toIntOrNull() ?: 0
+            val y = pb.getOrNull(i)?.toIntOrNull() ?: 0
+            if (x != y) return x.compareTo(y)
+        }
+        return 0
+    }
+
+    private fun latestAppRelease(): JSONObject =
+        JSONObject(httpGet("https://api.github.com/repos/qqkane/wisteria-app/releases/latest", 1 shl 20, 15000))
+
+    private fun apkAsset(rel: JSONObject): JSONObject {
+        val assets = rel.optJSONArray("assets") ?: JSONArray()
+        for (i in 0 until assets.length()) {
+            val a = assets.getJSONObject(i)
+            if (a.optString("name") == "Wisteria-android.apk") return a
+        }
+        throw err("в релизе нет Wisteria-android.apk")
+    }
+
+    private fun checkAppUpdate(): JSONObject {
+        val rel = latestAppRelease()
+        val latest = rel.optString("tag_name", "").removePrefix("v")
+        val asset = apkAsset(rel)
+        return JSONObject()
+            .put("current", VERSION)
+            .put("latest", latest)
+            .put("has_update", cmpVersions(VERSION, latest) < 0)
+            .put("asset_size", asset.optLong("size"))
+    }
+
+    /** The JS bridge call is synchronous from the WebView's point of view,
+     *  so the download runs on its own thread and reports through apkupdate
+     *  events; Call itself returns as soon as the thread is started. */
+    private fun startApkUpdate() {
+        Thread {
+            try {
+                val rel = latestAppRelease()
+                val latest = rel.optString("tag_name", "").removePrefix("v")
+                if (cmpVersions(VERSION, latest) >= 0) throw err("установлена актуальная версия")
+                val asset = apkAsset(rel)
+                val url = asset.optString("browser_download_url")
+                if (url.isEmpty()) throw err("у ассета нет ссылки на скачивание")
+                EngineHub.pushEvent("apkupdate", JSONObject().put("stage", "downloading").put("latest", latest))
+                val dir = File(context.cacheDir, "update")
+                dir.mkdirs()
+                val apk = File(dir, "Wisteria-android.apk")
+                downloadToFile(url, apk)
+                // GitHub publishes a sha256 digest per asset; a mismatch
+                // means a corrupted or tampered download — never install it.
+                val digest = asset.optString("digest")
+                if (digest.startsWith("sha256:")) {
+                    val got = sha256Hex(apk)
+                    if (!got.equals(digest.removePrefix("sha256:"), ignoreCase = true)) {
+                        apk.delete()
+                        throw err("контрольная сумма APK не совпала — файл удалён")
+                    }
+                }
+                installApk(apk)
+                EngineHub.pushEvent("apkupdate", JSONObject().put("stage", "install"))
+            } catch (e: Throwable) {
+                EngineHub.pushEvent("apkupdate", JSONObject().put("stage", "error").put("message", e.message ?: e.toString()))
+            }
+        }.start()
+    }
+
+    private fun downloadToFile(url: String, dst: File) {
+        val conn = URL(url).openConnection() as HttpURLConnection
+        conn.connectTimeout = 15000
+        conn.readTimeout = 60000
+        conn.instanceFollowRedirects = true
+        conn.setRequestProperty("User-Agent", "WisteriaAndroid/$VERSION")
+        try {
+            if (conn.responseCode !in 200..299) throw err("HTTP ${conn.responseCode} при скачивании APK")
+            conn.inputStream.use { input -> dst.outputStream().use { out -> input.copyTo(out, 64 * 1024) } }
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    private fun sha256Hex(f: File): String {
+        val md = MessageDigest.getInstance("SHA-256")
+        f.inputStream().use { input ->
+            val buf = ByteArray(64 * 1024)
+            while (true) {
+                val n = input.read(buf)
+                if (n <= 0) break
+                md.update(buf, 0, n)
+            }
+        }
+        return md.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    private fun installApk(apk: File) {
+        if (Build.VERSION.SDK_INT >= 26 && !context.packageManager.canRequestPackageInstalls()) {
+            context.startActivity(
+                Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + context.packageName))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+            throw err("разрешите установку из неизвестных источников для Wisteria и нажмите «Скачать и установить» ещё раз")
+        }
+        val uri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", apk)
+        context.startActivity(
+            Intent(Intent.ACTION_VIEW)
+                .setDataAndType(uri, "application/vnd.android.package-archive")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
     }
 
     private fun httpGet(url: String, maxBytes: Int, timeoutMs: Int): String {

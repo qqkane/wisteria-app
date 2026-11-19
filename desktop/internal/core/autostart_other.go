@@ -34,11 +34,23 @@ func SetAutostart(on bool) error {
 		return err
 	}
 	if !on {
-		return os.Remove(path)
+		// Toggling off a never-enabled autostart is a no-op, not an error
+		// the UI would toast.
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
 	}
-	exe, err := os.Executable()
-	if err != nil {
-		return err
+	// An AppImage's os.Executable() is the ephemeral squashfs mount point
+	// (/tmp/.mount_*): it vanishes when the app exits, so an autostart
+	// entry built from it points at a dead path and silently never fires.
+	// The image file itself is the stable target (same rule as RestartApp).
+	exe := AppImagePath()
+	if exe == "" {
+		exe, err = os.Executable()
+		if err != nil {
+			return err
+		}
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err

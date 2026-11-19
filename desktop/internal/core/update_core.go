@@ -219,7 +219,11 @@ func CoreUpdateApply(name, explicitPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := stageReplace(staged[0], filepath.Join(bin, name+exeSuffix)); err != nil {
+	// The destination must use the BINARY name, not the core family name:
+	// the wisteria release ships wisteria-client, and FindCore looks for
+	// exactly that — staging it as "wisteria.exe" downloaded a core the
+	// app could never find.
+	if err := stageReplace(staged[0], filepath.Join(bin, coreBinary(name)+exeSuffix)); err != nil {
 		return "", err
 	}
 	return info.Latest, nil

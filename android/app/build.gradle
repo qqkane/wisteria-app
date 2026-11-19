@@ -11,8 +11,8 @@ android {
         applicationId "org.wisteria.app"
         minSdk 24
         targetSdk 35
-        versionCode 26
-        versionName "1.1.15"
+        versionCode 27
+        versionName "1.1.16"
     }
 
     // WisteriaBridge.VERSION reads BuildConfig.VERSION_NAME so the version
@@ -40,7 +40,14 @@ android {
                 keyAlias "wisteria"
                 keyPassword relPass
             } else {
+                // No release keystore/secret (local builds, CI without the
+                // secrets): fall back to the debug key COMPLETELY — setting
+                // storeFile alone leaves storePassword unset and
+                // packageRelease dies with "missing required property".
                 storeFile file("${System.properties['user.home']}/.android/debug.keystore")
+                storePassword "android"
+                keyAlias "androiddebugkey"
+                keyPassword "android"
             }
         }
     }

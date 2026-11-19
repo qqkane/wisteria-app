@@ -1,16 +1,41 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Legacy launcher icon (API 24-25, before adaptive icons): the same
+     wisteria raceme on the violet gradient, full-bleed rounded square.
+     API 26+ uses @mipmap/ic_launcher (adaptive). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="48dp"
     android:height="48dp"
-    android:viewportWidth="48"
-    android:viewportHeight="48">
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M26,0 H82 A26,26 0 0 1 108,26 V82 A26,26 0 0 1 82,108 H26 A26,26 0 0 1 0,82 V26 A26,26 0 0 1 26,0 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="54"
+                android:centerY="41"
+                android:gradientRadius="78"
+                android:startColor="#43307A"
+                android:centerColor="#2A1D52"
+                android:endColor="#150E2B" />
+        </aapt:attr>
+    </path>
     <path
-        android:fillColor="#6750A4"
-        android:pathData="M8,0h32a8,8 0 0 1 8,8v32a8,8 0 0 1 -8,8h-32a8,8 0 0 1 -8,-8v-32a8,8 0 0 1 8,-8z" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M16,23v-5a8,8 0 0 1 16,0v5h-3.5v-5a4.5,4.5 0 0 0 -9,0v5z" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M14,24.5h20a2,2 0 0 1 2,2v11a2,2 0 0 1 -2,2h-20a2,2 0 0 1 -2,-2v-11a2,2 0 0 1 2,-2z" />
+        android:pathData="M54,20 C54,26 54,29 54,33"
+        android:strokeColor="#A78BFA"
+        android:strokeWidth="3"
+        android:strokeLineCap="round" />
+    <path android:fillColor="#8FB573" android:pathData="M47,31 Q39,23 32,29 Q39,36 47,31 Z" />
+    <path android:fillColor="#8FB573" android:pathData="M61,31 Q69,23 76,29 Q69,36 61,31 Z" />
+    <path android:fillColor="#EDE9FE" android:pathData="M49.5,33 a4.5,4.5 0 1,0 9,0 a4.5,4.5 0 1,0 -9,0 Z" />
+    <path android:fillColor="#E9D5FF" android:strokeColor="#241740" android:strokeAlpha="0.3" android:strokeWidth="1" android:pathData="M36,42 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0 Z" />
+    <path android:fillColor="#E9D5FF" android:strokeColor="#241740" android:strokeAlpha="0.3" android:strokeWidth="1" android:pathData="M47,40.5 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0 Z" />
+    <path android:fillColor="#E9D5FF" android:strokeColor="#241740" android:strokeAlpha="0.3" android:strokeWidth="1" android:pathData="M58,42 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0 Z" />
+    <path android:fillColor="#C4B5FD" android:strokeColor="#241740" android:strokeAlpha="0.3" android:strokeWidth="1" android:pathData="M41.4,53.5 a6.6,6.6 0 1,0 13.2,0 a6.6,6.6 0 1,0 -13.2,0 Z" />
+    <path android:fillColor="#C4B5FD" android:strokeColor="#241740" android:strokeAlpha="0.3" android:strokeWidth="1" android:pathData="M53.4,53.5 a6.6,6.6 0 1,0 13.2,0 a6.6,6.6 0 1,0 -13.2,0 Z" />
+    <path android:fillColor="#A78BFA" android:strokeColor="#241740" android:strokeAlpha="0.3" android:strokeWidth="1" android:pathData="M47.5,64 a6.5,6.5 0 1,0 13,0 a6.5,6.5 0 1,0 -13,0 Z" />
+    <path android:fillColor="#8B5CF6" android:pathData="M49.5,73.5 a4.5,4.5 0 1,0 9,0 a4.5,4.5 0 1,0 -9,0 Z" />
+    <path android:fillColor="#FFFFFF" android:fillAlpha="0.55" android:pathData="M39,39.5 a2,2 0 1,0 4,0 a2,2 0 1,0 -4,0 Z" />
+    <path android:fillColor="#FFFFFF" android:fillAlpha="0.55" android:pathData="M50,38 a2,2 0 1,0 4,0 a2,2 0 1,0 -4,0 Z" />
+    <path android:fillColor="#FFFFFF" android:fillAlpha="0.55" android:pathData="M61,39.5 a2,2 0 1,0 4,0 a2,2 0 1,0 -4,0 Z" />
 </vector>

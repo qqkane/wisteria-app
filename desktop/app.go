@@ -19,7 +19,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const appVersion = "1.1.15"
+const appVersion = "1.1.16"
 
 type App struct {
 	ctx      context.Context
@@ -342,6 +342,16 @@ func (a *App) GetLogs(since int64) []core.LogLine {
 		return nil
 	}
 	return a.ring.Snapshot(since)
+}
+
+// GetCoreHealth feeds the live health line above the logs: the latest
+// rtt/loss/pings slice the wisteria core reported (consumed from the log
+// stream, not logged). Zero value when no session has reported yet.
+func (a *App) GetCoreHealth() core.CoreHealth {
+	if a.svc == nil {
+		return core.CoreHealth{}
+	}
+	return a.svc.CoreHealth()
 }
 
 // ---- profiles ----

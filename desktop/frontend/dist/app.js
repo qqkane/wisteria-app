@@ -18,6 +18,7 @@ const I = {
   terminal: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>',
   gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
   power: '<svg class="power-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>',
+  checkStroke: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="4.5 12.5 9.5 17.5 19.5 7"/></svg>',
   plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
   globe: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
   trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
@@ -57,7 +58,7 @@ const I18N = {
     "sec.general": "Общие", "sec.routing": "Маршрутизация и DNS", "sec.cores": "Ядра", "sec.system": "Система",
     "set.lang": "Язык", "set.socksPort": "Локальный SOCKS-порт", "set.httpPort": "Локальный HTTP-порт",
     "set.sysproxy": "Системный прокси при подключении", "set.bridge": "HTTP-мост (нужен для системного прокси)",
-    "set.autoconnect": "Автоподключение при старте", "set.autostart": "Запускать при входе в Windows",
+    "set.autoconnect": "Автоподключение при старте", "set.autostart": "Запускать при входе в систему",
     "set.wisteriaCore": "Путь к wisteria-client", "set.singboxCore": "Путь к sing-box",
     "set.detect": "Найти ядра", "set.save": "Сохранить настройки",
     "set.startMin": "Запускать свёрнутым", "set.startMinNote": "окно свернётся в панель задач",
@@ -90,6 +91,8 @@ const I18N = {
     "set.checkUpd": "Проверить обновления", "set.updAvail": "Доступна версия",
     "set.updApply": "Скачать и установить", "set.updRestart": "Перезапустить приложение",
     "set.updCore": "Обновить", "set.dlCore": "Скачать",
+    "toast.coreDl": "Скачивание…",
+    "set.ghToken": "GitHub-токен", "set.ghTokenNote": "нужен только для ядра wisteria (приватный репозиторий); хранится в settings.json с правами 0600",
     "toast.updNone": "актуальная версия",
     "toast.updReady": "Обновление загружено — можно перезапускать",
     "set.restartAdmin": "Перезапустить от администратора",
@@ -99,6 +102,7 @@ const I18N = {
     "logs.title": "Логи", "logs.follow": "Автопрокрутка", "logs.clear": "Очистить",
     "logs.copy": "Скопировать", "logs.copied": "Логи скопированы ({n} строк)",
     "logs.copyFail": "Не удалось скопировать логи", "logs.copyEmpty": "Логов пока нет",
+    "logs.healthIdle": "туннель не активен", "logs.healthTip": "Последний health-срез ядра: задержка, потери, число проверок",
     "diag.title": "Диагностика wisteria", "diag.inactive": "Диагностика работает только для профилей wisteria",
     "diag.inactiveHint": "Подключитесь к профилю wisteria — здесь появится причина сбоя: заблокировали, упал интернет или ключ не принят.",
     "diag.bUp": "Туннель работает",
@@ -144,7 +148,7 @@ const I18N = {
     "sec.general": "General", "sec.routing": "Routing & DNS", "sec.cores": "Cores", "sec.system": "System",
     "set.lang": "Language", "set.socksPort": "Local SOCKS port", "set.httpPort": "Local HTTP port",
     "set.sysproxy": "Set system proxy on connect", "set.bridge": "HTTP bridge (required for the system proxy)",
-    "set.autoconnect": "Auto-connect on start", "set.autostart": "Start with Windows",
+    "set.autoconnect": "Auto-connect on start", "set.autostart": "Start on login",
     "set.wisteriaCore": "Path to wisteria-client", "set.singboxCore": "Path to sing-box",
     "set.detect": "Detect cores", "set.save": "Save settings",
     "set.startMin": "Start minimized", "set.startMinNote": "the window opens minimized",
@@ -177,6 +181,8 @@ const I18N = {
     "set.checkUpd": "Check for updates", "set.updAvail": "New version available",
     "set.updApply": "Download and install", "set.updRestart": "Restart the app",
     "set.updCore": "Update", "set.dlCore": "Download",
+    "toast.coreDl": "Downloading…",
+    "set.ghToken": "GitHub token", "set.ghTokenNote": "only needed for the wisteria core (private repo); stored in settings.json with 0600 permissions",
     "toast.updNone": "up to date",
     "toast.updReady": "Update staged — restart to apply",
     "set.restartAdmin": "Restart as administrator",
@@ -186,6 +192,7 @@ const I18N = {
     "logs.title": "Logs", "logs.follow": "Auto-scroll", "logs.clear": "Clear",
     "logs.copy": "Copy", "logs.copied": "Logs copied ({n} lines)",
     "logs.copyFail": "Could not copy the logs", "logs.copyEmpty": "No logs yet",
+    "logs.healthIdle": "tunnel inactive", "logs.healthTip": "Latest core health slice: latency, loss, probe count",
     "diag.title": "Wisteria diagnostics", "diag.inactive": "Diagnostics only works for wisteria profiles",
     "diag.inactiveHint": "Connect to a wisteria profile — the failure reason will show up here: server blocked, internet down, or the key was rejected.",
     "diag.bUp": "Tunnel is working",
@@ -265,6 +272,11 @@ function showToast(msg) {
   el._timer = setTimeout(() => el.classList.remove("show"), 2500);
 }
 
+// Haptic feedback on the phone (WebView honours navigator.vibrate with
+// the VIBRATE permission); a no-op on desktop. Short and rare: connect
+// tap, successful connect, failure — never on a timer.
+const buzz = (p) => { try { if (navigator.vibrate) navigator.vibrate(p); } catch (e) { /* unsupported */ } };
+
 // Styled replacement for window.confirm (the WebView's native dialog
 // looks alien and says "wails.localhost"). Resolves true/false.
 function askConfirm(msg, okLabel) {
@@ -295,7 +307,7 @@ function switchTab(tab) {
   S.tab = tab;
   document.querySelectorAll(".sidebar-nav-item").forEach((el) => el.classList.toggle("active", el.dataset.tab === tab));
   renderContent();
-  if (tab === "logs") pullLogs();
+  if (tab === "logs") { pullLogs(); pullLogHealth(); }
 }
 document.querySelectorAll(".sidebar-nav-item").forEach((b) => b.addEventListener("click", () => switchTab(b.dataset.tab)));
 
@@ -339,12 +351,13 @@ function renderVpn() {
   const lat = p && p.latency_ms ? (p.latency_ms < 0 ? "n/a" : p.latency_ms + " ms") : "";
   return `
     <div class="vpn-screen">
-      <div class="vpn-status"><div class="label">${esc(label)}</div></div>
+      <div class="vpn-status ${conn ? "on" : connecting || reconn ? "mid" : ""}"><div class="label">${esc(label)}</div></div>
       <div id="btn-wrap" style="position:relative; display:flex; justify-content:center;">
-        <button class="connect-btn ${conn ? "connected" : ""}" id="btn-toggle" ${connecting ? "disabled" : ""}>
+        <button class="connect-btn ${conn ? "connected" : ""} ${connecting || reconn ? "connecting" : ""}" id="btn-toggle" ${connecting ? "disabled" : ""}>
           <div class="ring-anim"></div>
           <div class="ring-anim d2"></div>
-          ${I.power}
+          <svg class="spin-arc" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="46"/></svg>
+          <span class="btn-icons">${I.power}<span class="icon-check">${I.checkStroke}</span></span>
           <span class="connect-text">${esc(btnText)}</span>
         </button>
       </div>
@@ -459,13 +472,37 @@ function renderLogs() {
     <div class="logs-header">
       <h2>${esc(t("logs.title"))}</h2>
       <div class="logs-tools">
-        <label><input type="checkbox" id="log-follow" checked/> ${esc(t("logs.follow"))}</label>
         <button class="ghost-btn" id="btn-copy-logs">${esc(t("logs.copy"))}</button>
         <button class="ghost-btn" id="btn-clear-logs">${esc(t("logs.clear"))}</button>
       </div>
     </div>
+    <div class="logs-bar">
+      <label class="log-follow"><span class="switch"><input type="checkbox" id="log-follow" checked/><span class="slider"></span></span><span>${esc(t("logs.follow"))}</span></label>
+      <div class="log-health" id="log-health" title="${esc(t("logs.healthTip"))}"><span class="lh-dot"></span><span id="log-health-text">—</span></div>
+    </div>
     <pre class="log-view" id="log-view"></pre>`;
 }
+
+// The live health line: the core's periodic "health: rtt=… loss=… pings=…"
+// reports are consumed by the backend (they used to flood this screen);
+// the freshest slice is painted here instead, polled while Logs is open.
+async function pullLogHealth() {
+  const el = $("log-health-text");
+  if (!el) return;
+  try {
+    const h = await api().GetCoreHealth();
+    const wrap = $("log-health");
+    if (h && h.active) {
+      if (wrap) wrap.classList.add("live");
+      el.textContent = "rtt " + h.rtt_ms + " ms · loss " + h.loss_pct + "% · pings " + h.pings +
+        (h.at ? " · " + new Date(h.at).toLocaleTimeString() : "");
+    } else {
+      if (wrap) wrap.classList.remove("live");
+      el.textContent = t("logs.healthIdle");
+    }
+  } catch (e) { /* bridge not ready / method absent on old builds */ }
+}
+setInterval(() => { if (S.tab === "logs") pullLogHealth(); }, 2000);
 
 // ---------- diagnostics (wisteria) ----------
 // The wisteria core classifies its own connect loop: "cannot reach" = no
@@ -679,6 +716,8 @@ function renderSettings() {
         <label>${esc(t("set.wisteriaCore"))}</label><input id="s-wisteria" type="text"/>
         <label>${esc(t("set.singboxCore"))}</label><input id="s-singbox" type="text"/>
         <label>${esc(t("set.xrayCore"))}</label><input id="s-xray" type="text"/>
+        <label>${esc(t("set.ghToken"))}<span class="set-note">${esc(t("set.ghTokenNote"))}</span></label>
+        <input id="s-ghtoken" type="password" autocomplete="off" placeholder="ghp_… / github_pat_…"/>
         <label>${esc(t("set.memLimit"))}<span class="set-note">${esc(t("set.memLimitNote"))}</span></label>
         <input id="s-memlimit" type="number" min="0" max="16384"/>
       </div>
@@ -729,10 +768,16 @@ function withTimeout(p, ms, msg) {
   ]);
 }
 
+// One-button core download/update. The button itself carries the progress
+// ("Скачивание…") — a full renderContent() here would wipe unsaved edits
+// in the settings form, so only the button and the detect note change.
 async function updateCore(name) {
   if (S.coreUpd[name]) return;
   S.coreUpd[name] = true;
-  renderContent();
+  const btnId = { "sing-box": "btn-upd-singbox", xray: "btn-upd-xray", wisteria: "btn-upd-wisteria" }[name];
+  const btn = $(btnId);
+  const oldLabel = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = t("toast.coreDl"); }
   try {
     const info = await api().CheckCoreUpdate(name);
     if (!info.has_update) {
@@ -743,7 +788,32 @@ async function updateCore(name) {
     }
   } catch (e) { showToast("✕ " + ((e && e.message) || e)); }
   S.coreUpd[name] = false;
-  renderContent();
+  if (btn) { btn.disabled = false; btn.textContent = oldLabel; }
+  // A fresh download must show up at once: re-detect, refresh the note and
+  // flip "Скачать" → "Обновить" on the buttons that now have a binary.
+  try {
+    const info = await api().DetectCores();
+    const note = $("core-note");
+    if (note && info) note.innerHTML = coreNoteHTML(info);
+    if (info) relabelCoreButtons(info);
+  } catch (e) { /* detection is cosmetic */ }
+}
+
+function coreNoteHTML(info) {
+  const fmt = (f, p) => (f ? "✓ " + p : "✕ not found");
+  return `wisteria-client: ${esc(fmt(info.wisteria_found, info.wisteria_path))}<br>` +
+    `sing-box: ${esc(fmt(info.singbox_found, info.singbox_path))}<br>` +
+    `xray: ${esc(fmt(info.xray_found, info.xray_path))}`;
+}
+
+// When a core is not installed at all, the upstream button is a first
+// download, not an update — say so ("Скачать xray") instead of the
+// misleading "Обновить".
+function relabelCoreButtons(info) {
+  const b1 = $("btn-upd-singbox"), b2 = $("btn-upd-xray"), b3 = $("btn-upd-wisteria");
+  if (b1) b1.textContent = (info.singbox_found ? t("set.updCore") : t("set.dlCore")) + " sing-box";
+  if (b2) b2.textContent = (info.xray_found ? t("set.updCore") : t("set.dlCore")) + " xray";
+  if (b3) b3.textContent = (info.wisteria_found ? t("set.updCore") : t("set.dlCore")) + " wisteria";
 }
 
 // ---------- per-render event wiring ----------
@@ -753,9 +823,10 @@ function wireContent() {
   on("btn-toggle", "click", async () => {
     if (S.busy) { showToast(t("toast.busy")); return; }
     try {
-      if (S.state.state === "connected") api().Disconnect();
+      if (S.state.state === "connected") { buzz(12); api().Disconnect(); }
       else {
         if (!S.selected) { openModal(); return; }
+        buzz(10);
         S.busy = true;
         markConnecting(S.selected);
         await withTimeout(api().Connect(S.selected), 45000, t("toast.stuck"));
@@ -903,11 +974,8 @@ function wireContent() {
 
   on("btn-detect", "click", async () => {
     const info = await api().DetectCores();
-    const fmt = (f, p) => (f ? "✓ " + p : "✕ not found");
-    $("core-note").innerHTML =
-      `wisteria-client: ${esc(fmt(info.wisteria_found, info.wisteria_path))}<br>` +
-      `sing-box: ${esc(fmt(info.singbox_found, info.singbox_path))}<br>` +
-      `xray: ${esc(fmt(info.xray_found, info.xray_path))}`;
+    $("core-note").innerHTML = coreNoteHTML(info);
+    relabelCoreButtons(info);
   });
   on("btn-admin", "click", async () => {
     try { await api().RestartAsAdmin(); }
@@ -949,16 +1017,10 @@ function wireContent() {
   on("btn-upd-singbox", "click", () => updateCore("sing-box"));
   on("btn-upd-xray", "click", () => updateCore("xray"));
   on("btn-upd-wisteria", "click", () => updateCore("wisteria"));
-  // Cores tab: when a third-party core is not installed at all, the
-  // upstream button is a first download, not an update — say so on the
-  // button ("Скачать xray") instead of the misleading "Обновить".
+  // Cores tab: label the buttons by what is actually installed.
   if ($("btn-upd-singbox") || $("btn-upd-xray")) {
     api().DetectCores().then((info) => {
-      if (!info) return;
-      const b1 = $("btn-upd-singbox"), b2 = $("btn-upd-xray"), b3 = $("btn-upd-wisteria");
-      if (b1 && !info.singbox_found) b1.textContent = t("set.dlCore") + " sing-box";
-      if (b2 && !info.xray_found) b2.textContent = t("set.dlCore") + " xray";
-      if (b3 && !info.wisteria_found) b3.textContent = t("set.dlCore") + " wisteria";
+      if (info) relabelCoreButtons(info);
     }).catch(() => { /* detection is cosmetic here */ });
   }
   document.querySelectorAll(".set-tab").forEach((b) => b.addEventListener("click", () => {
@@ -1020,6 +1082,7 @@ async function fillSettingsForm(s) {
   setv("s-core-vless", s.core_vless || "sing-box");
   setv("s-core-trojan", s.core_trojan || "sing-box");
   setv("s-xray", s.xray_core || "");
+  setv("s-ghtoken", s.github_token || "");
   const sel = $("s-autoconnect");
   if (sel) {
     sel.innerHTML = `<option value="">—</option>` + S.profiles.map((p) =>
@@ -1079,8 +1142,10 @@ function applyTheme() {
 // ---------- profiles ----------
 async function loadProfiles() {
   S.profiles = (await api().ListProfiles()) || [];
-  const st = await api().GetState();
-  if (st.profile_id) S.selected = st.profile_id;
+  // A failed state read must not abort the boot chain into a blank screen.
+  let st = null;
+  try { st = await api().GetState(); } catch (e) { /* fall back to active id */ }
+  if (st && st.profile_id) S.selected = st.profile_id;
   else S.selected = await api().GetActiveID();
   renderContent();
 }
@@ -1117,7 +1182,10 @@ async function pullLogs() {
   lines.forEach((l) => {
     const div = document.createElement("span");
     div.className = "l-" + l.tag;
-    div.textContent = `${new Date(l.at).toLocaleTimeString()} [${l.tag}] ${l.text}\n`;
+    // The core prefixes its own lines with a timestamp; the view adds one
+    // from l.at — strip the embedded one so every line reads once.
+    const text = String(l.text).replace(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} /, "").replace(/^\d{2}:\d{2}:\d{2} /, "");
+    div.textContent = `${new Date(l.at).toLocaleTimeString()} [${l.tag}] ${text}\n`;
     frag.appendChild(div);
   });
   view.appendChild(frag);
@@ -1167,6 +1235,7 @@ async function ensureExtIP() {
 function renderState(st) {
   const prev = S.state;
   S.state = st || S.state;
+  if (S.state.error && !(prev && prev.error)) buzz([40, 60, 40]); // a failure surfaced
   if (S.tab !== "vpn") { renderSidebarFooter(); return; }
   // Rebuild only on structural changes (profile switch, error box, TUN
   // note, proxy toggle). Same-profile transitions (idle → connecting →
@@ -1190,12 +1259,20 @@ function patchVpnState() {
   const reconn = !!st.reconnecting;
   const labelEl = document.querySelector(".vpn-status .label");
   if (labelEl) labelEl.textContent = conn ? t("vpn.protected") : reconn ? t("vpn.reconnecting") + (st.attempt ? " " + t("vpn.attempt").replace("{n}", st.attempt) : "") : connecting ? t("vpn.connecting") : t("vpn.unprotected");
+  const statusEl = document.querySelector(".vpn-status");
+  if (statusEl) {
+    statusEl.classList.toggle("on", conn);
+    statusEl.classList.toggle("mid", connecting || reconn);
+  }
   const btn = $("btn-toggle");
   if (btn) {
+    const wasConn = btn.classList.contains("connected");
     btn.classList.toggle("connected", conn);
+    btn.classList.toggle("connecting", connecting || reconn);
     btn.disabled = connecting;
     const txt = btn.querySelector(".connect-text");
     if (txt) txt.textContent = conn || reconn ? t("vpn.disconnect") : t("vpn.connect");
+    if (conn && !wasConn) buzz(20); // the moment the tunnel comes up
   }
 }
 
@@ -1350,6 +1427,8 @@ whenReady(async () => {
   await loadProfiles();
   await loadSubs();
   S.version = await api().Version();
-  renderState(await api().GetState());
+  let st0 = null;
+  try { st0 = await api().GetState(); } catch (e) { /* backend not ready */ }
+  renderState(st0 || { state: "disconnected" });
   renderExtraFields();
 });

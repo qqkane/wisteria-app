@@ -160,6 +160,19 @@ html.platform-android .app-content { overflow-x: hidden; }
   .vpn-screen { padding-top: 18px; }
   .connect-btn { width: 176px; height: 176px; margin: 22px auto; }
   .connect-btn .power-icon { width: 44px; height: 44px; }
+  .connect-btn .btn-icons { width: 44px; height: 44px; }
+
+  /* Logs screen: the desktop header crams title + follow + two buttons
+     into one row and clips «Очистить» off-screen on a phone. Title gets
+     its own row, the buttons wrap below it, the follow switch and the
+     live health line stack under that. */
+  .logs-header { flex-wrap: wrap; gap: 8px; margin: 16px 0 10px; }
+  .logs-header h2 { font-size: 20px; }
+  .logs-tools { gap: 8px; }
+  .logs-tools .ghost-btn { padding: 9px 14px; font-size: 12.5px; }
+  .logs-bar { flex-direction: column; align-items: stretch; gap: 8px; }
+  .log-health { width: 100%; justify-content: center; }
+  .log-view { height: calc(100vh - 285px); height: calc(100dvh - 285px - var(--safe-b, 0px)); min-height: 220px; }
 
   /* Hero centered: the big button sits in the middle of the screen with the
      status label right above it; the profile card and stats go below. Auto

@@ -172,80 +172,109 @@ class WisteriaVpnService : VpnService() {
                 if (userStopped) { reconnectQueued.set(false); return@execute }
                 if (cancelEpoch != epoch) { reconnectQueued.set(false); return@execute }
                 teardown()
-                connect("", epoch)
+                // Internal relaunch: nobody called startForegroundService
+                // for it, so a backgrounded app must not crash the retry.
+                connect("", epoch, fgsRequired = false)
             }
         }, delay.toLong(), TimeUnit.SECONDS)
     }
 
     private val callback = object : Callback {
         override fun onLog(line: String?) {
-            EngineHub.coreLog(line ?: "")
+            // Every callback crosses JNI into Go: an exception escaping
+            // here becomes a Go panic and aborts the whole process. The
+            // bodies below are already defensive, this is the belt that
+            // guarantees a callback can never kill the app.
+            try {
+                EngineHub.coreLog(line ?: "")
+            } catch (t: Throwable) {
+                android.util.Log.w("WisteriaVpn", "onLog", t)
+            }
         }
 
         override fun onState(state: String?) {
-            val mapped = when (state) {
-                "connecting", "retrying" -> "connecting"
-                "connected" -> "connected"
-                else -> "disconnected"
+            try {
+                val mapped = when (state) {
+                    "connecting", "retrying" -> "connecting"
+                    "connected" -> "connected"
+                    else -> "disconnected"
+                }
+                EngineHub.pushEvent("state", statusJson(mapped))
+                if (mapped == "connected") {
+                    reconnectStep = 0 // backoff chain only runs while offline
+                    reconnectQueued.set(false)
+                    WisteriaBridgeHolder.instance?.onConnectedCheckIP()
+                }
+                if (mapped == "connecting") reconnectQueued.set(false)
+                updateNotification(mapped)
+                // An engine-originated "disconnected" while the user wants the
+                // tunnel (wisteria runLoop device-dead, box core stop) is the
+                // fast path of the watchdog: react immediately, do not idle 2s.
+                // Events fired from our own teardown() are not a drop.
+                if (mapped == "disconnected" && !userStopped && !tearingDown) scheduleReconnect()
+            } catch (t: Throwable) {
+                android.util.Log.w("WisteriaVpn", "onState", t)
             }
-            EngineHub.pushEvent("state", statusJson(mapped))
-            if (mapped == "connected") {
-                reconnectStep = 0 // backoff chain only runs while offline
-                reconnectQueued.set(false)
-                WisteriaBridgeHolder.instance?.onConnectedCheckIP()
-            }
-            if (mapped == "connecting") reconnectQueued.set(false)
-            updateNotification(mapped)
-            // An engine-originated "disconnected" while the user wants the
-            // tunnel (wisteria runLoop device-dead, box core stop) is the
-            // fast path of the watchdog: react immediately, do not idle 2s.
-            // Events fired from our own teardown() are not a drop.
-            if (mapped == "disconnected" && !userStopped && !tearingDown) scheduleReconnect()
         }
 
-        override fun protect(fd: Long): Boolean =
+        override fun protect(fd: Long): Boolean = try {
             this@WisteriaVpnService.protect(fd.toInt())
+        } catch (_: Throwable) {
+            // An invalid/closed fd throws IllegalArgumentException; a
+            // failed protect must read as "false", not crash via JNI.
+            false
+        }
 
         override fun onOpenTun(optionsJson: String?): Int {
-            val opts = try { JSONObject(optionsJson ?: "{}") } catch (_: Exception) { JSONObject() }
-            // Serialize with teardown: boxTun must never be assigned after a
-            // teardown already closed it (fd leak), and a Disconnect that
-            // raced the box boot must not hand the dying engine a fresh tun.
-            // The lock spans establish() — a few ms — and teardown (the
-            // other stateLock user) simply waits it out.
-            synchronized(stateLock) {
-                val builder = Builder()
-                    .setSession(EngineHub.profileName.ifEmpty { "Wisteria" })
-                    .setMtu(opts.optInt("mtu", TUN_MTU))
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) builder.setMetered(false)
-                for (key in listOf("inet4", "inet6")) {
-                    val arr = opts.optJSONArray(key) ?: continue
-                    for (i in 0 until arr.length()) {
-                        val cidr = arr.optString(i)
-                        val slash = cidr.lastIndexOf('/')
-                        if (slash <= 0) continue
-                        val addr = cidr.substring(0, slash)
-                        val bits = cidr.substring(slash + 1).toIntOrNull() ?: continue
-                        builder.addAddress(addr, bits)
+            // establish() throws when VPN consent is revoked mid-boot (or
+            // an always-on VPN conflicts) — uncaught, that exception rides
+            // JNI into Go and panics the process. Any failure here is a
+            // clean "-1" the box engine reports as a start error.
+            try {
+                val opts = try { JSONObject(optionsJson ?: "{}") } catch (_: Exception) { JSONObject() }
+                // Serialize with teardown: boxTun must never be assigned after a
+                // teardown already closed it (fd leak), and a Disconnect that
+                // raced the box boot must not hand the dying engine a fresh tun.
+                // The lock spans establish() — a few ms — and teardown (the
+                // other stateLock user) simply waits it out.
+                synchronized(stateLock) {
+                    val builder = Builder()
+                        .setSession(EngineHub.profileName.ifEmpty { "Wisteria" })
+                        .setMtu(opts.optInt("mtu", TUN_MTU))
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) builder.setMetered(false)
+                    for (key in listOf("inet4", "inet6")) {
+                        val arr = opts.optJSONArray(key) ?: continue
+                        for (i in 0 until arr.length()) {
+                            val cidr = arr.optString(i)
+                            val slash = cidr.lastIndexOf('/')
+                            if (slash <= 0) continue
+                            val addr = cidr.substring(0, slash)
+                            val bits = cidr.substring(slash + 1).toIntOrNull() ?: continue
+                            builder.addAddress(addr, bits)
+                        }
                     }
-                }
-                val routes = opts.optJSONArray("routes")
-                if (routes != null && routes.length() > 0) {
-                    for (i in 0 until routes.length()) {
-                        val cidr = routes.optString(i)
-                        val slash = cidr.lastIndexOf('/')
-                        if (slash <= 0) continue
-                        val addr = cidr.substring(0, slash)
-                        val bits = cidr.substring(slash + 1).toIntOrNull() ?: continue
-                        builder.addRoute(addr, bits)
+                    val routes = opts.optJSONArray("routes")
+                    if (routes != null && routes.length() > 0) {
+                        for (i in 0 until routes.length()) {
+                            val cidr = routes.optString(i)
+                            val slash = cidr.lastIndexOf('/')
+                            if (slash <= 0) continue
+                            val addr = cidr.substring(0, slash)
+                            val bits = cidr.substring(slash + 1).toIntOrNull() ?: continue
+                            builder.addRoute(addr, bits)
+                        }
+                    } else {
+                        builder.addRoute("0.0.0.0", 0)
                     }
-                } else {
-                    builder.addRoute("0.0.0.0", 0)
+                    builder.addDnsServer(tunDns())
+                    val pfd = builder.establish() ?: return -1
+                    boxTun = pfd
+                    return pfd.fd
                 }
-                builder.addDnsServer(tunDns())
-                val pfd = builder.establish() ?: return -1
-                boxTun = pfd
-                return pfd.fd
+            } catch (t: Throwable) {
+                android.util.Log.w("WisteriaVpn", "onOpenTun", t)
+                EngineHub.coreLog("tun: ${t.message ?: t.javaClass.simpleName}")
+                return -1
             }
         }
     }
@@ -274,7 +303,14 @@ class WisteriaVpnService : VpnService() {
                 // connect sat in the queue — the check would then compare the
                 // post-cancel value with itself and wave the Cancel through.
                 val epoch = cancelEpoch
-                executor.execute { connect(id, epoch) }
+                // A null intent is the START_STICKY resurrection after a
+                // system kill: the SYSTEM started us, so there is no
+                // startForegroundService obligation — startForeground is
+                // best-effort there (it throws when the app is backgrounded,
+                // Android 12+). An explicit CONNECT intent came through
+                // startForegroundService and MUST reach startForeground.
+                val fgsRequired = intent != null
+                executor.execute { connect(id, epoch, fgsRequired) }
             }
         }
         // STICKY: if the system kills the service (memory, LMK), it comes
@@ -306,7 +342,7 @@ class WisteriaVpnService : VpnService() {
         super.onDestroy()
     }
 
-    private fun connect(profileIdParam: String, myCancelEpoch: Long) {
+    private fun connect(profileIdParam: String, myCancelEpoch: Long, fgsRequired: Boolean = true) {
         val myEpoch = synchronized(stateLock) {
             // `starting` closes the gap before the engine flags are set
             // (startBox sets engineIsBox only after the config build,
@@ -323,7 +359,9 @@ class WisteriaVpnService : VpnService() {
             // must still be answered with startForeground() within the
             // system timeout, or the app is crashed ~10 s later. Re-post
             // the notification with the engine's current state word.
-            startForegroundWith(currentStatusWord())
+            if (!tryStartForeground(currentStatusWord()) && fgsRequired) {
+                stopSelf()
+            }
             return
         }
         // startForeground before anything slow: a startForegroundService
@@ -332,7 +370,18 @@ class WisteriaVpnService : VpnService() {
         // The try/finally spans everything from here on: `starting` must be
         // cleared on ANY exit path, or the next Connect would forever land
         // in the duplicate-start branch above.
-        startForegroundWith()
+        if (!tryStartForeground() && fgsRequired) {
+            // startForeground threw (ForegroundServiceStartNotAllowedException:
+            // the app slipped into the background between the start call and
+            // this point, Android 12+). Leaving the obligation unanswered
+            // crashes the app ~10 s later — stop cleanly and tell the UI.
+            synchronized(stateLock) { starting = false }
+            EngineHub.appLog("подключение: приложение в фоне — откройте его и повторите")
+            EngineHub.pushEvent("state", statusJson("disconnected", "приложение в фоне — откройте его для подключения"))
+            userStopped = true
+            stopSelf()
+            return
+        }
         try {
             val store = AndroidStore(this)
             val id = profileIdParam.ifEmpty { store.activeId() }
@@ -701,6 +750,19 @@ class WisteriaVpnService : VpnService() {
         )
     }
 
+    /** startForeground that cannot crash the executor thread: Android 12+
+     *  throws ForegroundServiceStartNotAllowedException when the app is
+     *  backgrounded (STICKY resurrection, a connect queued behind a slow
+     *  teardown while the user pressed Home). Returns false instead; the
+     *  caller decides whether the FGS obligation forces a clean stop. */
+    private fun tryStartForeground(state: String = "connecting"): Boolean = try {
+        startForegroundWith(state)
+        true
+    } catch (t: Throwable) {
+        android.util.Log.w("WisteriaVpn", "startForeground", t)
+        false
+    }
+
     private fun updateNotification(state: String) {
         val nm = getSystemService(NotificationManager::class.java) ?: return
         nm.notify(NOTIF_ID, buildNotification(state))
@@ -725,7 +787,7 @@ class WisteriaVpnService : VpnService() {
             else -> getString(R.string.status_idle)
         }
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_lock_lock)
+            .setSmallIcon(R.drawable.ic_notif)
             .setContentTitle("Wisteria")
             .setContentText(text)
             .setContentIntent(contentIntent)
@@ -743,4 +805,16 @@ class WisteriaVpnService : VpnService() {
 object WisteriaBridgeHolder {
     @Volatile
     var instance: WisteriaBridge? = null
+}
+
+/**
+ * The profile waiting for the system VPN consent dialog, process-wide.
+ * It used to live on the activity/bridge instances: a rotation (or the
+ * restartApp relaunch) while the dialog was up recreated both, the grant
+ * then matched a null pending id and was silently dropped — the user
+ * tapped "Connect", allowed the VPN, and nothing happened.
+ */
+object VpnConsentHolder {
+    @Volatile
+    var pendingId: String? = null
 }

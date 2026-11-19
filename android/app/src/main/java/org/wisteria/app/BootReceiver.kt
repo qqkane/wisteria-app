@@ -22,10 +22,17 @@ class BootReceiver : BroadcastReceiver() {
         // silently ignored vless/ss/… profiles with autostart enabled.)
         store.profile(id) ?: return
 
-        context.startForegroundService(
-            Intent(context, WisteriaVpnService::class.java)
-                .setAction(WisteriaVpnService.ACTION_CONNECT)
-                .putExtra(WisteriaVpnService.EXTRA_PROFILE_ID, id)
-        )
+        try {
+            context.startForegroundService(
+                Intent(context, WisteriaVpnService::class.java)
+                    .setAction(WisteriaVpnService.ACTION_CONNECT)
+                    .putExtra(WisteriaVpnService.EXTRA_PROFILE_ID, id)
+            )
+        } catch (t: Throwable) {
+            // Some OEM builds refuse the boot-time FGS start; a crash in
+            // a BOOT_COMPLETED receiver would take the whole app down at
+            // every boot. Log and skip — the user can connect manually.
+            android.util.Log.w("WisteriaBoot", "autostart failed", t)
+        }
     }
 }

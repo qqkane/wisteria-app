@@ -31,11 +31,29 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
+
+// CoreHealth is the latest "health: rtt=… loss=… pings=…" slice the
+// wisteria core prints every few seconds. Those lines used to flood the
+// log ring (and app.log) — most of the Logs screen was them. They are now
+// consumed here: the UI shows the freshest slice on its own live line
+// above the logs, and the log window keeps only actionable lines.
+type CoreHealth struct {
+	Active  bool      `json:"active"`
+	RTTms   int64     `json:"rtt_ms"`
+	LossPct int64     `json:"loss_pct"`
+	Pings   int64     `json:"pings"`
+	At      time.Time `json:"at,omitempty"`
+}
+
+// healthLine matches the core's periodic health report on stdout.
+var healthLine = regexp.MustCompile(`health: rtt=(\d+)ms loss=(\d+)% pings=(\d+)`)
 
 type State string
 
@@ -295,6 +313,7 @@ type Service struct {
 	sess       *session
 	wstStatus  string   // wisteria --status file path ("" when not a wisteria session)
 	wstEvents  []WEvent // classified connect-loop feed for the diagnostics page
+	wstHealth  CoreHealth // latest health slice (log spam consumed, not logged)
 	sbModern   bool     // cached sing-box >= 1.11 probe
 	sbProbed   bool
 	userStop   bool          // the user asked to disconnect: suppress auto-reconnect
@@ -452,7 +471,11 @@ func (s *Service) Start(p Profile) (err error) {
 	// core, which binds SOCKS only after a completed server handshake, then
 	// never opens the port at all: the session would sit in CONNECTING for
 	// the full 20s readiness deadline. Fail fast with a clear message.
+	// Settings snapshot under the lock: SaveSettings replaces the struct
+	// concurrently, a bare read here is a data race.
+	s.mu.Lock()
 	socksAddr0 := fmt.Sprintf("%s:%d", s.settings.ListenHost(), s.settings.LocalPort)
+	s.mu.Unlock()
 	if err := checkPortFree(socksAddr0); err != nil {
 		return err
 	}
@@ -504,6 +527,7 @@ func (s *Service) Start(p Profile) (err error) {
 	s.sess = sess
 	s.wstStatus = "" // prepareCore re-sets it for wisteria profiles
 	s.wstEvents = nil
+	s.wstHealth = CoreHealth{}
 	s.st = Status{
 		State:       StateConnecting,
 		ProfileID:   p.ID,
@@ -519,14 +543,14 @@ func (s *Service) Start(p Profile) (err error) {
 
 	// Core output → log ring (tagged by the binary name so wisteria's own
 	// [socks5] prefixes stay readable). Wisteria lines also feed the
-	// diagnostics page classifier.
-	tag := "core"
-	onLine := func(string) {}
+	// diagnostics page classifier; the periodic health reports are
+	// consumed there (snapshot for the live line) instead of logged.
+	var onLine func(string) bool
 	if p.Type == TWisteria {
 		onLine = s.noteWisteriaLine
 	}
-	go pumpPipe(stdout, tag, s.ring, onLine)
-	go pumpPipe(stderr, tag, s.ring, onLine)
+	go pumpPipe(stdout, "core", s.ring, onLine)
+	go pumpPipe(stderr, "core", s.ring, onLine)
 	go s.supervise(sess, ctx, cancel)
 	s.notify()
 	return nil
@@ -1107,7 +1131,10 @@ func (s *Service) SetSystemProxyState(on bool) {
 	s.mu.Unlock()
 }
 
-func pumpPipe(r interface{ Read([]byte) (int, error) }, tag string, ring *LogRing, onLine func(string)) {
+// pumpPipe feeds core output into the ring. onLine (wisteria sessions)
+// classifies lines for diagnostics and returns true for lines it consumed
+// outright (the health spam) — those never reach the log window.
+func pumpPipe(r interface{ Read([]byte) (int, error) }, tag string, ring *LogRing, onLine func(string) bool) {
 	if r == nil {
 		return
 	}
@@ -1115,20 +1142,29 @@ func pumpPipe(r interface{ Read([]byte) (int, error) }, tag string, ring *LogRin
 	sc.Buffer(make([]byte, 0, 64*1024), 512*1024)
 	for sc.Scan() {
 		line := sc.Text()
-		ring.Add(tag, line)
-		if onLine != nil {
-			onLine(line)
+		if onLine != nil && onLine(line) {
+			continue
 		}
+		ring.Add(tag, line)
 	}
 }
 
-// noteWisteriaLine classifies a core stdout line into the diagnostics feed.
-// Cheap no-op for every non-wisteria session and for lines that carry no
-// diagnostic marker.
-func (s *Service) noteWisteriaLine(line string) {
+// noteWisteriaLine classifies a core stdout line into the diagnostics feed
+// and consumes the periodic health reports (returns true = suppress from
+// the log ring). Cheap no-op for lines that carry no diagnostic marker.
+func (s *Service) noteWisteriaLine(line string) bool {
+	if m := healthLine.FindStringSubmatch(line); m != nil {
+		rtt, _ := strconv.ParseInt(m[1], 10, 64)
+		loss, _ := strconv.ParseInt(m[2], 10, 64)
+		pings, _ := strconv.ParseInt(m[3], 10, 64)
+		s.mu.Lock()
+		s.wstHealth = CoreHealth{Active: true, RTTms: rtt, LossPct: loss, Pings: pings, At: time.Now()}
+		s.mu.Unlock()
+		return true
+	}
 	ev, ok := classifyWisteriaLine(line)
 	if !ok {
-		return
+		return false
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1137,6 +1173,15 @@ func (s *Service) noteWisteriaLine(line string) {
 		s.wstEvents = s.wstEvents[1:]
 	}
 	s.wstEvents = append(s.wstEvents, ev)
+	return false
+}
+
+// CoreHealth returns the latest consumed health slice (zero value when
+// no wisteria session has reported yet).
+func (s *Service) CoreHealth() CoreHealth {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.wstHealth
 }
 
 // WisteriaDiag is the diagnostics page payload: the session state, the

@@ -241,10 +241,10 @@
     const as = document.querySelector("input#s-autostart");
     if (as) {
       const lbl = as.closest("label.switch")?.previousElementSibling;
-      if (lbl && lbl.tagName === "LABEL" && lbl.textContent.includes("Windows"))
+      if (lbl && lbl.tagName === "LABEL" && (lbl.textContent.includes("входе в систему") || lbl.textContent.includes("on login")))
         lbl.textContent = lbl.textContent
-          .replace("при входе в Windows", "при включении телефона")
-          .replace("Start with Windows", "Start on device boot");
+          .replace("при входе в систему", "при включении телефона")
+          .replace("Start on login", "Start on device boot");
     }
 
     killPairs.forEach((id) => {
