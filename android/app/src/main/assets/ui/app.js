@@ -79,6 +79,7 @@ const I18N = {
     "toast.ipFail": "Не удалось определить IP",
     "toast.ipRetry": "Туннель переподключается — IP появится через несколько секунд",
     "toast.ipWait": "Определяю IP…",
+    "vpn.disconnected": "Disconnected", "vpn.preset": "Пресет обфускации",
     "set.tun": "Режим TUN (весь трафик системы)",
     "set.tunNote": "маршрутизирует всё через туннель; нужен sing-box и wintun.dll; системный прокси при этом не используется",
     "set.tunStack": "Стек TUN",
@@ -172,6 +173,7 @@ const I18N = {
     "toast.ipFail": "Could not determine the IP",
     "toast.ipRetry": "Tunnel is reconnecting — the IP will appear in a few seconds",
     "toast.ipWait": "Checking IP…",
+    "vpn.disconnected": "Disconnected", "vpn.preset": "Obfuscation preset",
     "set.tun": "TUN mode (all system traffic)",
     "set.tunNote": "routes everything through the tunnel; needs sing-box and wintun.dll; the system proxy is not used",
     "set.tunStack": "TUN stack",
@@ -363,7 +365,7 @@ function renderVpn() {
   const reconn = !!st.reconnecting; // always false on Android (no shell-side reconnect field), keeps the markup desktop-identical
   const p = S.profiles.find((x) => x.id === (st.profile_id || S.selected)) || null;
   const label = conn ? t("vpn.protected") : connecting ? t("vpn.connecting") : t("vpn.unprotected");
-  const btnText = conn ? t("vpn.disconnect") : t("vpn.connect");
+  const btnText = conn ? t("vpn.connected") : connecting ? t("vpn.connecting") : t("vpn.disconnected");
   const lat = p && p.latency_ms ? (p.latency_ms < 0 ? "n/a" : p.latency_ms + " ms") : "";
   return `
     <div class="vpn-screen">
@@ -390,6 +392,13 @@ function renderVpn() {
         <div class="stat-card"><div class="stat-label">${I.globe} IP</div><div class="stat-value" style="font-size:13px; line-height:2.4;" id="stat-ip">${esc(S.extIP || (conn && S.extIPErr ? "✕" : "—"))}</div></div>
         <div class="stat-card"><div class="stat-label">${I.globe} ${esc(t("stat.proxy"))}</div><div class="stat-value">${st.sys_proxy ? "ON" : "OFF"}</div></div>
       </div>
+      ${p && p.type === "wisteria" ? `
+      <div class="vpn-tun-row">
+        <div class="vpn-tun-label">${esc(t("vpn.preset"))}</div>
+        <select id="vpn-preset" class="preset-select">
+          ${["fast", "balance", "stealth"].map((k) => `<option value="${k}" ${((p.fields && p.fields.preset) || (S.cfg && S.cfg.wisteria_preset) || "stealth") === k ? "selected" : ""}>${k}</option>`).join("")}
+        </select>
+      </div>` : ""}
       ${st.tun ? `<div class="tun-note">${esc(t("vpn.tunOn"))}</div>` : ""}
       ${st.error ? `<div class="error-box">${esc(st.error)}</div>` : ""}
     </div>`;
@@ -1309,7 +1318,7 @@ function patchVpnState() {
     btn.classList.toggle("connecting", connecting);
     btn.disabled = connecting;
     const txt = btn.querySelector(".connect-text");
-    if (txt) txt.textContent = conn ? t("vpn.disconnect") : t("vpn.connect");
+    if (txt) txt.textContent = conn ? t("vpn.connected") : connecting ? t("vpn.connecting") : t("vpn.disconnected");
     if (conn && !wasConn) buzz(20); // the moment the tunnel comes up
     // The shim turns the disabled connecting button into an active
     // «Отмена» and marks it via dataset. A full re-render used to drop
@@ -1429,6 +1438,15 @@ $("btn-add-manual").addEventListener("click", async () => {
 
 // language switch lives in settings; re-render on change of the select
 document.addEventListener("change", async (ev) => {
+  if (ev.target && ev.target.id === "vpn-preset") {
+    const pid = S.state.profile_id || S.selected;
+    if (pid) {
+      await api().SetProfilePreset(pid, ev.target.value);
+      await loadProfiles();
+      renderContent();
+    }
+    return;
+  }
   if (ev.target && ev.target.id === "s-lang") {
     lang = ev.target.value;
     renderContent();

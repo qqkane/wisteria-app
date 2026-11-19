@@ -429,6 +429,12 @@ class WisteriaVpnService : VpnService() {
     private fun epochChanged(myEpoch: Long): Boolean =
         synchronized(stateLock) { teardownEpoch != myEpoch }
 
+    private fun presetOf(profile: JSONObject, settings: JSONObject): String {
+        val per = profile.optJSONObject("fields")?.optString("preset").orEmpty()
+        val v = per.ifEmpty { settings.optString("wisteria_preset", "stealth") }
+        return when (v) { "fast", "balance", "stealth" -> v; else -> "stealth" }
+    }
+
     private fun startWisteria(profile: JSONObject, myEpoch: Long) {
         val builder = Builder()
             .addAddress(TUN_ADDRESS, TUN_PREFIX)
@@ -513,6 +519,7 @@ class WisteriaVpnService : VpnService() {
         val cfg = JSONObject()
             .put("priv", profile.optString("client_priv"))
             .put("name", profile.optString("name"))
+            .put("preset", presetOf(profile, settings))
             .put("servers", TlsTransport.engineServers(profile))
             .toString()
 

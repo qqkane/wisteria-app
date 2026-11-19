@@ -6,6 +6,9 @@
 /* The system-proxy stat card is meaningless on Android (VpnService routes
    everything; there is no system proxy concept). */
 html.platform-android .stats-row .stat-card:nth-child(3) { display: none; }
+html.platform-android .vpn-tun-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; width: 100%; margin: 14px auto 0; background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 12px 16px; }
+html.platform-android .vpn-tun-label { font-size: 14px; color: var(--fg); }
+html.platform-android .preset-select { background: var(--card); border: 1px solid var(--border); color: var(--fg); border-radius: 8px; padding: 6px 10px; font-size: 13px; }
 
 /* Bottom system inset in CSS px: env() is the primary source (the page
    loads with viewport-fit=cover under an edge-to-edge webview), the

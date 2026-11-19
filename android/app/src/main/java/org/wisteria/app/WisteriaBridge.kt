@@ -99,6 +99,7 @@ class WisteriaBridge(private val activity: MainActivity) {
         "Connect" -> { connect(args.getString(0)); null }
         "Disconnect" -> { disconnect(); null }
         "DeleteProfile" -> { deleteProfile(args.getString(0)); null }
+        "SetProfilePreset" -> { setProfilePreset(args.getString(0), args.optString(1)); null }
         "PingProfile" -> { pingProfile(args.getString(0)); null }
         "AddLinks" -> addLinks(args.getString(0))
         "AddManual" -> addManual(args.getJSONObject(0))
@@ -224,6 +225,14 @@ class WisteriaBridge(private val activity: MainActivity) {
     }
 
     // ---- profiles ----
+
+    private fun setProfilePreset(id: String, preset: String) {
+        if (preset.isNotEmpty() && preset !in listOf("fast", "balance", "stealth")) throw err("unknown preset $preset")
+        val p = store.profile(id) ?: throw err("profile not found")
+        val fields = p.optJSONObject("fields") ?: JSONObject().also { p.put("fields", it) }
+        if (preset.isEmpty()) fields.remove("preset") else fields.put("preset", preset)
+        store.updateProfile(p)
+    }
 
     private fun deleteProfile(id: String) {
         if (id == EngineHub.profileId && isRunning(JSONObject(Mobile.status()))) {
