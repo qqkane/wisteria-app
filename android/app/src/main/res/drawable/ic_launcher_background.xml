@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Adaptive icon background: deep violet night with a soft glow behind
-     the flower. Full-bleed square — the launcher applies its own mask. -->
+<!-- Adaptive icon background: the raster master's night-violet vignette
+     (sampled from logo-master.png: center ~#200F33, corners ~#120520).
+     Full-bleed square — the launcher applies its own mask. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
@@ -12,11 +13,11 @@
             <gradient
                 android:type="radial"
                 android:centerX="54"
-                android:centerY="41"
+                android:centerY="54"
                 android:gradientRadius="78"
-                android:startColor="#43307A"
-                android:centerColor="#2A1D52"
-                android:endColor="#150E2B" />
+                android:startColor="#200F33"
+                android:centerColor="#1B0B2D"
+                android:endColor="#120520" />
         </aapt:attr>
     </path>
 </vector>
