@@ -446,6 +446,15 @@ func (a *App) ImportTOML(text string) (core.Profile, error) {
 
 func (a *App) RenameProfile(id, name string) error { return a.store.Rename(id, name) }
 
+// SetProfilePreset stores the per-profile obfuscation preset ("" clears it so
+// the global default applies again). Takes effect on the next connect.
+func (a *App) SetProfilePreset(id, preset string) error {
+	if preset != "" && !core.ValidPreset(preset) {
+		return fmt.Errorf("unknown preset %q (fast|balance|stealth)", preset)
+	}
+	return a.store.SetField(id, "preset", preset)
+}
+
 func (a *App) DeleteProfile(id string) error {
 	if a.svc != nil && a.svc.RunningProfile() == id {
 		return errors.New("профиль подключён — сначала отключитесь")

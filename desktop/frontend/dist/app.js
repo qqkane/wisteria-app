@@ -81,6 +81,8 @@ const I18N = {
     "toast.ipFail": "Не удалось определить IP",
     "toast.ipRetry": "Туннель переподключается — IP появится через несколько секунд",
     "vpn.disconnected": "Disconnected",
+    "vpn.preset": "Пресет обфускации",
+    "set.wpreset": "Пресет wisteria по умолчанию", "set.wpresetNote": "для профилей без своего пресета; применится при следующем подключении",
     "vpn.tunToggle": "Режим TUN", "vpn.tunHint": "весь трафик системы через туннель; применится при следующем подключении",
     "set.scale": "Масштаб интерфейса", "set.scaleNote": "увеличивает шрифты и элементы на больших экранах",
     "set.customTheme": "Своя тема", "set.ctAccent": "Акцент", "set.ctBg": "Фон", "set.ctCard": "Карточки", "set.ctFg": "Текст", "set.ctMuted": "Второстепенный текст",
@@ -175,6 +177,8 @@ const I18N = {
     "toast.ipFail": "Could not determine the IP",
     "toast.ipRetry": "Tunnel is reconnecting — the IP will appear in a few seconds",
     "vpn.disconnected": "Disconnected",
+    "vpn.preset": "Obfuscation preset",
+    "set.wpreset": "Default wisteria preset", "set.wpresetNote": "for profiles without their own preset; applies on next connect",
     "vpn.tunToggle": "TUN mode", "vpn.tunHint": "all system traffic via the tunnel; applies on next connect",
     "set.scale": "Interface scale", "set.scaleNote": "enlarges fonts and controls on big screens",
     "set.customTheme": "Custom theme", "set.ctAccent": "Accent", "set.ctBg": "Background", "set.ctCard": "Cards", "set.ctFg": "Text", "set.ctMuted": "Muted text",
@@ -386,6 +390,13 @@ function renderVpn() {
         <div class="stat-card"><div class="stat-label">${I.globe} IP</div><div class="stat-value" style="font-size:13px; line-height:2.4;" id="stat-ip">${esc(S.extIP || "—")}</div></div>
         <div class="stat-card"><div class="stat-label">${I.globe} ${esc(t("stat.proxy"))}</div><div class="stat-value">${st.sys_proxy ? "ON" : "OFF"}</div></div>
       </div>
+      ${p && p.type === "wisteria" ? `
+      <div class="vpn-tun-row">
+        <div class="vpn-tun-label">${esc(t("vpn.preset"))}</div>
+        <select id="vpn-preset" class="preset-select">
+          ${["fast", "balance", "stealth"].map((k) => `<option value="${k}" ${((p.fields && p.fields.preset) || (S.cfg && S.cfg.wisteria_preset) || "stealth") === k ? "selected" : ""}>${k}</option>`).join("")}
+        </select>
+      </div>` : ""}
       <div class="vpn-tun-row">
         <div class="vpn-tun-label">${esc(t("vpn.tunToggle"))}<span class="set-note">${esc(t("vpn.tunHint"))}</span></div>
         <label class="switch"><input id="vpn-tun" type="checkbox" ${S.cfg && S.cfg.tun_enabled ? "checked" : ""}/><span class="slider"></span></label>
@@ -766,6 +777,8 @@ function renderSettings() {
       <div class="set-grid" style="margin-top:12px;">
         <label>${esc(t("set.scale"))}<span class="set-note">${esc(t("set.scaleNote"))}</span></label>
         <div class="scale-row"><input type="range" id="s-scale" min="70" max="160" step="5" value="${S.uiScale || 100}"/><span id="s-scale-val">${S.uiScale || 100}%</span></div>
+        <label>${esc(t("set.wpreset"))}<span class="set-note">${esc(t("set.wpresetNote"))}</span></label>
+        <select id="s-wpreset"><option value="fast">fast</option><option value="balance">balance</option><option value="stealth">stealth</option></select>
         <label>${esc(t("set.lang"))}</label>
         <select id="s-lang"><option value="ru">Русский</option><option value="en">English</option></select>
       </div>
@@ -1113,6 +1126,7 @@ async function fillSettingsForm(s) {
   setv("s-xray", s.xray_core || "");
   setv("s-ghtoken", s.github_token || "");
   setv("s-scale", s.ui_scale || 100);
+  setv("s-wpreset", s.wisteria_preset || "stealth");
   const sv = $("s-scale-val"); if (sv) sv.textContent = (s.ui_scale || 100) + "%";
   const ct = Object.assign({}, DEFAULT_CUSTOM, s.custom_theme || {});
   ["accent", "bg", "card", "fg", "muted"].forEach((k) => setv("ct-" + k, ct[k]));
@@ -1132,6 +1146,7 @@ async function saveSettings() {
     language: lang,
     theme: S.theme,
     ui_scale: g("s-scale") ? num("s-scale", 100) : cur.ui_scale,
+    wisteria_preset: g("s-wpreset") ? $("s-wpreset").value : cur.wisteria_preset,
     custom_theme: S.customTheme || cur.custom_theme,
     local_port: g("s-port") ? num("s-port", 2080) : cur.local_port,
     http_port: g("s-http-port") ? num("s-http-port", 2081) : cur.http_port,
@@ -1250,6 +1265,14 @@ document.addEventListener("input", (ev) => {
   }
 });
 document.addEventListener("change", async (ev) => {
+  if (ev.target.id === "vpn-preset") {
+    const pid = S.state.profile_id || S.selected;
+    if (!pid) return;
+    await api().SetProfilePreset(pid, ev.target.value);
+    await loadProfiles();
+    renderContent();
+    return;
+  }
   if (ev.target.id !== "vpn-tun") return;
   const cur = await api().GetSettings();
   cur.tun_enabled = ev.target.checked;
@@ -1425,6 +1448,10 @@ function renderExtraFields() {
   });
   // Wisteria TLS transport (wave 4): the dedicated block replaces the
   // generic text inputs — a select plus two rows that only make sense on TLS.
+  if (tp === "wisteria") {
+    box.insertAdjacentHTML("beforeend",
+      `<div class="input-group"><label>${esc(t("vpn.preset"))}</label><select data-field="preset"><option value="">—</option><option value="fast">fast</option><option value="balance">balance</option><option value="stealth">stealth</option></select></div>`);
+  }
   const wst = $("m-wst-tls");
   if (wst) wst.classList.toggle("hidden", tp !== "wisteria");
   syncTlsRows();
@@ -1474,7 +1501,7 @@ $("btn-import-toml").addEventListener("click", async () => {
 
 $("btn-add-manual").addEventListener("click", async () => {
   const fields = {};
-  document.querySelectorAll("#m-extra input[data-field]").forEach((i) => { if (i.value.trim()) fields[i.dataset.field] = i.value.trim(); });
+  document.querySelectorAll("#m-extra [data-field]").forEach((i) => { if (i.value.trim()) fields[i.dataset.field] = i.value.trim(); });
   const payload = {
     type: $("m-type").value, name: $("m-name").value.trim(),
     host: $("m-host").value.trim(), port: parseInt($("m-port").value, 10) || 0,

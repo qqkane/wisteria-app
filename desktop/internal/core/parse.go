@@ -388,6 +388,14 @@ func parseWisteria(p Profile, userinfo string, q map[string]string) (Profile, er
 			p.Fields[k] = v
 		}
 	}
+	// Obfuscation preset label (core internal/presets). Per-profile default;
+	// the UI can override it later. Unknown labels are import errors.
+	if v := strings.TrimSpace(q["lvl"]); v != "" {
+		if !validPreset(v) {
+			return Profile{}, fmt.Errorf("wisteria: lvl = %q — нужен fast|balance|stealth", v)
+		}
+		p.Fields["preset"] = v
+	}
 	// TLS transport (wave 4): optional query params riding the same link
 	// format. Absent = bare TCP, so pre-TLS links parse unchanged. Strict
 	// like the numeric fields above: the transport spelling is case-

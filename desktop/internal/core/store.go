@@ -183,6 +183,28 @@ func (s *Store) Rename(id, name string) error {
 	return ErrNotFound
 }
 
+// SetField updates one profile field (e.g. the per-profile obfuscation
+// preset) and persists. Empty value clears the key so the global default
+// applies again.
+func (s *Store) SetField(id, key, value string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.Profiles {
+		if s.Profiles[i].ID == id {
+			if s.Profiles[i].Fields == nil {
+				s.Profiles[i].Fields = map[string]string{}
+			}
+			if value == "" {
+				delete(s.Profiles[i].Fields, key)
+			} else {
+				s.Profiles[i].Fields[key] = value
+			}
+			return s.saveLocked()
+		}
+	}
+	return ErrNotFound
+}
+
 // Delete removes the profile. Removing the active profile clears the
 // pointer; the caller is responsible for not deleting a connected profile
 // (the service layer refuses).

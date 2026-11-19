@@ -122,6 +122,10 @@ type Settings struct {
 	// upgrade into the new default without a migration flag).
 	NoBypassRU bool `json:"no_bypass_ru"`
 
+	// WisteriaPreset: global default obfuscation preset for wisteria profiles
+	// that carry no per-profile "preset" field (fast|balance|stealth).
+	WisteriaPreset string `json:"wisteria_preset"`
+
 	// Cores
 	MemLimitMB int    `json:"mem_limit_mb"` // GOMEMLIMIT for the core process, 0 = off
 	LogLevel   string `json:"log_level"`    // sing-box log level
@@ -227,6 +231,9 @@ func (s *Settings) defaults() {
 	}
 	if !knownLogLevels[s.LogLevel] {
 		s.LogLevel = "warn"
+	}
+	if !knownPresets[s.WisteriaPreset] {
+		s.WisteriaPreset = "stealth"
 	}
 	if s.RemoteDNS != "" && !validDNSAddress(s.RemoteDNS) {
 		s.RemoteDNS = ""
@@ -617,7 +624,7 @@ func (s *Service) prepareCore(p Profile) (core string, args []string, confFile s
 			return "", nil, "", fmt.Errorf("ядро wisteria-client не найдено — положите его в bin/ рядом с приложением или укажите путь в настройках")
 		}
 		tomlText, err := WisteriaTOML(p, fmt.Sprintf("%s:%d", s.settings.ListenHost(), s.settings.LocalPort),
-			filepath.Join(s.dirs.Data, "serverkey-"+p.ID+".cache"), !s.settings.NoBypassRU)
+			filepath.Join(s.dirs.Data, "serverkey-"+p.ID+".cache"), !s.settings.NoBypassRU, s.settings.WisteriaPreset)
 		if err != nil {
 			return "", nil, "", err
 		}

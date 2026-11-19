@@ -21,6 +21,16 @@ var (
 	obfFloatFields = []string{"obf_mu", "obf_sigma", "dir_balance"}
 )
 
+// knownPresets: the core obfuscation vocabulary (internal/presets). The
+// per-profile "preset" field and the global default both use these labels;
+// the renderer emits them as [obfuscation].lvl and the core expands them.
+var knownPresets = map[string]bool{"fast": true, "balance": true, "stealth": true}
+
+func validPreset(s string) bool { return knownPresets[s] }
+
+// ValidPreset exposes the preset vocabulary to the shell (API validation).
+func ValidPreset(s string) bool { return validPreset(s) }
+
 // validObfUint: non-negative int64, digits only (the TOML integer grammar).
 func validObfUint(v string) bool {
 	_, err := strconv.ParseUint(v, 10, 63)
@@ -80,7 +90,7 @@ func checkObfFields(f map[string]string) error {
 // WisteriaTOML renders the client config. socksListen is the local SOCKS5
 // address; cachePath is the per-profile server-key cache (XX→IK pinning).
 // bypassRU picks the routing mode: RU domains/networks direct, rest tunneled.
-func WisteriaTOML(p Profile, socksListen, cachePath string, bypassRU bool) (string, error) {
+func WisteriaTOML(p Profile, socksListen, cachePath string, bypassRU bool, defaultPreset ...string) (string, error) {
 	if p.Type != TWisteria {
 		return "", fmt.Errorf("профиль %q не wisteria", p.ID)
 	}
@@ -166,11 +176,23 @@ func WisteriaTOML(p Profile, socksListen, cachePath string, bypassRU bool) (stri
 	// Obfuscation: emit only what the profile carries — the rest keeps the
 	// core defaults, which match a server deployed with defaults.
 	f := p.Fields
-	anyObf := f["obf_mu"] != "" || f["obf_sigma"] != "" || f["min_pad"] != "" ||
+	// Per-profile preset wins over the global default; both are core preset
+	// labels emitted as [obfuscation].lvl (the core expands them).
+	preset := f["preset"]
+	if preset == "" && len(defaultPreset) > 0 {
+		preset = defaultPreset[0]
+	}
+	if !validPreset(preset) {
+		preset = ""
+	}
+	anyObf := preset != "" || f["obf_mu"] != "" || f["obf_sigma"] != "" || f["min_pad"] != "" ||
 		f["jitter_us"] != "" || f["jitter_ms"] != "" || f["coalesce_ms"] != "" ||
 		f["mimic"] != "" || f["filler_min"] != "" || f["filler_ratio"] != "" ||
 		f["dir_balance"] != "" || f["rekey"] != "" || f["pow"] != ""
 	w("[obfuscation]")
+	if preset != "" {
+		w("lvl = %q", preset)
+	}
 	if f["obf_mu"] != "" {
 		w("mu_log = %s", f["obf_mu"])
 	}
