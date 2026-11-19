@@ -82,8 +82,13 @@ type Status struct {
 
 type Settings struct {
 	Language      string `json:"language"`   // "ru" | "en"
-	Theme         string `json:"theme"`      // ui accent theme id (sunset, neon-dark, ...)
+	Theme         string `json:"theme"`      // ui accent theme id (sunset, neon-dark, ..., custom)
 	Background    string `json:"background"` // ambient background preset (off, lilac, matrix, gradient)
+	// UIScale is the interface zoom in percent (100 = native). Clamped in
+	// defaults(); 0 from older configs means "native".
+	UIScale int `json:"ui_scale"`
+	// CustomTheme holds the user-built palette, used when Theme == "custom".
+	CustomTheme CustomTheme `json:"custom_theme"`
 	LocalPort     int    `json:"local_port"`
 	HttpPort      int    `json:"http_port"`
 	SysProxy      bool   `json:"sys_proxy"`      // set the Windows proxy on connect
@@ -145,9 +150,38 @@ type Settings struct {
 	TunStrictRoute bool   `json:"tun_strict_route"` // tighter leak protection, may break LAN access
 }
 
+// CustomTheme is the user-built palette (hex colors). Empty fields fall back
+// to sensible dark defaults in fillDefaults so a half-filled editor still
+// renders a usable theme.
+type CustomTheme struct {
+	Accent string `json:"accent"`
+	Bg     string `json:"bg"`
+	Card   string `json:"card"`
+	Fg     string `json:"fg"`
+	Muted  string `json:"muted"`
+}
+
+func (c *CustomTheme) fillDefaults() {
+	if c.Accent == "" {
+		c.Accent = "#00e8a2"
+	}
+	if c.Bg == "" {
+		c.Bg = "#0d0d12"
+	}
+	if c.Card == "" {
+		c.Card = "#14141a"
+	}
+	if c.Fg == "" {
+		c.Fg = "#e0e8f0"
+	}
+	if c.Muted == "" {
+		c.Muted = "#6b6b78"
+	}
+}
+
 var knownThemes = map[string]bool{
 	"lilac": true, "sunset": true, "neon-dark": true, "warm-sand": true,
-	"arctic": true, "matrix": true, "mono": true,
+	"arctic": true, "matrix": true, "mono": true, "custom": true,
 }
 
 // knownBackgrounds: ambient background presets. The presets themselves are
@@ -175,6 +209,16 @@ func (s *Settings) defaults() {
 	if !knownBackgrounds[s.Background] {
 		s.Background = "off"
 	}
+	if s.UIScale == 0 {
+		s.UIScale = 100
+	}
+	if s.UIScale < 70 {
+		s.UIScale = 70
+	}
+	if s.UIScale > 160 {
+		s.UIScale = 160
+	}
+	s.CustomTheme.fillDefaults()
 	if s.LocalPort == 0 {
 		s.LocalPort = 2080
 	}

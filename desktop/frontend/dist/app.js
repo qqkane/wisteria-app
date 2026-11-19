@@ -41,7 +41,11 @@ const THEMES = [
   { id: "sunset", name: "Sunset", color: "#f06888" },
   { id: "matrix", name: "Matrix", color: "#00ff41" },
   { id: "mono", name: "Mono Red", color: "#e02020" },
+  { id: "custom", name: "Custom", color: "#9aa0a6" },
 ];
+
+// Fallback palette for the custom-theme editor (mirrors backend fillDefaults).
+const DEFAULT_CUSTOM = { accent: "#00e8a2", bg: "#0d0d12", card: "#14141a", fg: "#e0e8f0", muted: "#6b6b78" };
 
 // ---------- i18n ----------
 const I18N = {
@@ -76,6 +80,10 @@ const I18N = {
     "set.checkIpNow": "Проверить IP сейчас",
     "toast.ipFail": "Не удалось определить IP",
     "toast.ipRetry": "Туннель переподключается — IP появится через несколько секунд",
+    "vpn.disconnected": "Disconnected",
+    "vpn.tunToggle": "Режим TUN", "vpn.tunHint": "весь трафик системы через туннель; применится при следующем подключении",
+    "set.scale": "Масштаб интерфейса", "set.scaleNote": "увеличивает шрифты и элементы на больших экранах",
+    "set.customTheme": "Своя тема", "set.ctAccent": "Акцент", "set.ctBg": "Фон", "set.ctCard": "Карточки", "set.ctFg": "Текст", "set.ctMuted": "Второстепенный текст",
     "set.tun": "Режим TUN (весь трафик системы)",
     "set.tunNote": "маршрутизирует всё через туннель; нужен sing-box и wintun.dll; системный прокси при этом не используется",
     "set.tunStack": "Стек TUN",
@@ -166,6 +174,10 @@ const I18N = {
     "set.checkIpNow": "Check IP now",
     "toast.ipFail": "Could not determine the IP",
     "toast.ipRetry": "Tunnel is reconnecting — the IP will appear in a few seconds",
+    "vpn.disconnected": "Disconnected",
+    "vpn.tunToggle": "TUN mode", "vpn.tunHint": "all system traffic via the tunnel; applies on next connect",
+    "set.scale": "Interface scale", "set.scaleNote": "enlarges fonts and controls on big screens",
+    "set.customTheme": "Custom theme", "set.ctAccent": "Accent", "set.ctBg": "Background", "set.ctCard": "Cards", "set.ctFg": "Text", "set.ctMuted": "Muted text",
     "set.tun": "TUN mode (all system traffic)",
     "set.tunNote": "routes everything through the tunnel; needs sing-box and wintun.dll; the system proxy is not used",
     "set.tunStack": "TUN stack",
@@ -245,7 +257,7 @@ const EXTRA = {
 
 // ---------- state ----------
 const S = {
-  tab: "vpn", setTab: "look", theme: "sunset", profiles: [], selected: "", lastLogSeq: 0,
+  tab: "vpn", setTab: "look", theme: "sunset", customTheme: null, uiScale: 100, profiles: [], selected: "", lastLogSeq: 0,
   state: { state: "disconnected" }, uptimeTimer: null, extIP: "",
   subs: [], subBusy: {}, busy: false, // busy = a Connect is in flight
   version: "", upd: null, updBusy: false, updReady: false, coreUpd: {},
@@ -347,7 +359,7 @@ function renderVpn() {
   // backend status ever mentions one (i.e. before the first Connect).
   const p = S.profiles.find((x) => x.id === (st.profile_id || S.selected)) || null;
   const label = conn ? t("vpn.protected") : reconn ? t("vpn.reconnecting") + (st.attempt ? " " + t("vpn.attempt").replace("{n}", st.attempt) : "") : connecting ? t("vpn.connecting") : t("vpn.unprotected");
-  const btnText = conn || reconn ? t("vpn.disconnect") : t("vpn.connect");
+  const btnText = conn ? t("vpn.connected") : connecting ? t("vpn.connecting") : reconn ? t("vpn.reconnecting") : t("vpn.disconnected");
   const lat = p && p.latency_ms ? (p.latency_ms < 0 ? "n/a" : p.latency_ms + " ms") : "";
   return `
     <div class="vpn-screen">
@@ -373,6 +385,10 @@ function renderVpn() {
         <div class="stat-card"><div class="stat-label">${I.clock} ${esc(t("stat.uptime"))}</div><div class="stat-value" id="stat-uptime">${uptimeHTML(st.started_at) || "—"}</div></div>
         <div class="stat-card"><div class="stat-label">${I.globe} IP</div><div class="stat-value" style="font-size:13px; line-height:2.4;" id="stat-ip">${esc(S.extIP || "—")}</div></div>
         <div class="stat-card"><div class="stat-label">${I.globe} ${esc(t("stat.proxy"))}</div><div class="stat-value">${st.sys_proxy ? "ON" : "OFF"}</div></div>
+      </div>
+      <div class="vpn-tun-row">
+        <div class="vpn-tun-label">${esc(t("vpn.tunToggle"))}<span class="set-note">${esc(t("vpn.tunHint"))}</span></div>
+        <label class="switch"><input id="vpn-tun" type="checkbox" ${S.cfg && S.cfg.tun_enabled ? "checked" : ""}/><span class="slider"></span></label>
       </div>
       ${st.tun ? `<div class="tun-note">${esc(t("vpn.tunOn"))}</div>` : ""}
       ${st.error ? `<div class="error-box">${esc(st.error)}</div>` : ""}
@@ -735,11 +751,21 @@ function renderSettings() {
       <h3>${esc(t("sec.appearance"))}</h3>
       <div class="theme-grid">${THEMES.map((th) => `
         <div class="theme-option ${S.theme === th.id ? "selected" : ""}" data-theme="${th.id}">
-          <div class="theme-dot" style="background:${th.color}"></div>
+          <div class="theme-dot ${th.id === "custom" ? "custom-dot" : ""}" style="background:${th.color}"></div>
           <div class="theme-name">${esc(th.name)}</div>
         </div>`).join("")}
       </div>
+      ${S.theme === "custom" ? `
+      <div class="set-grid ct-grid" style="margin-top:12px;">
+        <label>${esc(t("set.ctAccent"))}</label><input type="color" id="ct-accent" value="${(S.customTheme || DEFAULT_CUSTOM).accent}"/>
+        <label>${esc(t("set.ctBg"))}</label><input type="color" id="ct-bg" value="${(S.customTheme || DEFAULT_CUSTOM).bg}"/>
+        <label>${esc(t("set.ctCard"))}</label><input type="color" id="ct-card" value="${(S.customTheme || DEFAULT_CUSTOM).card}"/>
+        <label>${esc(t("set.ctFg"))}</label><input type="color" id="ct-fg" value="${(S.customTheme || DEFAULT_CUSTOM).fg}"/>
+        <label>${esc(t("set.ctMuted"))}</label><input type="color" id="ct-muted" value="${(S.customTheme || DEFAULT_CUSTOM).muted}"/>
+      </div>` : ""}
       <div class="set-grid" style="margin-top:12px;">
+        <label>${esc(t("set.scale"))}<span class="set-note">${esc(t("set.scaleNote"))}</span></label>
+        <div class="scale-row"><input type="range" id="s-scale" min="70" max="160" step="5" value="${S.uiScale || 100}"/><span id="s-scale-val">${S.uiScale || 100}%</span></div>
         <label>${esc(t("set.lang"))}</label>
         <select id="s-lang"><option value="ru">Русский</option><option value="en">English</option></select>
       </div>
@@ -951,7 +977,8 @@ function wireContent() {
   document.querySelectorAll(".theme-option").forEach((opt) => opt.addEventListener("click", async () => {
     S.theme = opt.dataset.theme;
     applyTheme();
-    document.querySelectorAll(".theme-option").forEach((o) => o.classList.toggle("selected", o === opt));
+    if (S.tab === "settings") { renderContent(); fillSettingsForm(S.cfg); }
+    else document.querySelectorAll(".theme-option").forEach((o) => o.classList.toggle("selected", o === opt));
     await saveSettings();
   }));
   on("btn-checkip", "click", async () => {
@@ -1041,6 +1068,8 @@ async function loadSettings() {
   const s = await api().GetSettings();
   S.cfg = s;
   S.theme = s.theme || "lilac";
+  S.customTheme = Object.assign({}, DEFAULT_CUSTOM, s.custom_theme || {});
+  S.uiScale = s.ui_scale || 100;
   lang = s.language || "ru";
   applyTheme();
   // Values are filled when the settings view renders.
@@ -1083,6 +1112,10 @@ async function fillSettingsForm(s) {
   setv("s-core-trojan", s.core_trojan || "sing-box");
   setv("s-xray", s.xray_core || "");
   setv("s-ghtoken", s.github_token || "");
+  setv("s-scale", s.ui_scale || 100);
+  const sv = $("s-scale-val"); if (sv) sv.textContent = (s.ui_scale || 100) + "%";
+  const ct = Object.assign({}, DEFAULT_CUSTOM, s.custom_theme || {});
+  ["accent", "bg", "card", "fg", "muted"].forEach((k) => setv("ct-" + k, ct[k]));
   const sel = $("s-autoconnect");
   if (sel) {
     sel.innerHTML = `<option value="">—</option>` + S.profiles.map((p) =>
@@ -1098,6 +1131,8 @@ async function saveSettings() {
   const next = {
     language: lang,
     theme: S.theme,
+    ui_scale: g("s-scale") ? num("s-scale", 100) : cur.ui_scale,
+    custom_theme: S.customTheme || cur.custom_theme,
     local_port: g("s-port") ? num("s-port", 2080) : cur.local_port,
     http_port: g("s-http-port") ? num("s-http-port", 2081) : cur.http_port,
     sys_proxy: g("s-sysproxy") ? $("s-sysproxy").checked : cur.sys_proxy,
@@ -1135,9 +1170,93 @@ async function saveSettings() {
   showToast(t("toast.saved"));
 }
 
-function applyTheme() {
-  $("app").className = "theme-" + S.theme;
+function hexToRgb(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex || "");
+  if (!m) return "0, 232, 162";
+  const n = parseInt(m[1], 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255].join(", ");
 }
+
+function applyScale() {
+  const app = $("app");
+  const z = (S.uiScale || 100) / 100;
+  // zoom scales layout too, so shrink the box by 1/z to keep it filling the
+  // window exactly at any scale.
+  app.style.zoom = z;
+  app.style.height = (100 / z) + "vh";
+  app.style.width = (100 / z) + "%";
+}
+
+function applyTheme() {
+  const app = $("app");
+  const inline = ["--accent", "--accent-rgb", "--card", "--fg", "--muted", "--border", "--bg", "--surface"];
+  if (S.theme === "custom") {
+    const c = Object.assign({}, DEFAULT_CUSTOM, S.customTheme || {});
+    app.className = "theme-custom";
+    app.style.background = c.bg;
+    app.style.color = c.fg;
+    app.style.setProperty("--accent", c.accent);
+    app.style.setProperty("--accent-rgb", hexToRgb(c.accent));
+    app.style.setProperty("--bg", c.bg);
+    app.style.setProperty("--surface", c.card);
+    app.style.setProperty("--card", c.card);
+    app.style.setProperty("--fg", c.fg);
+    app.style.setProperty("--muted", c.muted);
+    app.style.setProperty("--border", "rgba(" + hexToRgb(c.fg) + ", 0.08)");
+  } else {
+    app.className = "theme-" + S.theme;
+    app.style.background = "";
+    app.style.color = "";
+    inline.forEach((p) => app.style.removeProperty(p));
+  }
+  applyScale();
+}
+
+// ---------- connect feedback (Web Animations API) ----------
+// CSS keyframes alone proved unreliable on Windows/WebView2 (the button just
+// lit up with no sweep). WAAPI runs on the compositor in both Chromium and
+// WebKitGTK and is not suppressed by the OS reduce-motion setting, so the
+// one-shot "tunnel is up" confirmation plays everywhere. Ambient loops stay
+// CSS and stay gated by prefers-reduced-motion.
+let spinAnim = null;
+function setSpin(on) {
+  const arc = document.querySelector(".connect-btn .spin-arc");
+  if (spinAnim) { spinAnim.cancel(); spinAnim = null; }
+  if (on && arc) {
+    spinAnim = arc.animate([{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }], { duration: 1100, iterations: Infinity });
+  }
+}
+function playConnectFx(btn) {
+  try {
+    btn.animate([{ transform: "scale(.93)" }, { transform: "scale(1.05)", offset: .6 }, { transform: "scale(1)" }], { duration: 520, easing: "cubic-bezier(.34,1.56,.64,1)" });
+    const arc = btn.querySelector(".spin-arc");
+    if (arc) arc.animate([{ transform: "rotate(0deg)", opacity: 1 }, { transform: "rotate(360deg)", opacity: 0 }], { duration: 700, easing: "ease-out" });
+    btn.querySelectorAll(".ring-anim").forEach((r, i) => r.animate([{ transform: "scale(1)", opacity: .6 }, { transform: "scale(1.5)", opacity: 0 }], { duration: 800, delay: i * 120, easing: "ease-out" }));
+  } catch (e) { /* WAAPI unavailable: CSS still shows the state */ }
+}
+
+// Live previews (look tab scale + custom palette) and the VPN-tab TUN switch.
+// Delegated at module scope so they survive re-renders without duplicating.
+document.addEventListener("input", (ev) => {
+  const id = ev.target.id;
+  if (id === "s-scale") {
+    S.uiScale = parseInt(ev.target.value, 10) || 100;
+    const lv = $("s-scale-val"); if (lv) lv.textContent = S.uiScale + "%";
+    applyScale();
+  } else if (id && id.indexOf("ct-") === 0) {
+    S.customTheme = Object.assign({}, DEFAULT_CUSTOM, S.customTheme || {});
+    S.customTheme[id.slice(3)] = ev.target.value;
+    applyTheme();
+  }
+});
+document.addEventListener("change", async (ev) => {
+  if (ev.target.id !== "vpn-tun") return;
+  const cur = await api().GetSettings();
+  cur.tun_enabled = ev.target.checked;
+  await api().SaveSettings(cur);
+  S.cfg = cur;
+  renderContent();
+});
 
 // ---------- profiles ----------
 async function loadProfiles() {
@@ -1247,7 +1366,7 @@ function renderState(st) {
     !!prev.tun !== !!S.state.tun ||
     (prev.error || "") !== (S.state.error || "") ||
     !!prev.sys_proxy !== !!S.state.sys_proxy;
-  if (structural) { renderContent(); return; }
+  if (structural) { renderContent(); setSpin(S.state.state === "connecting" || !!S.state.reconnecting); return; }
   patchVpnState();
   renderSidebarFooter();
 }
@@ -1271,8 +1390,9 @@ function patchVpnState() {
     btn.classList.toggle("connecting", connecting || reconn);
     btn.disabled = connecting;
     const txt = btn.querySelector(".connect-text");
-    if (txt) txt.textContent = conn || reconn ? t("vpn.disconnect") : t("vpn.connect");
-    if (conn && !wasConn) buzz(20); // the moment the tunnel comes up
+    if (txt) txt.textContent = conn ? t("vpn.connected") : connecting ? t("vpn.connecting") : reconn ? t("vpn.reconnecting") : t("vpn.disconnected");
+    setSpin(connecting || reconn);
+    if (conn && !wasConn) { buzz(20); playConnectFx(btn); } // the moment the tunnel comes up
   }
 }
 
