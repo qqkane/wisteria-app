@@ -1235,11 +1235,19 @@ function applyTheme() {
 // one-shot "tunnel is up" confirmation plays everywhere. Ambient loops stay
 // CSS and stay gated by prefers-reduced-motion.
 let spinAnim = null;
+let spinStart = 0;    // performance.now() when the current lap began
+let connTimer = null; // pending "finish the lap" connected reveal
+let sawConnecting = false; // a connecting state was observed this page session
+const SPIN_MS = 1100; // one full arc revolution
 function setSpin(on) {
   const arc = document.querySelector(".connect-btn .spin-arc");
-  if (spinAnim) { spinAnim.cancel(); spinAnim = null; }
-  if (on && arc) {
-    spinAnim = arc.animate([{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }], { duration: 1100, iterations: Infinity });
+  if (on) {
+    if (spinAnim || !arc) return; // idempotent: never restart a running lap
+    spinStart = performance.now();
+    spinAnim = arc.animate([{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }], { duration: SPIN_MS, iterations: Infinity });
+  } else {
+    if (spinAnim) { spinAnim.cancel(); spinAnim = null; }
+    spinStart = 0;
   }
 }
 function playConnectFx(btn) {
@@ -1249,6 +1257,56 @@ function playConnectFx(btn) {
     if (arc) arc.animate([{ transform: "rotate(0deg)", opacity: 1 }, { transform: "rotate(360deg)", opacity: 0 }], { duration: 700, easing: "ease-out" });
     btn.querySelectorAll(".ring-anim").forEach((r, i) => r.animate([{ transform: "scale(1)", opacity: .6 }, { transform: "scale(1.5)", opacity: 0 }], { duration: 800, delay: i * 120, easing: "ease-out" }));
   } catch (e) { /* WAAPI unavailable: CSS still shows the state */ }
+}
+
+// The connected reveal waits for the arc to finish exactly one full
+// revolution: a sub-second connect used to swap power→check after a quarter
+// lap, and a structural rebuild (sys_proxy/tun flip at connect on Windows)
+// recreated the button born-connected — no crossfade, no fx at all.
+function beginConnectedLap() {
+  const btn = $("btn-toggle");
+  if (!btn) return;
+  if (!sawConnecting) {
+    // Boot reconciliation, not a fresh connect: no fake connecting lap —
+    // start from the power glyph and let the crossfade play on the live node.
+    btn.classList.remove("connected");
+    void btn.offsetWidth; // commit the start style so the transition runs
+    revealConnected();
+    return;
+  }
+  btn.classList.remove("connected");
+  btn.classList.add("connecting");
+  btn.disabled = true;
+  const txt = btn.querySelector(".connect-text");
+  if (txt) txt.textContent = t("vpn.connecting");
+  const labelEl = document.querySelector(".vpn-status .label");
+  if (labelEl) labelEl.textContent = t("vpn.connecting");
+  const statusEl = document.querySelector(".vpn-status");
+  if (statusEl) { statusEl.classList.remove("on"); statusEl.classList.add("mid"); }
+  setSpin(true);
+  const elapsed = spinStart ? performance.now() - spinStart : 0;
+  const wait = Math.max(0, SPIN_MS - elapsed);
+  if (connTimer) clearTimeout(connTimer);
+  connTimer = setTimeout(() => { connTimer = null; revealConnected(); }, wait);
+}
+
+function revealConnected() {
+  const btn = $("btn-toggle");
+  if (!btn || S.state.state !== "connected") return;
+  if (btn.classList.contains("connected")) return; // already revealed
+  const labelEl = document.querySelector(".vpn-status .label");
+  if (labelEl) labelEl.textContent = t("vpn.protected");
+  const statusEl = document.querySelector(".vpn-status");
+  if (statusEl) { statusEl.classList.add("on"); statusEl.classList.remove("mid"); }
+  btn.classList.remove("connecting");
+  btn.classList.add("connected");
+  btn.disabled = false;
+  const txt = btn.querySelector(".connect-text");
+  if (txt) txt.textContent = t("vpn.connected");
+  setSpin(false);
+  buzz(20);
+  playConnectFx(btn);
+  renderSidebarFooter();
 }
 
 // Live previews (look tab scale + custom palette) and the VPN-tab TUN switch.
@@ -1388,6 +1446,7 @@ async function ensureExtIP() {
 function renderState(st) {
   const prev = S.state;
   S.state = st || S.state;
+  if (S.state.state === "connecting" || S.state.reconnecting) sawConnecting = true;
   if (S.state.error && !(prev && prev.error)) buzz([40, 60, 40]); // a failure surfaced
   if (S.tab !== "vpn") { renderSidebarFooter(); return; }
   // Rebuild only on structural changes (profile switch, error box, TUN
@@ -1400,7 +1459,15 @@ function renderState(st) {
     !!prev.tun !== !!S.state.tun ||
     (prev.error || "") !== (S.state.error || "") ||
     !!prev.sys_proxy !== !!S.state.sys_proxy;
-  if (structural) { renderContent(); setSpin(S.state.state === "connecting" || !!S.state.reconnecting); return; }
+  if (structural) {
+    const prevConn = !!prev && prev.state === "connected";
+    if (connTimer) { clearTimeout(connTimer); connTimer = null; }
+    setSpin(false); // the rebuild replaces the arc node the spin targets
+    renderContent();
+    if (S.state.state === "connected" && !prevConn) beginConnectedLap();
+    else setSpin(S.state.state === "connecting" || !!S.state.reconnecting);
+    return;
+  }
   patchVpnState();
   renderSidebarFooter();
 }
@@ -1420,13 +1487,14 @@ function patchVpnState() {
   const btn = $("btn-toggle");
   if (btn) {
     const wasConn = btn.classList.contains("connected");
+    if (conn && !wasConn) { beginConnectedLap(); return; }
+    if (!conn && connTimer) { clearTimeout(connTimer); connTimer = null; }
     btn.classList.toggle("connected", conn);
     btn.classList.toggle("connecting", connecting || reconn);
     btn.disabled = connecting;
     const txt = btn.querySelector(".connect-text");
     if (txt) txt.textContent = conn ? t("vpn.connected") : connecting ? t("vpn.connecting") : reconn ? t("vpn.reconnecting") : t("vpn.disconnected");
     setSpin(connecting || reconn);
-    if (conn && !wasConn) { buzz(20); playConnectFx(btn); } // the moment the tunnel comes up
   }
 }
 

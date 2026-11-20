@@ -1384,6 +1384,7 @@ async function ensureExtIP() {
 function renderState(st) {
   const prev = S.state;
   S.state = st || S.state;
+  if (S.state.state === "connecting") sawConnecting = true;
   if (S.state.error && !(prev && prev.error)) buzz([40, 60, 40]); // a failure surfaced
   if (S.tab !== "vpn") { renderSidebarFooter(); return; }
   // Rebuild only on structural changes (profile switch, error box, TUN
@@ -1396,8 +1397,74 @@ function renderState(st) {
     !!prev.tun !== !!S.state.tun ||
     (prev.error || "") !== (S.state.error || "") ||
     !!prev.sys_proxy !== !!S.state.sys_proxy;
-  if (structural) { renderContent(); return; }
+  if (structural) {
+    const prevConn = !!prev && prev.state === "connected";
+    if (connTimer) { clearTimeout(connTimer); connTimer = null; }
+    lapStart = 0;
+    renderContent();
+    if (S.state.state === "connected" && !prevConn) beginConnectedLap();
+    else if (S.state.state === "connecting") lapStart = performance.now();
+    return;
+  }
   patchVpnState();
+  renderSidebarFooter();
+}
+
+// The connected reveal waits for the CSS arc (arc-spin 1.1s) to finish
+// exactly one full revolution: a sub-second connect used to swap
+// power→check after a quarter lap, and the structural rebuild at connect
+// (tun flips false→true) recreated the button born-connected — no
+// crossfade at all. Same choreography as the desktop shell.
+const SPIN_MS = 1100;
+let lapStart = 0;
+let connTimer = null;
+let sawConnecting = false; // a connecting state was observed this page session
+function beginConnectedLap() {
+  const btn = $("btn-toggle");
+  if (!btn) return;
+  if (!sawConnecting) {
+    // Boot reconciliation (the tunnel survives app opens): no fake
+    // connecting lap — start from the power glyph, crossfade on the live node.
+    btn.classList.remove("connected");
+    void btn.offsetWidth; // commit the start style so the transition runs
+    revealConnected();
+    return;
+  }
+  btn.classList.remove("connected");
+  btn.classList.add("connecting");
+  btn.disabled = true;
+  const txt = btn.querySelector(".connect-text");
+  if (txt) txt.textContent = t("vpn.connecting");
+  const labelEl = document.querySelector(".vpn-status .label");
+  if (labelEl) labelEl.textContent = t("vpn.connecting");
+  const statusEl = document.querySelector(".vpn-status");
+  if (statusEl) { statusEl.classList.remove("on"); statusEl.classList.add("mid"); }
+  if (!lapStart) lapStart = performance.now();
+  const wait = Math.max(0, SPIN_MS - (performance.now() - lapStart));
+  if (connTimer) clearTimeout(connTimer);
+  connTimer = setTimeout(() => { connTimer = null; revealConnected(); }, wait);
+}
+
+function revealConnected() {
+  const btn = $("btn-toggle");
+  if (!btn || S.state.state !== "connected") return;
+  if (btn.classList.contains("connected")) return; // already revealed
+  const labelEl = document.querySelector(".vpn-status .label");
+  if (labelEl) labelEl.textContent = t("vpn.protected");
+  const statusEl = document.querySelector(".vpn-status");
+  if (statusEl) { statusEl.classList.add("on"); statusEl.classList.remove("mid"); }
+  btn.classList.remove("connecting");
+  btn.classList.add("connected");
+  btn.disabled = false;
+  const txt = btn.querySelector(".connect-text");
+  if (txt) txt.textContent = t("vpn.connected");
+  // Same cleanup the in-place patch does: the shim's cancel markers must
+  // not leak from the connecting look into the connected button.
+  delete btn.dataset.abCancel;
+  btn.classList.remove("ab-cancel");
+  if (txt) delete txt.dataset.abCancel;
+  lapStart = 0;
+  buzz(20);
   renderSidebarFooter();
 }
 
@@ -1415,12 +1482,16 @@ function patchVpnState() {
   const btn = $("btn-toggle");
   if (btn) {
     const wasConn = btn.classList.contains("connected");
+    if (conn && !wasConn) { beginConnectedLap(); return; }
+    if (!conn && connTimer) { clearTimeout(connTimer); connTimer = null; }
+    const wasConnecting = btn.classList.contains("connecting");
+    if (connecting && !wasConnecting) lapStart = performance.now();
+    if (!connecting && !conn) lapStart = 0;
     btn.classList.toggle("connected", conn);
     btn.classList.toggle("connecting", connecting);
     btn.disabled = connecting;
     const txt = btn.querySelector(".connect-text");
     if (txt) txt.textContent = conn ? t("vpn.connected") : connecting ? t("vpn.connecting") : t("vpn.disconnected");
-    if (conn && !wasConn) buzz(20); // the moment the tunnel comes up
     // The shim turns the disabled connecting button into an active
     // «Отмена» and marks it via dataset. A full re-render used to drop
     // those markers with the old node; the in-place patch must clear them
