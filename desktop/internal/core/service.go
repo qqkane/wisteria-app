@@ -81,26 +81,25 @@ type Status struct {
 }
 
 type Settings struct {
-	Language      string `json:"language"`   // "ru" | "en"
-	Theme         string `json:"theme"`      // ui accent theme id (sunset, neon-dark, ..., custom)
-	Background    string `json:"background"` // ambient background preset (off, lilac, matrix, gradient)
+	Language   string `json:"language"`   // "ru" | "en"
+	Theme      string `json:"theme"`      // ui accent theme id (sunset, neon-dark, ..., custom)
+	Background string `json:"background"` // ambient background preset (off, lilac, matrix, gradient)
 	// UIScale is the interface zoom in percent (100 = native). Clamped in
 	// defaults(); 0 from older configs means "native".
 	UIScale int `json:"ui_scale"`
 	// CustomTheme holds the user-built palette, used when Theme == "custom".
-	CustomTheme CustomTheme `json:"custom_theme"`
-	LocalPort     int    `json:"local_port"`
-	HttpPort      int    `json:"http_port"`
-	SysProxy      bool   `json:"sys_proxy"`      // set the Windows proxy on connect
-	BridgeEnabled bool   `json:"bridge_enabled"` // local HTTP bridge (needed for the system proxy)
-	AutoConnect   string `json:"auto_connect"`   // profile id to connect at startup, "" = off
-	WisteriaCore  string `json:"wisteria_core"`  // explicit paths (else bin/ next to the exe)
-	SingBoxCore   string `json:"singbox_core"`
+	CustomTheme   CustomTheme `json:"custom_theme"`
+	LocalPort     int         `json:"local_port"`
+	HttpPort      int         `json:"http_port"`
+	SysProxy      bool        `json:"sys_proxy"`      // set the Windows proxy on connect
+	BridgeEnabled bool        `json:"bridge_enabled"` // local HTTP bridge (needed for the system proxy)
+	AutoConnect   string      `json:"auto_connect"`   // profile id to connect at startup, "" = off
+	WisteriaCore  string      `json:"wisteria_core"`  // explicit paths (else bin/ next to the exe)
+	SingBoxCore   string      `json:"singbox_core"`
 
 	// General
 	StartMinimized bool `json:"start_minimized"` // hide the window at launch
 	ConfirmExit    bool `json:"confirm_exit"`    // ask before quitting while connected
-	CheckExtIP     bool `json:"check_ext_ip"`    // resolve the external IP after connect
 	AutoPingSec    int  `json:"auto_ping_sec"`   // background TCP ping interval, 0 = off
 
 	// Updates: the zero value keeps the check on (so old configs stay in it).
@@ -362,10 +361,10 @@ type Service struct {
 	notify   func() // called on every state change
 
 	sess       *session
-	wstStatus  string   // wisteria --status file path ("" when not a wisteria session)
-	wstEvents  []WEvent // classified connect-loop feed for the diagnostics page
+	wstStatus  string     // wisteria --status file path ("" when not a wisteria session)
+	wstEvents  []WEvent   // classified connect-loop feed for the diagnostics page
 	wstHealth  CoreHealth // latest health slice (log spam consumed, not logged)
-	sbModern   bool     // cached sing-box >= 1.11 probe
+	sbModern   bool       // cached sing-box >= 1.11 probe
 	sbProbed   bool
 	userStop   bool          // the user asked to disconnect: suppress auto-reconnect
 	reconnNext time.Duration // backoff delay for the next auto-reconnect attempt
@@ -1000,7 +999,7 @@ func (s *Service) startTun(sess *session, ctx context.Context, socksAddr string,
 		return nil, err
 	}
 	if singbox == "" {
-		return nil, errors.New("для TUN нужен sing-box" + exeSuffix + " (положите в bin/ или укажите путь в настройках)")
+		return nil, errors.New("для TUN нужно ядро sing-box — скачайте его в Настройках → Ядра")
 	}
 	if !IsElevated() {
 		if runtime.GOOS == "windows" {
@@ -1014,7 +1013,7 @@ func (s *Service) startTun(sess *session, ctx context.Context, socksAddr string,
 		}
 	}
 	if runtime.GOOS == "windows" && !hasWintunDLL(singbox, s.dirs) {
-		return nil, errors.New("wintun.dll не найден рядом с sing-box.exe — возьмите его из архива релиза sing-box или с wintun.net и положите рядом")
+		return nil, errors.New("wintun.dll не найден — скачайте его в Настройках → Ядра (кнопка wintun; там же скачается sing-box)")
 	}
 	// The main core's own upstream connection must bypass the tunnel,
 	// otherwise it loops back into the TUN.
@@ -1083,16 +1082,12 @@ func (s *Service) startTun(sess *session, ctx context.Context, socksAddr string,
 	return nil, errors.New("TUN-адаптер " + tunInterfaceName + " не появился за 15с (см. логи)")
 }
 
-// hasWintunDLL: sing-box on Windows needs wintun.dll next to its binary
-// (checked on Windows only; the linux build of sing-box carries the tun
-// device support natively).
+// hasWintunDLL: sing-box on Windows loads wintun.dll from disk at TUN
+// start (upstream releases stopped bundling it — the app installs it from
+// the pinned wintun.net archive, see wintun.go). The linux build of
+// sing-box carries the tun device support natively.
 func hasWintunDLL(singbox string, dirs Dirs) bool {
-	for _, d := range []string{filepath.Dir(singbox), dirs.Runtime, dirs.Data} {
-		if st, err := os.Stat(filepath.Join(d, "wintun.dll")); err == nil && !st.IsDir() {
-			return true
-		}
-	}
-	return false
+	return WintunPath(singbox, dirs) != ""
 }
 
 // runCoreOutput runs a core binary for its textual output (version probes).

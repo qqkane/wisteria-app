@@ -274,8 +274,6 @@ textarea { resize: vertical; min-height: 80px; }
 .danger-btn { padding: 12px 18px; border-radius: 12px; border: none; background: #e5484d; color: #fff; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
 .danger-btn:hover { filter: brightness(1.08); }
 /* TUN note on the VPN screen */
-.tun-note { text-align: center; font-size: 12px; color: var(--muted); margin-top: 14px; user-select: none; }
-
 /* ---------- diagnostics ---------- */
 .diag-banner { display: flex; gap: 14px; align-items: flex-start; padding: 16px 18px; border-radius: 14px; margin: 0 0 16px; border: 1px solid; font-size: 14px; }
 .diag-banner b { font-size: 15px; }
@@ -357,6 +355,7 @@ textarea { resize: vertical; min-height: 80px; }
 @media (prefers-reduced-motion: reduce) {
   .connect-btn.connecting .btn-icons .power-icon, .connect-btn .ring-anim,
   .vpn-status.mid .label, .orb, .sf-dot.mid { animation: none; }
+  .seg-thumb { transition: none; }
 }
 
 /* ---------- custom theme + look-tab controls + VPN-tab TUN ---------- */
@@ -394,3 +393,20 @@ textarea:focus-visible, [tabindex]:focus-visible {
   .connect-btn:hover:not(:disabled) { transform: scale(1.02); }
   .add-btn:hover { box-shadow: 0 6px 20px rgba(var(--accent-rgb), .35); }
 }
+
+/* ---------- VPN-tab mode control: system proxy / TUN (replaces the
+   IP and proxy stat cards and the old TUN switch row). Native radios,
+   keyboard arrows work out of the box; the thumb is a single transform. */
+.vh { position: absolute; width: 1px; height: 1px; margin: -1px; clip-path: inset(50%); overflow: hidden; white-space: nowrap; }
+.mode-card { flex: 1.4; }
+.seg { border: none; }
+.seg-track { position: relative; display: flex; background: rgba(255,255,255,.05); border: 1px solid var(--border); border-radius: 12px; padding: 3px; }
+.seg-thumb { position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc(50% - 3px); border-radius: 9px; background: rgba(var(--accent-rgb), .18); border: 1px solid rgba(var(--accent-rgb), .45); box-shadow: 0 4px 14px rgba(var(--accent-rgb), .25); transition: transform .25s ease, background .25s; }
+.seg-track[data-active="tun"] .seg-thumb { transform: translateX(100%); }
+.seg-item { flex: 1; position: relative; z-index: 1; cursor: pointer; }
+.seg-item input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.seg-opt { display: flex; align-items: center; justify-content: center; gap: 6px; height: 36px; font-size: 11px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); transition: color .25s; border-radius: 9px; }
+.seg-opt svg { width: 12px; height: 12px; }
+.seg-item input:checked + .seg-opt { color: var(--accent); }
+.seg-item input:focus-visible + .seg-opt { outline: 2px solid var(--accent); outline-offset: 2px; }
+.theme-arctic .seg-track { background: rgba(42,100,180,.08); }

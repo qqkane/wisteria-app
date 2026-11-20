@@ -56,7 +56,7 @@ const I18N = {
     "vpn.reconnecting": "RECONNECTING…", "vpn.attempt": "попытка {n}",
     "vpn.connect": "Connect", "vpn.disconnect": "Disconnect", "vpn.connected": "Connected",
     "vpn.noProfile": "Профиль не выбран", "vpn.clickSelect": "Нажмите, чтобы выбрать",
-    "stat.uptime": "Аптайм", "stat.proxy": "Системный прокси", "stat.core": "Ядро",
+    "stat.uptime": "Аптайм", "stat.mode": "Режим", "stat.core": "Ядро", "mode.proxy": "Системный прокси",
     "profiles.title": "Профили", "profiles.empty": "Нет профилей — добавьте ссылку или TOML-конфиг",
     "settings.title": "Настройки", "sec.appearance": "Оформление", "sec.connection": "Соединение",
     "sec.general": "Общие", "sec.routing": "Маршрутизация и DNS", "sec.cores": "Ядра", "sec.system": "Система",
@@ -67,7 +67,7 @@ const I18N = {
     "set.detect": "Найти ядра", "set.save": "Сохранить настройки",
     "set.startMin": "Запускать свёрнутым", "set.startMinNote": "окно свернётся в панель задач",
     "set.confirmExit": "Спрашивать подтверждение при выходе во время соединения",
-    "set.checkIp": "Показывать внешний IP", "set.checkIpNote": "запрос через туннель после подключения",
+    "set.dlWintun": "Скачать wintun.dll",
     "set.autoping": "Автопинг серверов, сек", "set.autopingNote": "0 — выключено",
     "set.listenAll": "Разрешить доступ из локальной сети", "set.listenAllNote": "прокси слушает 0.0.0.0 вместо 127.0.0.1",
     "set.bypassLan": "Обходить локальные адреса",
@@ -83,7 +83,6 @@ const I18N = {
     "vpn.disconnected": "Disconnected",
     "vpn.preset": "Пресет обфускации",
     "set.wpreset": "Пресет wisteria по умолчанию", "set.wpresetNote": "для профилей без своего пресета; применится при следующем подключении",
-    "vpn.tunToggle": "Режим TUN", "vpn.tunHint": "весь трафик системы через туннель; применится при следующем подключении",
     "set.scale": "Масштаб интерфейса", "set.scaleNote": "увеличивает шрифты и элементы на больших экранах",
     "set.customTheme": "Своя тема", "set.ctAccent": "Акцент", "set.ctBg": "Фон", "set.ctCard": "Карточки", "set.ctFg": "Текст", "set.ctMuted": "Второстепенный текст",
     "set.tun": "Режим TUN (весь трафик системы)",
@@ -142,7 +141,7 @@ const I18N = {
     "profiles.manual": "Мои профили",
     "confirm.title": "Удаление", "confirm.cancel": "Отмена", "confirm.deleteBtn": "Удалить",
     "toast.busy": "Идёт подключение — секунду",
-    "toast.clipSubs": "подписок: {n}", "toast.clipProfiles": "профилей: {n}", "toast.clipNone": "Ничего нового в буфере", "vpn.tunOn": "TUN активен — весь трафик системы идёт через туннель",
+    "toast.clipSubs": "подписок: {n}", "toast.clipProfiles": "профилей: {n}", "toast.clipNone": "Ничего нового в буфере",
     "toast.stuck": "Подключение зависло — попробуйте ещё раз",
   },
   en: {
@@ -152,7 +151,7 @@ const I18N = {
     "vpn.reconnecting": "RECONNECTING…", "vpn.attempt": "attempt {n}",
     "vpn.connect": "Connect", "vpn.disconnect": "Disconnect", "vpn.connected": "Connected",
     "vpn.noProfile": "No profile selected", "vpn.clickSelect": "Click to choose",
-    "stat.uptime": "Uptime", "stat.proxy": "System proxy", "stat.core": "Core",
+    "stat.uptime": "Uptime", "stat.mode": "Mode", "stat.core": "Core", "mode.proxy": "System proxy",
     "profiles.title": "Profiles", "profiles.empty": "No profiles yet — add a link or a TOML config",
     "settings.title": "Settings", "sec.appearance": "Appearance", "sec.connection": "Connection",
     "sec.general": "General", "sec.routing": "Routing & DNS", "sec.cores": "Cores", "sec.system": "System",
@@ -163,7 +162,7 @@ const I18N = {
     "set.detect": "Detect cores", "set.save": "Save settings",
     "set.startMin": "Start minimized", "set.startMinNote": "the window opens minimized",
     "set.confirmExit": "Ask for confirmation on exit while connected",
-    "set.checkIp": "Show external IP", "set.checkIpNote": "queried through the tunnel after connecting",
+    "set.dlWintun": "Download wintun.dll",
     "set.autoping": "Auto-ping servers, sec", "set.autopingNote": "0 — disabled",
     "set.listenAll": "Allow LAN access", "set.listenAllNote": "proxy listens on 0.0.0.0 instead of 127.0.0.1",
     "set.bypassLan": "Bypass local addresses",
@@ -179,7 +178,6 @@ const I18N = {
     "vpn.disconnected": "Disconnected",
     "vpn.preset": "Obfuscation preset",
     "set.wpreset": "Default wisteria preset", "set.wpresetNote": "for profiles without their own preset; applies on next connect",
-    "vpn.tunToggle": "TUN mode", "vpn.tunHint": "all system traffic via the tunnel; applies on next connect",
     "set.scale": "Interface scale", "set.scaleNote": "enlarges fonts and controls on big screens",
     "set.customTheme": "Custom theme", "set.ctAccent": "Accent", "set.ctBg": "Background", "set.ctCard": "Cards", "set.ctFg": "Text", "set.ctMuted": "Muted text",
     "set.tun": "TUN mode (all system traffic)",
@@ -238,7 +236,7 @@ const I18N = {
     "profiles.manual": "My profiles",
     "confirm.title": "Delete", "confirm.cancel": "Cancel", "confirm.deleteBtn": "Delete",
     "toast.busy": "Connection in progress — one moment",
-    "toast.clipSubs": "subscriptions: {n}", "toast.clipProfiles": "profiles: {n}", "toast.clipNone": "Nothing new in the clipboard", "vpn.tunOn": "TUN active — all system traffic goes through the tunnel",
+    "toast.clipSubs": "subscriptions: {n}", "toast.clipProfiles": "profiles: {n}", "toast.clipNone": "Nothing new in the clipboard",
     "toast.stuck": "Connection is stuck — please try again",
   },
 };
@@ -262,7 +260,7 @@ const EXTRA = {
 // ---------- state ----------
 const S = {
   tab: "vpn", setTab: "look", theme: "sunset", customTheme: null, uiScale: 100, profiles: [], selected: "", lastLogSeq: 0,
-  state: { state: "disconnected" }, uptimeTimer: null, extIP: "",
+  state: { state: "disconnected" }, uptimeTimer: null,
   subs: [], subBusy: {}, busy: false, // busy = a Connect is in flight
   version: "", upd: null, updBusy: false, updReady: false, coreUpd: {},
   wdiag: null, // the Diagnostics page data (wisteria profiles only)
@@ -337,7 +335,6 @@ function renderContent() {
   else if (S.tab === "settings") { w.innerHTML = renderSettings(); fillSettingsForm(); }
   wireContent();
   renderSidebarFooter();
-  if (S.tab === "vpn") ensureExtIP();
 }
 
 function renderSidebarFooter() {
@@ -365,6 +362,7 @@ function renderVpn() {
   const label = conn ? t("vpn.protected") : reconn ? t("vpn.reconnecting") + (st.attempt ? " " + t("vpn.attempt").replace("{n}", st.attempt) : "") : connecting ? t("vpn.connecting") : t("vpn.unprotected");
   const btnText = conn ? t("vpn.connected") : connecting ? t("vpn.connecting") : reconn ? t("vpn.reconnecting") : t("vpn.disconnected");
   const lat = p && p.latency_ms ? (p.latency_ms < 0 ? "n/a" : p.latency_ms + " ms") : "";
+  const tun = !!(S.cfg && S.cfg.tun_enabled);
   return `
     <div class="vpn-screen">
       <div class="vpn-status ${conn ? "on" : connecting || reconn ? "mid" : ""}"><div class="label">${esc(label)}</div></div>
@@ -387,8 +385,17 @@ function renderVpn() {
       </div>
       <div class="stats-row">
         <div class="stat-card"><div class="stat-label">${I.clock} ${esc(t("stat.uptime"))}</div><div class="stat-value" id="stat-uptime">${uptimeHTML(st.started_at) || "—"}</div></div>
-        <div class="stat-card"><div class="stat-label">${I.globe} IP</div><div class="stat-value" style="font-size:13px; line-height:2.4;" id="stat-ip">${esc(S.extIP || "—")}</div></div>
-        <div class="stat-card"><div class="stat-label">${I.globe} ${esc(t("stat.proxy"))}</div><div class="stat-value">${st.sys_proxy ? "ON" : "OFF"}</div></div>
+        <div class="stat-card mode-card">
+          <div class="stat-label">${I.activity} ${esc(t("stat.mode"))}</div>
+          <fieldset class="seg">
+            <legend class="vh">${esc(t("stat.mode"))}</legend>
+            <div class="seg-track" data-active="${tun ? "tun" : "proxy"}">
+              <span class="seg-thumb" aria-hidden="true"></span>
+              <label class="seg-item"><input type="radio" name="mode" value="proxy" ${tun ? "" : "checked"}/><span class="seg-opt">${I.globe}${esc(t("mode.proxy"))}</span></label>
+              <label class="seg-item"><input type="radio" name="mode" value="tun" ${tun ? "checked" : ""}/><span class="seg-opt">${I.layers}TUN</span></label>
+            </div>
+          </fieldset>
+        </div>
       </div>
       ${p && p.type === "wisteria" ? `
       <div class="vpn-tun-row">
@@ -397,11 +404,6 @@ function renderVpn() {
           ${["fast", "balance", "stealth"].map((k) => `<option value="${k}" ${((p.fields && p.fields.preset) || (S.cfg && S.cfg.wisteria_preset) || "stealth") === k ? "selected" : ""}>${k}</option>`).join("")}
         </select>
       </div>` : ""}
-      <div class="vpn-tun-row">
-        <div class="vpn-tun-label">${esc(t("vpn.tunToggle"))}<span class="set-note">${esc(t("vpn.tunHint"))}</span></div>
-        <label class="switch"><input id="vpn-tun" type="checkbox" ${S.cfg && S.cfg.tun_enabled ? "checked" : ""}/><span class="slider"></span></label>
-      </div>
-      ${st.tun ? `<div class="tun-note">${esc(t("vpn.tunOn"))}</div>` : ""}
       ${st.error ? `<div class="error-box">${esc(st.error)}</div>` : ""}
     </div>`;
 }
@@ -660,8 +662,6 @@ function renderSettings() {
         <label class="switch"><input id="s-startmin" type="checkbox"/><span class="slider"></span></label>
         <label>${esc(t("set.confirmExit"))}</label>
         <label class="switch"><input id="s-confirmexit" type="checkbox"/><span class="slider"></span></label>
-        <label>${esc(t("set.checkIp"))}<span class="set-note">${esc(t("set.checkIpNote"))}</span></label>
-        <label class="switch"><input id="s-checkip" type="checkbox"/><span class="slider"></span></label>
         <label>${esc(t("set.autoping"))}<span class="set-note">${esc(t("set.autopingNote"))}</span></label>
         <input id="s-autoping" type="number" min="0" max="3600"/>
         <label>${esc(t("set.autoconnect"))}</label>
@@ -751,6 +751,7 @@ function renderSettings() {
       <div style="display:flex; gap:10px; margin-top:14px; align-items:center;">
         <button class="ghost-btn" id="btn-detect">${esc(t("set.detect"))}</button>
         <button class="ghost-btn" id="btn-upd-singbox" ${S.coreUpd["sing-box"] ? "disabled" : ""}>${esc(t("set.updCore"))} sing-box</button>
+        <button class="ghost-btn hidden" id="btn-upd-wintun" ${S.coreUpd["wintun"] ? "disabled" : ""}>${esc(t("set.dlWintun"))}</button>
         <button class="ghost-btn" id="btn-upd-xray" ${S.coreUpd["xray"] ? "disabled" : ""}>${esc(t("set.updCore"))} xray</button>
         <button class="ghost-btn" id="btn-upd-wisteria" ${S.coreUpd["wisteria"] ? "disabled" : ""}>${esc(t("set.updCore"))} wisteria</button>
       </div>
@@ -838,11 +839,37 @@ async function updateCore(name) {
   } catch (e) { /* detection is cosmetic */ }
 }
 
+// One-button wintun.dll install (the Windows-only row next to the core
+// buttons): the pinned official archive, sha256-verified, lands where
+// sing-box reads it. The button carries the progress like updateCore.
+async function installWintun() {
+  if (S.coreUpd["wintun"]) return;
+  S.coreUpd["wintun"] = true;
+  const btn = $("btn-upd-wintun");
+  const oldLabel = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = t("toast.coreDl"); }
+  try {
+    const dir = await api().WintunInstall();
+    showToast("✓ wintun.dll → " + dir);
+  } catch (e) { showToast("✕ " + ((e && e.message) || e)); }
+  S.coreUpd["wintun"] = false;
+  if (btn) { btn.disabled = false; btn.textContent = oldLabel; }
+  try {
+    const info = await api().DetectCores();
+    const note = $("core-note");
+    if (note && info) note.innerHTML = coreNoteHTML(info);
+  } catch (e) { /* detection is cosmetic */ }
+}
+
 function coreNoteHTML(info) {
   const fmt = (f, p) => (f ? "✓ " + p : "✕ not found");
-  return `wisteria-client: ${esc(fmt(info.wisteria_found, info.wisteria_path))}<br>` +
+  let out = `wisteria-client: ${esc(fmt(info.wisteria_found, info.wisteria_path))}<br>` +
     `sing-box: ${esc(fmt(info.singbox_found, info.singbox_path))}<br>` +
     `xray: ${esc(fmt(info.xray_found, info.xray_path))}`;
+  if (info.os === "windows") {
+    out += `<br>wintun.dll: ${esc(fmt(info.wintun_found, info.wintun_path))}`;
+  }
+  return out;
 }
 
 // When a core is not installed at all, the upstream button is a first
@@ -853,6 +880,10 @@ function relabelCoreButtons(info) {
   if (b1) b1.textContent = (info.singbox_found ? t("set.updCore") : t("set.dlCore")) + " sing-box";
   if (b2) b2.textContent = (info.xray_found ? t("set.updCore") : t("set.dlCore")) + " xray";
   if (b3) b3.textContent = (info.wisteria_found ? t("set.updCore") : t("set.dlCore")) + " wisteria";
+  // wintun.dll is a Windows-only install (sing-box's TUN helper); the
+  // row stays hidden elsewhere.
+  const bw = $("btn-upd-wintun");
+  if (bw) bw.classList.toggle("hidden", info.os !== "windows");
 }
 
 // ---------- per-render event wiring ----------
@@ -997,9 +1028,6 @@ function wireContent() {
   on("btn-checkip", "click", async () => {
     try {
       const ip = await api().GetExternalIP();
-      S.extIP = ip;
-      const el = $("stat-ip");
-      if (el) el.textContent = ip;
       showToast("IP: " + ip);
     } catch (e) {
       const msg = (e && e.message) || String(e);
@@ -1055,6 +1083,7 @@ function wireContent() {
     catch (e) { showToast((e && e.message) || e); }
   });
   on("btn-upd-singbox", "click", () => updateCore("sing-box"));
+  on("btn-upd-wintun", "click", installWintun);
   on("btn-upd-xray", "click", () => updateCore("xray"));
   on("btn-upd-wisteria", "click", () => updateCore("wisteria"));
   // Cores tab: label the buttons by what is actually installed.
@@ -1106,7 +1135,6 @@ async function fillSettingsForm(s) {
   setc("s-autostart", await api().GetAutostart());
   setc("s-startmin", s.start_minimized);
   setc("s-confirmexit", s.confirm_exit);
-  setc("s-checkip", s.check_ext_ip);
   setv("s-autoping", s.auto_ping_sec || 0);
   setc("s-listenall", s.listen_all);
   setc("s-bypasslan", s.bypass_lan);
@@ -1157,7 +1185,6 @@ async function saveSettings(silent) {
     singbox_core: g("s-singbox") ? $("s-singbox").value.trim() : cur.singbox_core,
     start_minimized: g("s-startmin") ? $("s-startmin").checked : cur.start_minimized,
     confirm_exit: g("s-confirmexit") ? $("s-confirmexit").checked : cur.confirm_exit,
-    check_ext_ip: g("s-checkip") ? $("s-checkip").checked : cur.check_ext_ip,
     no_update_check: g("s-updcheck") ? !$("s-updcheck").checked : cur.no_update_check,
     github_token: g("s-ghtoken") ? $("s-ghtoken").value.trim() : cur.github_token,
     auto_ping_sec: g("s-autoping") ? Math.max(0, num("s-autoping", 0)) : cur.auto_ping_sec,
@@ -1342,12 +1369,19 @@ document.addEventListener("change", async (ev) => {
     renderContent();
     return;
   }
-  if (ev.target.id !== "vpn-tun") return;
+  if (ev.target.name !== "mode") return;
+  // The segmented control replaces the old TUN checkbox: proxy = system
+  // proxy, tun = the sing-box helper over the core's SOCKS. Saved at
+  // once; the backend applies it on the next connect (no forced
+  // reconnect blip, same as the checkbox had). The thumb moves via
+  // data-active without a re-render — focus stays on the control.
   const cur = await api().GetSettings();
-  cur.tun_enabled = ev.target.checked;
+  cur.tun_enabled = ev.target.value === "tun";
   await api().SaveSettings(cur);
   S.cfg = cur;
-  renderContent();
+  const track = $("seg-track");
+  if (track) track.dataset.active = ev.target.value;
+  return;
 });
 
 // ---------- profiles ----------
@@ -1422,26 +1456,6 @@ setInterval(() => {
   const html = uptimeHTML(S.state.started_at);
   if (html) el.innerHTML = html;
 }, 1000);
-
-// Self-heal the external IP: the push event can be lost when the backend
-// finishes the check before the frontend has registered its listeners
-// (auto-connect at startup). If we are connected and the card is empty,
-// pull it once through the tunnel.
-let extIPBusy = false;
-async function ensureExtIP() {
-  if (extIPBusy || S.extIP || S.state.state !== "connected") return;
-  if (S.cfg && S.cfg.check_ext_ip === false) return; // respect the setting, like the push event does
-  extIPBusy = true;
-  try {
-    const ip = await api().GetExternalIP();
-    if (ip) {
-      S.extIP = ip;
-      const el = $("stat-ip");
-      if (el) el.textContent = ip;
-    }
-  } catch (e) { /* the card stays "—" until the next push */ }
-  extIPBusy = false;
-}
 
 function renderState(st) {
   const prev = S.state;
@@ -1633,17 +1647,6 @@ whenReady(async () => {
   document.addEventListener("click", (ev) => {
     if (ev.target && ev.target.closest && ev.target.closest("#btn-diag-logs")) switchTab("logs");
   });
-  window.runtime.EventsOn("extip", (d) => {
-    S.extIP = (d && d.ip) || "";
-    const el = $("stat-ip");
-    if (el) el.textContent = S.extIP || ((d && d.error) ? "✕" : "—");
-    // The probe fires right after connect, when the core may still be
-    // reconnecting: explain it instead of showing a scary ✕.
-    if (!S.extIP && d && d.error && String(d.error).indexOf("туннель переподключается") >= 0) {
-      showToast(t("toast.ipRetry"));
-    }
-  });
-  // The backend auto-pinger emits this; don't wipe an open settings form.
   window.runtime.EventsOn("profiles", async () => {
     S.profiles = (await api().ListProfiles()) || [];
     if (S.tab === "profiles" || S.tab === "vpn") renderContent();

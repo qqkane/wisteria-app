@@ -109,10 +109,6 @@ func (a *App) startup(ctx context.Context) {
 	a.svc = core.NewService(d, a.ring, func() {
 		st := a.svc.Status()
 		runtime.EventsEmit(ctx, "state", st)
-		// External IP check fires once per successful connect.
-		if st.State == core.StateConnected && a.svc.Settings().CheckExtIP {
-			go a.fetchAndEmitIP()
-		}
 	})
 	a.svc.LoadSettings()
 	core.SetGitHubToken(a.svc.Settings().GitHubToken)
@@ -124,7 +120,6 @@ func (a *App) startup(ctx context.Context) {
 		_ = a.svc.SaveSettings(core.Settings{
 			BridgeEnabled: true,
 			SysProxy:      true,
-			CheckExtIP:    true,
 		})
 		a.svc.LoadSettings()
 	}
@@ -154,20 +149,6 @@ func (a *App) startup(ctx context.Context) {
 			go func() { _ = a.svc.Start(p) }()
 		}
 	}
-}
-
-// fetchAndEmitIP resolves the exit address through the tunnel and pushes it
-// to the UI (both success and failure land in the same event).
-func (a *App) fetchAndEmitIP() {
-	set := a.svc.Settings()
-	ip, err := core.FetchExternalIP("127.0.0.1", set.LocalPort, 8*time.Second)
-	if err != nil {
-		a.logf("внешний IP: %v", err)
-		runtime.EventsEmit(a.ctx, "extip", map[string]string{"error": err.Error()})
-		return
-	}
-	a.logf("внешний IP: %s", ip)
-	runtime.EventsEmit(a.ctx, "extip", map[string]string{"ip": ip})
 }
 
 // GetExternalIP lets the UI request a fresh check on demand.
@@ -695,18 +676,22 @@ func (a *App) SaveSettings(s core.Settings) core.Settings {
 }
 
 type CoreInfo struct {
+	OS            string `json:"os"` // "windows" | "linux" (wintun row is Windows-only)
 	WisteriaFound bool   `json:"wisteria_found"`
 	WisteriaPath  string `json:"wisteria_path"`
 	SingBoxFound  bool   `json:"singbox_found"`
 	SingBoxPath   string `json:"singbox_path"`
 	XrayFound     bool   `json:"xray_found"`
 	XrayPath      string `json:"xray_path"`
+	// WintunFound/Path: the DLL sing-box's TUN helper needs on Windows.
+	WintunFound bool   `json:"wintun_found"`
+	WintunPath  string `json:"wintun_path"`
 }
 
 // DetectCores reports which core binaries are resolvable right now.
 func (a *App) DetectCores() CoreInfo {
 	set := a.svc.Settings()
-	info := CoreInfo{}
+	info := CoreInfo{OS: core.RuntimeOS()}
 	if p := firstDefined(set.WisteriaCore, core.FindCore("wisteria-client")); p != "" {
 		info.WisteriaFound, info.WisteriaPath = true, p
 	}
@@ -715,6 +700,13 @@ func (a *App) DetectCores() CoreInfo {
 	}
 	if p := firstDefined(set.XrayCore, core.FindCore("xray")); p != "" {
 		info.XrayFound, info.XrayPath = true, p
+	}
+	// The same resolved sing-box and lookup order the TUN gate uses, so
+	// the note mirrors what a connect would actually find.
+	if info.OS == "windows" {
+		if p := core.WintunPath(info.SingBoxPath, a.dirs); p != "" {
+			info.WintunFound, info.WintunPath = true, p
+		}
 	}
 	return info
 }
@@ -805,10 +797,40 @@ func (a *App) UpdateCore(name string) (string, error) {
 		return "", errors.New("подключение активно — сначала отключитесь")
 	}
 	ver, err := core.CoreUpdateApply(name, a.coreExplicitPath(name))
-	if err == nil {
-		a.logf("ядро %s обновлено до v%s", name, ver)
+	if err != nil {
+		return ver, err
 	}
-	return ver, err
+	// One "download sing-box" click must leave TUN usable: upstream
+	// stopped bundling wintun.dll, so when the DLL gate would fail after
+	// the fresh install, the pinned official copy goes in right away.
+	// A failure here is logged, not returned — sing-box itself installed
+	// fine, and the settings screen offers a retry button.
+	if name == "sing-box" && core.RuntimeOS() == "windows" {
+		sb := firstDefined(a.svc.Settings().SingBoxCore, core.FindCore("sing-box"))
+		if !core.WintunInstalled(sb, a.dirs) {
+			if _, werr := core.WintunApply(sb, a.dirs); werr != nil {
+				a.logf("wintun.dll: %v — скачайте вручную в Настройках → Ядра", werr)
+			} else {
+				a.logf("wintun.dll установлен для TUN")
+			}
+		}
+	}
+	a.logf("ядро %s обновлено до v%s", name, ver)
+	return ver, nil
+}
+
+// WintunInstall downloads the pinned official wintun.dll into the first
+// directory sing-box reads it from (Windows only — the settings screen
+// hides the button elsewhere). Refuses while a session runs.
+func (a *App) WintunInstall() (string, error) {
+	if a.svc.RunningProfile() != "" {
+		return "", errors.New("подключение активно — сначала отключитесь")
+	}
+	dir, err := core.WintunApply(a.svc.Settings().SingBoxCore, a.dirs)
+	if err == nil {
+		a.logf("wintun.dll установлен в %s", dir)
+	}
+	return dir, err
 }
 
 // ---- helpers ----
