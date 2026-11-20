@@ -72,6 +72,18 @@ const I18N = {
     "set.bypassRuNote": "сайты из РФ увидят реальный IP; нужен Android 13+",
     "set.wistDirect": "Свои подсети напрямую",
     "set.wistDirectNote": "CIDR, по одному в строке; домены на Android не поддерживаются",
+    "sec.split": "Split-tunnel по приложениям",
+    "set.splitMode": "Режим",
+    "set.splitOff": "Весь трафик в туннель",
+    "set.splitBypass": "Выбранные — мимо туннеля",
+    "set.splitOnly": "Только выбранные — в туннель",
+    "set.splitNote": "выбранные приложения видят реальный IP (банки, РФ-сервисы); смена применяется переподключением",
+    "set.splitRu": "Российские приложения",
+    "set.splitSearch": "Поиск приложения…",
+    "set.splitCount": "Выбрано: {n}",
+    "set.splitEmpty": "Ничего не найдено",
+    "toast.splitRu": "Добавлено RU-приложений: {n}",
+    "toast.updPerm": "Разрешите установку из неизвестных источников — обновление продолжится само",
     "set.remoteDns": "Удалённый DNS", "set.remoteDnsNote": "например tcp://8.8.8.8",
     "set.logLevel": "Уровень логирования",
     "set.memLimit": "Лимит памяти ядра, МБ", "set.memLimitNote": "0 — без лимита",
@@ -166,6 +178,18 @@ const I18N = {
     "set.bypassRuNote": "Russian sites see your real IP; needs Android 13+",
     "set.wistDirect": "Custom direct routes",
     "set.wistDirectNote": "CIDRs, one per line; domains are not supported on Android",
+    "sec.split": "Per-app split tunnel",
+    "set.splitMode": "Mode",
+    "set.splitOff": "All traffic through the tunnel",
+    "set.splitBypass": "Selected apps bypass the tunnel",
+    "set.splitOnly": "Only selected apps use the tunnel",
+    "set.splitNote": "selected apps see the real IP (banks, RU services); changes apply via reconnect",
+    "set.splitRu": "Russian apps",
+    "set.splitSearch": "Search apps…",
+    "set.splitCount": "Selected: {n}",
+    "set.splitEmpty": "Nothing found",
+    "toast.splitRu": "RU apps added: {n}",
+    "toast.updPerm": "Allow installs from unknown sources — the update will continue automatically",
     "set.remoteDns": "Remote DNS", "set.remoteDnsNote": "e.g. tcp://8.8.8.8",
     "set.logLevel": "Log level",
     "set.memLimit": "Core memory limit, MB", "set.memLimitNote": "0 — unlimited",
@@ -257,6 +281,7 @@ const S = {
   state: { state: "disconnected" }, uptimeTimer: null, extIP: "",
   subs: [], subBusy: {}, busy: false, // busy = a Connect is in flight
   version: "", upd: null, updBusy: false, updReady: false, coreUpd: {},
+  apps: null, splitMode: "off", splitApps: [], splitFilter: "",
   wdiag: null, // the Diagnostics page data (wisteria profiles only)
 };
 const $ = (id) => document.getElementById(id);
@@ -721,6 +746,23 @@ function renderSettings() {
         <label>${esc(t("set.wistDirect"))}<span class="set-note">${esc(t("set.wistDirectNote"))}</span></label>
         <textarea id="s-wistcidrs" rows="3" placeholder="203.0.113.0/24"></textarea>
       </div>
+    </div>
+    <div class="settings-section">
+      <h3>${esc(t("sec.split"))}</h3>
+      <div class="set-grid">
+        <label>${esc(t("set.splitMode"))}<span class="set-note">${esc(t("set.splitNote"))}</span></label>
+        <select id="s-splitmode">
+          <option value="off">${esc(t("set.splitOff"))}</option>
+          <option value="bypass">${esc(t("set.splitBypass"))}</option>
+          <option value="only">${esc(t("set.splitOnly"))}</option>
+        </select>
+      </div>
+      <div style="display:flex; gap:10px; margin:12px 0; align-items:center; flex-wrap:wrap;">
+        <button class="ghost-btn" id="btn-split-ru">${esc(t("set.splitRu"))}</button>
+        <span class="core-note" id="split-count" style="margin:0;"></span>
+      </div>
+      <input id="split-search" type="search" placeholder="${esc(t("set.splitSearch"))}" style="width:100%; margin-bottom:10px;"/>
+      <div id="split-list" class="split-list"></div>
     </div>`;
   } else if (S.setTab === "cores") {
     body = `
@@ -1053,6 +1095,25 @@ function wireContent() {
     renderContent();
   }));
   on("btn-save-settings", "click", saveSettings);
+  on("s-splitmode", "change", (ev) => { S.splitMode = ev.target.value; });
+  on("split-search", "input", (ev) => {
+    S.splitFilter = ev.target.value.trim().toLowerCase();
+    renderSplitList();
+  });
+  on("btn-split-ru", "click", async () => {
+    try {
+      const ru = (await api().ListRuApps()) || [];
+      const have = new Set(S.splitApps);
+      let n = 0;
+      ru.forEach((a) => { if (!have.has(a.pkg)) { S.splitApps.push(a.pkg); n++; } });
+      if (S.splitMode === "off") {
+        S.splitMode = "bypass";
+        const sm = $("s-splitmode"); if (sm) sm.value = "bypass";
+      }
+      renderSplitList();
+      showToast(t("toast.splitRu").replace("{n}", String(n)));
+    } catch (e) { showToast((e && e.message) || e); }
+  });
 }
 
 function applyI18nEl(el) {
@@ -1067,6 +1128,8 @@ async function loadSettings() {
   const s = await api().GetSettings();
   S.cfg = s;
   S.theme = s.theme || "lilac";
+  S.splitMode = s.split_mode || "off";
+  S.splitApps = Array.isArray(s.split_apps) ? s.split_apps.slice() : [];
   lang = s.language || "ru";
   applyTheme();
   // Values are filled when the settings view renders.
@@ -1096,6 +1159,8 @@ async function fillSettingsForm(s) {
   setc("s-bypasslan", s.bypass_lan);
   setc("s-bypassru", !s.no_bypass_ru); // checkbox states the feature, the flag states the opt-out
   setv("s-wistcidrs", s.wisteria_direct_cidrs || "");
+  setv("s-splitmode", S.splitMode);
+  renderSplitList();
   setv("s-remotedns", s.remote_dns || "");
   setv("s-loglevel", s.log_level || "warn");
   setv("s-memlimit", s.mem_limit_mb || 0);
@@ -1140,6 +1205,8 @@ async function saveSettings() {
     bypass_lan: g("s-bypasslan") ? $("s-bypasslan").checked : cur.bypass_lan,
     no_bypass_ru: g("s-bypassru") ? !$("s-bypassru").checked : cur.no_bypass_ru,
     wisteria_direct_cidrs: g("s-wistcidrs") ? $("s-wistcidrs").value.trim() : cur.wisteria_direct_cidrs,
+    split_mode: S.splitMode,
+    split_apps: S.splitApps,
     remote_dns: g("s-remotedns") ? $("s-remotedns").value.trim() : cur.remote_dns,
     log_level: g("s-loglevel") ? $("s-loglevel").value : cur.log_level,
     mem_limit_mb: g("s-memlimit") ? Math.max(0, num("s-memlimit", 0)) : cur.mem_limit_mb,
@@ -1159,6 +1226,40 @@ async function saveSettings() {
   const as = g("s-autostart");
   if (as && as.checked !== (await api().GetAutostart())) await api().SetAutostart(as.checked);
   showToast(t("toast.saved"));
+}
+
+// ---------- split tunnel picker ----------
+async function loadApps() {
+  S.apps = (await api().ListApps()) || [];
+}
+
+function renderSplitList() {
+  const box = $("split-list");
+  if (!box) return;
+  const cnt = $("split-count");
+  if (cnt) cnt.textContent = t("set.splitCount").replace("{n}", String(S.splitApps.length));
+  if (!S.apps) {
+    box.innerHTML = `<div class="core-note">…</div>`;
+    loadApps().then(renderSplitList).catch(() => {});
+    return;
+  }
+  const have = new Set(S.splitApps);
+  const f = S.splitFilter;
+  const rows = S.apps.filter((a) => !f || a.label.toLowerCase().includes(f) || a.pkg.includes(f));
+  // Selected first so the current bypass set is visible without scrolling.
+  const list = rows.filter((a) => have.has(a.pkg)).concat(rows.filter((a) => !have.has(a.pkg))).slice(0, 300);
+  box.innerHTML = list.map((a) => `
+    <label class="split-row">
+      <input type="checkbox" data-pkg="${esc(a.pkg)}" ${have.has(a.pkg) ? "checked" : ""}/>
+      <span class="split-name">${esc(a.label)}<span class="split-pkg">${esc(a.pkg)}</span></span>
+    </label>`).join("") || `<div class="core-note">${esc(t("set.splitEmpty"))}</div>`;
+  box.querySelectorAll("input[data-pkg]").forEach((cb) => cb.addEventListener("change", () => {
+    const pkg = cb.dataset.pkg;
+    if (cb.checked) { if (!S.splitApps.includes(pkg)) S.splitApps.push(pkg); }
+    else S.splitApps = S.splitApps.filter((p) => p !== pkg);
+    const c = $("split-count");
+    if (c) c.textContent = t("set.splitCount").replace("{n}", String(S.splitApps.length));
+  }));
 }
 
 function applyTheme() {
@@ -1469,7 +1570,16 @@ whenReady(async () => {
     if (!u) return;
     if (u.stage === "downloading") {
       S.updBusy = true;
-      showToast(t("toast.updDl") + " v" + (u.latest || ""));
+      // Patch the button label in place: a full renderContent() per percent
+      // would wipe unsaved edits in the settings form.
+      const b = $("btn-apply-upd");
+      if (b) b.textContent = t("toast.updDl") + (u.pct != null ? " " + u.pct + "%" : "");
+      else showToast(t("toast.updDl") + " v" + (u.latest || ""));
+      return;
+    }
+    if (u.stage === "permission") {
+      S.updBusy = false;
+      showToast(t("toast.updPerm"));
     } else if (u.stage === "install") {
       S.updBusy = false;
       showToast(t("toast.updApk"));

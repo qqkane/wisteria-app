@@ -46,6 +46,11 @@ class WisteriaBridge(private val activity: MainActivity) {
         val VERSION: String = BuildConfig.VERSION_NAME
         private const val MAX_SUB_BYTES = 4 shl 20
 
+        /** Set when the unknown-sources settings page was opened mid-update;
+         *  MainActivity.onResume continues the install once the grant lands. */
+        @Volatile
+        var pendingApkInstall = false
+
         /** Status shape shared with WisteriaVpnService (EngineHub-based).
          *  startedAt (unix seconds) mirrors the desktop's Status.StartedAt:
          *  the pushed state events are what the VPN screen renders, and the
@@ -116,10 +121,15 @@ class WisteriaBridge(private val activity: MainActivity) {
         // ---- settings ----
         "GetSettings" -> store.settings()
         "SaveSettings" -> {
-            store.saveSettings(args.getJSONObject(0))
+            val old = store.settings()
+            val next = args.getJSONObject(0)
+            store.saveSettings(next)
             activity.applyThemeFromSettings()
+            maybeReconnect(old, next)
             null
         }
+        "ListApps" -> listApps()
+        "ListRuApps" -> listRuApps()
         "GetAutostart" -> store.autostart()
         "SetAutostart" -> { store.setAutostart(args.getBoolean(0)); null }
 
@@ -232,6 +242,12 @@ class WisteriaBridge(private val activity: MainActivity) {
         val fields = p.optJSONObject("fields") ?: JSONObject().also { p.put("fields", it) }
         if (preset.isEmpty()) fields.remove("preset") else fields.put("preset", preset)
         store.updateProfile(p)
+        // The preset is baked into the engine config at connect time: a live
+        // session must be rebuilt for the change to mean anything.
+        if (id == EngineHub.profileId && running()) {
+            EngineHub.appLog("пресет изменён — переподключение")
+            reconnectService()
+        }
     }
 
     private fun deleteProfile(id: String) {
@@ -709,6 +725,89 @@ class WisteriaBridge(private val activity: MainActivity) {
         return host to port
     }
 
+    // ---- split tunnel / live reconnect ----
+
+    /** Installed apps for the per-app split-tunnel picker: launchable apps
+     *  plus user-installed ones, minus ourselves. The manifest <queries>
+     *  (MAIN/LAUNCHER) makes them visible under Android 11+ package rules. */
+    private fun listApps(): JSONArray {
+        val pm = context.packageManager
+        val rows = ArrayList<Pair<String, String>>()
+        for (ai in pm.getInstalledApplications(0)) {
+            if (ai.packageName == context.packageName) continue
+            val launchable = pm.getLaunchIntentForPackage(ai.packageName) != null
+            val userApp = (ai.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0
+            if (!launchable && !userApp) continue
+            rows.add(ai.packageName to pm.getApplicationLabel(ai).toString())
+        }
+        rows.sortBy { it.second.lowercase() }
+        val out = JSONArray()
+        for ((pkg, label) in rows) out.put(JSONObject().put("pkg", pkg).put("label", label))
+        return out
+    }
+
+    private fun running(): Boolean = try {
+        isRunning(JSONObject(Mobile.status()))
+    } catch (_: Throwable) {
+        false
+    }
+
+    /** The RU bypass preset: only packages present on this device. */
+    private fun listRuApps(): JSONArray {
+        val out = JSONArray()
+        for ((pkg, label) in RuApps.installed(context)) {
+            out.put(JSONObject().put("pkg", pkg).put("label", label))
+        }
+        return out
+    }
+
+    /** Effective preset of the running profile: per-profile wins over global. */
+    private fun effPreset(s: JSONObject): String {
+        val per = store.profile(EngineHub.profileId)
+            ?.optJSONObject("fields")?.optString("preset").orEmpty()
+        val v = per.ifEmpty { s.optString("wisteria_preset", "stealth") }
+        return when (v) { "fast", "balance", "stealth" -> v; else -> "stealth" }
+    }
+
+    /** Tunnel-shaping settings only apply to a fresh VpnService.Builder:
+     *  when any of them changes under a live session, rebuild it. */
+    private fun maybeReconnect(old: JSONObject, next: JSONObject) {
+        if (!running()) return
+        val splitChanged =
+            old.optString("split_mode", "off") != next.optString("split_mode", "off") ||
+                (old.optJSONArray("split_apps")?.toString() ?: "[]") !=
+                (next.optJSONArray("split_apps")?.toString() ?: "[]")
+        val routesChanged =
+            old.optBoolean("no_bypass_ru", false) != next.optBoolean("no_bypass_ru", false) ||
+                old.optString("wisteria_direct_cidrs") != next.optString("wisteria_direct_cidrs")
+        val presetChanged = effPreset(old) != effPreset(next)
+        if (splitChanged || routesChanged || presetChanged) {
+            EngineHub.appLog("настройки маршрутизации изменены — переподключение")
+            reconnectService()
+        }
+    }
+
+    private fun reconnectService() {
+        try {
+            context.startForegroundService(
+                Intent(context, WisteriaVpnService::class.java)
+                    .setAction(WisteriaVpnService.ACTION_RECONNECT)
+            )
+        } catch (t: Throwable) {
+            EngineHub.appLog("переподключение: ${t.message}")
+        }
+    }
+
+    /** QS-tile fallback: connect the active profile, consent dialog if needed. */
+    fun connectActive() {
+        val id = store.activeId()
+        if (id.isEmpty()) {
+            EngineHub.appLog("тайл: нет активного профиля — выберите его в приложении")
+            return
+        }
+        connect(id)
+    }
+
     // ---- app self-update: APK from the public GitHub release ----
 
     /** Numeric per-segment comparison of dotted versions ("1.1.16"). */
@@ -756,32 +855,72 @@ class WisteriaBridge(private val activity: MainActivity) {
                 val latest = rel.optString("tag_name", "").removePrefix("v")
                 if (cmpVersions(VERSION, latest) >= 0) throw err("установлена актуальная версия")
                 val asset = apkAsset(rel)
-                val url = asset.optString("browser_download_url")
-                if (url.isEmpty()) throw err("у ассета нет ссылки на скачивание")
-                EngineHub.pushEvent("apkupdate", JSONObject().put("stage", "downloading").put("latest", latest))
-                val dir = File(context.cacheDir, "update")
-                dir.mkdirs()
-                val apk = File(dir, "Wisteria-android.apk")
-                downloadToFile(url, apk)
-                // GitHub publishes a sha256 digest per asset; a mismatch
-                // means a corrupted or tampered download — never install it.
-                val digest = asset.optString("digest")
-                if (digest.startsWith("sha256:")) {
-                    val got = sha256Hex(apk)
-                    if (!got.equals(digest.removePrefix("sha256:"), ignoreCase = true)) {
-                        apk.delete()
-                        throw err("контрольная сумма APK не совпала — файл удалён")
-                    }
+                if (Build.VERSION.SDK_INT >= 26 && !context.packageManager.canRequestPackageInstalls()) {
+                    // Ask FIRST. The old flow downloaded 90+ MB and only then
+                    // bounced the user to the settings page; the grant led to
+                    // a dead end ("press again" = a full silent re-download).
+                    // Now onResume continues the update automatically.
+                    pendingApkInstall = true
+                    context.startActivity(
+                        Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + context.packageName))
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                    EngineHub.pushEvent("apkupdate", JSONObject().put("stage", "permission"))
+                    return@Thread
                 }
-                installApk(apk)
-                EngineHub.pushEvent("apkupdate", JSONObject().put("stage", "install"))
+                downloadAndInstall(asset, latest)
             } catch (e: Throwable) {
                 EngineHub.pushEvent("apkupdate", JSONObject().put("stage", "error").put("message", e.message ?: e.toString()))
             }
         }.start()
     }
 
-    private fun downloadToFile(url: String, dst: File) {
+    /** MainActivity.onResume calls this once the unknown-sources grant lands. */
+    fun resumeApkUpdate() {
+        Thread {
+            try {
+                val rel = latestAppRelease()
+                val latest = rel.optString("tag_name", "").removePrefix("v")
+                if (cmpVersions(VERSION, latest) >= 0) throw err("установлена актуальная версия")
+                downloadAndInstall(apkAsset(rel), latest)
+            } catch (e: Throwable) {
+                EngineHub.pushEvent("apkupdate", JSONObject().put("stage", "error").put("message", e.message ?: e.toString()))
+            }
+        }.start()
+    }
+
+    private fun downloadAndInstall(asset: JSONObject, latest: String) {
+        val url = asset.optString("browser_download_url")
+        if (url.isEmpty()) throw err("у ассета нет ссылки на скачивание")
+        val dir = File(context.cacheDir, "update")
+        dir.mkdirs()
+        val apk = File(dir, "Wisteria-android.apk")
+        val digest = asset.optString("digest")
+        // A previous attempt may have left a verified APK behind (permission
+        // granted only after the download): reuse it instead of pulling the
+        // whole bundle again.
+        val cached = apk.exists() && digest.startsWith("sha256:") &&
+            sha256Hex(apk).equals(digest.removePrefix("sha256:"), ignoreCase = true)
+        if (!cached) {
+            EngineHub.pushEvent(
+                "apkupdate", JSONObject().put("stage", "downloading").put("latest", latest).put("pct", 0)
+            )
+            downloadToFile(url, apk, asset.optLong("size"))
+            // GitHub publishes a sha256 digest per asset; a mismatch means a
+            // corrupted or tampered download — never install it.
+            if (digest.startsWith("sha256:")) {
+                val got = sha256Hex(apk)
+                if (!got.equals(digest.removePrefix("sha256:"), ignoreCase = true)) {
+                    apk.delete()
+                    throw err("контрольная сумма APK не совпала — файл удалён")
+                }
+            }
+        }
+        installApk(apk)
+        EngineHub.pushEvent("apkupdate", JSONObject().put("stage", "install"))
+    }
+
+    private fun downloadToFile(url: String, dst: File, expected: Long) {
         val conn = URL(url).openConnection() as HttpURLConnection
         conn.connectTimeout = 15000
         conn.readTimeout = 60000
@@ -789,7 +928,29 @@ class WisteriaBridge(private val activity: MainActivity) {
         conn.setRequestProperty("User-Agent", "WisteriaAndroid/$VERSION")
         try {
             if (conn.responseCode !in 200..299) throw err("HTTP ${conn.responseCode} при скачивании APK")
-            conn.inputStream.use { input -> dst.outputStream().use { out -> input.copyTo(out, 64 * 1024) } }
+            val total = if (expected > 0) expected else conn.contentLengthLong
+            var done = 0L
+            var lastPct = -1
+            conn.inputStream.use { input ->
+                dst.outputStream().use { out ->
+                    val buf = ByteArray(64 * 1024)
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n <= 0) break
+                        out.write(buf, 0, n)
+                        done += n
+                        if (total > 0) {
+                            val pct = (done * 100 / total).toInt().coerceAtMost(100)
+                            if (pct != lastPct) {
+                                lastPct = pct
+                                EngineHub.pushEvent(
+                                    "apkupdate", JSONObject().put("stage", "downloading").put("pct", pct)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         } finally {
             conn.disconnect()
         }
@@ -810,11 +971,12 @@ class WisteriaBridge(private val activity: MainActivity) {
 
     private fun installApk(apk: File) {
         if (Build.VERSION.SDK_INT >= 26 && !context.packageManager.canRequestPackageInstalls()) {
+            pendingApkInstall = true
             context.startActivity(
                 Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + context.packageName))
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             )
-            throw err("разрешите установку из неизвестных источников для Wisteria и нажмите «Скачать и установить» ещё раз")
+            throw err("разрешите установку из неизвестных источников — обновление продолжится автоматически")
         }
         val uri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", apk)
         context.startActivity(

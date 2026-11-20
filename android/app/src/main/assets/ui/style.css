@@ -348,6 +348,13 @@ textarea { resize: vertical; min-height: 80px; }
   .vpn-status.mid .label, .orb, .sf-dot.mid { animation: none; }
 }
 
+/* Per-app split-tunnel picker (routing tab). */
+.split-list { max-height: 340px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+.split-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; cursor: pointer; }
+.split-row input { accent-color: var(--accent); width: 18px; height: 18px; flex: none; }
+.split-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.split-pkg { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* ---------- v1.1.19 polish: focus, depth, micro-interactions ----------
    Same elevation layer as desktop (shared design language). Tint derives
    from --accent-rgb so all themes stay coherent; motion/hover gated. */

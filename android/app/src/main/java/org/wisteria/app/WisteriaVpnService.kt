@@ -15,6 +15,7 @@ import android.os.Build
 import android.os.ParcelFileDescriptor
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import org.json.JSONArray
 import org.json.JSONObject
 import org.wisteria.mobile.Callback
 import org.wisteria.mobile.Mobile
@@ -41,6 +42,7 @@ class WisteriaVpnService : VpnService() {
     companion object {
         const val ACTION_CONNECT = "org.wisteria.app.CONNECT"
         const val ACTION_DISCONNECT = "org.wisteria.app.DISCONNECT"
+        const val ACTION_RECONNECT = "org.wisteria.app.RECONNECT"
         const val EXTRA_PROFILE_ID = "profile_id"
         private const val CHANNEL_ID = "vpn"
         private const val NOTIF_ID = 1
@@ -207,6 +209,7 @@ class WisteriaVpnService : VpnService() {
                 }
                 if (mapped == "connecting") reconnectQueued.set(false)
                 updateNotification(mapped)
+                WisteriaTileService.refresh(this@WisteriaVpnService)
                 // An engine-originated "disconnected" while the user wants the
                 // tunnel (wisteria runLoop device-dead, box core stop) is the
                 // fast path of the watchdog: react immediately, do not idle 2s.
@@ -267,6 +270,7 @@ class WisteriaVpnService : VpnService() {
                         builder.addRoute("0.0.0.0", 0)
                     }
                     builder.addDnsServer(tunDns())
+                    applySplitApps(builder)
                     val pfd = builder.establish() ?: return -1
                     boxTun = pfd
                     return pfd.fd
@@ -289,12 +293,27 @@ class WisteriaVpnService : VpnService() {
             // Own thread: CancelConnect must not queue behind a connect()
             // that is stuck inside a blocking native engine call.
             ACTION_DISCONNECT -> Thread({
+                // The QS tile delivers this via startForegroundService while
+                // the app is backgrounded: answer the FGS obligation before
+                // the teardown removes the notification again.
+                tryStartForeground("disconnected")
                 userStopped = true // cancels the watchdog and the reconnect queue
                 cancelEpoch++ // invalidates CONNECT intents queued before this cancel
                 stopWatchdog()
                 teardown()
                 stopSelf()
             }, "wisteria-disconnect").start()
+            ACTION_RECONNECT -> {
+                // Settings that reshape the tunnel (preset, per-app split,
+                // bypass routes) only apply to a fresh Builder: tear the
+                // session down and bring it back up on the same serialized
+                // executor, so a Disconnect racing the restart still wins.
+                val epoch = cancelEpoch
+                executor.execute {
+                    teardown()
+                    connect("", epoch, fgsRequired = true)
+                }
+            }
             else -> {
                 val id = intent?.getStringExtra(EXTRA_PROFILE_ID).orEmpty()
                 // The generation is read HERE, at submission time. Reading
@@ -447,6 +466,7 @@ class WisteriaVpnService : VpnService() {
             .addDnsServer(tunDns())
             .setMtu(TUN_MTU)
             .setSession(profile.optString("name").ifEmpty { "Wisteria" })
+        applySplitApps(builder)
         // "Do not proxy Russian sites" — the Android counterpart of the
         // desktop routing.mode=bypass_ru. VpnService cannot match domains,
         // so the RU CIDR list is subtracted from the 0.0.0.0/0 route and the
@@ -693,6 +713,7 @@ class WisteriaVpnService : VpnService() {
         EngineHub.profileType = ""
         sessionStartEpoch = 0 // the pushed "disconnected" must not carry a stale started_at
         if (pushState) EngineHub.pushEvent("state", statusJson("disconnected"))
+        WisteriaTileService.refresh(this)
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         } finally {
             // Only after the whole pass: the engine Stop() above fires
@@ -721,6 +742,38 @@ class WisteriaVpnService : VpnService() {
         }
     } catch (_: Throwable) {
         "connecting"
+    }
+
+    /** Per-app split tunnel: "bypass" keeps the listed apps on the physical
+     *  interface (banks / RU services see the real IP without CIDR hacks),
+     *  "only" sends just the listed apps through the tunnel. A package the
+     *  framework refuses (uninstalled meanwhile) must not kill the tunnel. */
+    private fun applySplitApps(builder: Builder) {
+        val s = AndroidStore(this).settings()
+        val mode = s.optString("split_mode", "off")
+        if (mode != "bypass" && mode != "only") return
+        val arr = s.optJSONArray("split_apps") ?: JSONArray()
+        if (mode == "only" && arr.length() == 0) {
+            EngineHub.appLog("split-tunnel: «только выбранные» с пустым списком — весь трафик идёт в туннель")
+            return
+        }
+        var added = 0
+        for (i in 0 until arr.length()) {
+            val pkg = arr.optString(i)
+            if (pkg.isEmpty() || pkg == packageName) continue
+            try {
+                if (mode == "only") builder.addAllowedApplication(pkg)
+                else builder.addDisallowedApplication(pkg)
+                added++
+            } catch (e: Exception) {
+                android.util.Log.w("WisteriaVpn", "split $pkg", e)
+            }
+        }
+        if (added > 0) {
+            EngineHub.appLog(
+                "split-tunnel: ${if (mode == "only") "в туннель только" else "мимо туннеля"} $added прил."
+            )
+        }
     }
 
     /** TUN DNS server: the user's remote_dns when it is a plain IP (the

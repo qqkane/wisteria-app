@@ -33,6 +33,11 @@ class MainActivity : AppCompatActivity() {
         private const val REQ_VPN = 41
         private const val REQ_NOTIF = 42
         private const val TAG = "WisteriaUI"
+
+        /** Set by the QS tile when it cannot start the tunnel itself (VPN
+         *  consent pending / no active profile): the activity connects on
+         *  launch instead. */
+        const val EXTRA_AUTO_CONNECT = "org.wisteria.app.AUTO_CONNECT"
     }
 
     private lateinit var web: WebView
@@ -195,6 +200,7 @@ class MainActivity : AppCompatActivity() {
 
         web.loadUrl("file:///android_asset/ui/index.html")
         applyThemeFromSettings()
+        handleAutoConnect(intent)
 
         // Android 13+ hides the VPN notification without the runtime grant;
         // denial is harmless (the foreground service still runs).
@@ -217,6 +223,33 @@ class MainActivity : AppCompatActivity() {
                 return@runOnUiThread
             }
             startActivityForResult(intent, REQ_VPN)
+        }
+    }
+
+    /** QS tile hand-off: consume the extra once so a recreation does not
+     *  reconnect again, then run the normal connect (consent dialog if needed). */
+    private fun handleAutoConnect(i: Intent?) {
+        if (i?.getBooleanExtra(EXTRA_AUTO_CONNECT, false) != true) return
+        i.removeExtra(EXTRA_AUTO_CONNECT)
+        bridge.connectActive()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleAutoConnect(intent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // The unknown-sources grant happened in system settings while the
+        // update was waiting: continue without making the user press again.
+        if (WisteriaBridge.pendingApkInstall &&
+            Build.VERSION.SDK_INT >= 26 &&
+            packageManager.canRequestPackageInstalls()
+        ) {
+            WisteriaBridge.pendingApkInstall = false
+            bridge.resumeApkUpdate()
         }
     }
 
