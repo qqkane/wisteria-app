@@ -990,9 +990,9 @@ function wireContent() {
   document.querySelectorAll(".theme-option").forEach((opt) => opt.addEventListener("click", async () => {
     S.theme = opt.dataset.theme;
     applyTheme();
+    await saveSettings();
     if (S.tab === "settings") { renderContent(); fillSettingsForm(S.cfg); }
     else document.querySelectorAll(".theme-option").forEach((o) => o.classList.toggle("selected", o === opt));
-    await saveSettings();
   }));
   on("btn-checkip", "click", async () => {
     try {
@@ -1138,7 +1138,7 @@ async function fillSettingsForm(s) {
   }
 }
 
-async function saveSettings() {
+async function saveSettings(silent) {
   const cur = await api().GetSettings();
   const g = (id) => { const el = $(id); return el ? el : null; };
   const num = (id, def) => { const v = parseInt($(id).value, 10); return Number.isFinite(v) ? v : def; };
@@ -1182,7 +1182,8 @@ async function saveSettings() {
   await api().SaveSettings(next);
   const as = g("s-autostart");
   if (as && as.checked !== (await api().GetAutostart())) await api().SetAutostart(as.checked);
-  showToast(t("toast.saved"));
+  S.cfg = await api().GetSettings();
+  if (!silent) showToast(t("toast.saved"));
 }
 
 function hexToRgb(hex) {
@@ -1258,12 +1259,22 @@ document.addEventListener("input", (ev) => {
     S.uiScale = parseInt(ev.target.value, 10) || 100;
     const lv = $("s-scale-val"); if (lv) lv.textContent = S.uiScale + "%";
     applyScale();
+    scheduleLookSave();
   } else if (id && id.indexOf("ct-") === 0) {
     S.customTheme = Object.assign({}, DEFAULT_CUSTOM, S.customTheme || {});
     S.customTheme[id.slice(3)] = ev.target.value;
     applyTheme();
+    scheduleLookSave();
   }
 });
+
+// Live previews persist on their own: dragging a color or the scale used to
+// reset on restart unless the user happened to press Save afterwards.
+let lookSaveTimer = null;
+function scheduleLookSave() {
+  clearTimeout(lookSaveTimer);
+  lookSaveTimer = setTimeout(() => { saveSettings(true); }, 700);
+}
 document.addEventListener("change", async (ev) => {
   if (ev.target.id === "vpn-preset") {
     const pid = S.state.profile_id || S.selected;
