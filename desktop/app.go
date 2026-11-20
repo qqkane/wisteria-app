@@ -447,12 +447,43 @@ func (a *App) ImportTOML(text string) (core.Profile, error) {
 func (a *App) RenameProfile(id, name string) error { return a.store.Rename(id, name) }
 
 // SetProfilePreset stores the per-profile obfuscation preset ("" clears it so
-// the global default applies again). Takes effect on the next connect.
+// the global default applies again). A live session is rebuilt right away —
+// the preset is baked into the core config at connect time.
 func (a *App) SetProfilePreset(id, preset string) error {
 	if preset != "" && !core.ValidPreset(preset) {
 		return fmt.Errorf("unknown preset %q (fast|balance|stealth)", preset)
 	}
-	return a.store.SetField(id, "preset", preset)
+	if err := a.store.SetField(id, "preset", preset); err != nil {
+		return err
+	}
+	if a.svc.RunningProfile() == id {
+		a.reconnectRunning(id)
+	}
+	return nil
+}
+
+// reconnectRunning rebuilds the live session of id in the background: Start
+// replaces a running session safely, and a reconnect failure must not reject
+// the UI call that merely changed a setting.
+func (a *App) reconnectRunning(id string) {
+	go func() {
+		a.logf("пресет изменён — переподключение")
+		if err := a.Connect(id); err != nil {
+			a.logf("автопереподключение после смены пресета: %v", err)
+		}
+	}()
+}
+
+// effPreset mirrors the core rule: a per-profile preset wins over the global.
+func (a *App) effPreset(s core.Settings, id string) string {
+	v := s.WisteriaPreset
+	if p, err := a.store.Get(id); err == nil && p.Fields["preset"] != "" {
+		v = p.Fields["preset"]
+	}
+	if !core.ValidPreset(v) {
+		v = "stealth"
+	}
+	return v
 }
 
 func (a *App) DeleteProfile(id string) error {
@@ -652,10 +683,14 @@ func (a *App) ToggleSystemProxy(on bool) error {
 func (a *App) GetSettings() core.Settings { return a.svc.Settings() }
 
 func (a *App) SaveSettings(s core.Settings) core.Settings {
+	old := a.svc.Settings()
 	out := a.svc.SaveSettings(s)
 	core.SetGitHubToken(out.GitHubToken)
 	a.startAutoPing() // interval may have changed
 	a.logf("настройки сохранены")
+	if id := a.svc.RunningProfile(); id != "" && a.effPreset(old, id) != a.effPreset(out, id) {
+		a.reconnectRunning(id)
+	}
 	return out
 }
 
