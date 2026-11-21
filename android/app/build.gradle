@@ -53,7 +53,12 @@ android {
     }
     buildTypes {
         release {
-            minifyEnabled false
+            // A 20+ MB APK is mostly unused AndroidX/R8 padding. The keep
+            // rules in proguard-rules.pro protect the gomobile JNI facade and
+            // the @JavascriptInterface bridge, which have no Java references.
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
             signingConfig signingConfigs.release
         }
     }

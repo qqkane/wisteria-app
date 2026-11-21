@@ -434,12 +434,6 @@ object SingboxLinks {
         }
         val withScheme = if (raw.contains("://")) raw else "udp://$raw"
         val scheme = withScheme.substringBefore("://").lowercase()
-        if (scheme == "local") {
-            return JSONObject()
-                .put("type", "local")
-                .put("tag", tag)
-                .apply { detour?.let { put("detour", it) } }
-        }
         val link = LinkParser.parse(withScheme)
         val type = when (scheme) {
             "https", "h3", "tls", "tcp", "udp", "quic" -> scheme

@@ -563,16 +563,6 @@ class WisteriaBridge(activity: MainActivity) {
         }.start()
     }
 
-    /** True for an HTML page served instead of the link list: captive
-     *  portals, expired tokens and 404 pages all answer with markup, and
-     *  parsing it yields zero profiles — which used to WIPE a working
-     *  subscription. */
-    private fun looksLikeHtml(text: String): Boolean {
-        val head = text.take(2048).lowercase()
-        return "<!doctype" in head || "<html" in head || "<head" in head ||
-            ("<body" in head && "</" in head)
-    }
-
     /** Fetches the subscription body, parses every link (wisteria and
      *  sing-box protocols) and replaces exactly this subscription's
      *  profiles, keeping the client keys of endpoints seen before (the
@@ -580,7 +570,7 @@ class WisteriaBridge(activity: MainActivity) {
     private fun fetchIntoSub(sub: JSONObject): JSONObject {
         val res = httpGetWithHeaders(sub.optString("url"), MAX_SUB_BYTES, 15_000)
         val text = decodeSubBody(res.body)
-        if (looksLikeHtml(text)) {
+        if (SubscriptionMeta.looksLikeHtml(text)) {
             throw err("сервер вернул HTML-страницу вместо списка ссылок — подписка не изменена")
         }
 
@@ -618,7 +608,7 @@ class WisteriaBridge(activity: MainActivity) {
         // Everything parsed: apply the response metadata before touching the
         // profiles, so the row shows the real name/counters even if the merge
         // below hits the store's dedup.
-        applySubMetadata(sub, res.headers)
+        SubscriptionMeta.apply(sub, res.headers)
 
         val old = JSONArray()
         val profiles = store.listProfiles()
@@ -694,40 +684,6 @@ class WisteriaBridge(activity: MainActivity) {
         EngineHub.appLog("подписка «${sub.optString("name")}» обновлена: профилей $count")
         pushProfiles()
         return sub
-    }
-
-    /**
-     * Subscription metadata from the response headers, the way v2rayN/SFA
-     * read it:
-     *   Subscription-Userinfo: upload=1; download=2; total=3; expire=1700000000
-     *   Profile-Title: My sub   |   base64:<encoded title>
-     * Field names on the stored sub are new (`userinfo`) — old rows simply
-     * have no such key, so existing user data stays valid.
-     */
-    internal fun applySubMetadata(sub: JSONObject, headers: Map<String, String>) {
-        val lower = headers.entries.associate { it.key.lowercase() to it.value }
-        lower["subscription-userinfo"]?.let { raw ->
-            val o = JSONObject()
-            for (part in raw.split(";", ",")) {
-                val idx = part.indexOf('=')
-                if (idx <= 0) continue
-                val k = part.substring(0, idx).trim().lowercase()
-                val v = part.substring(idx + 1).trim().toLongOrNull() ?: continue
-                if (k in setOf("upload", "download", "total", "expire")) o.put(k, v)
-            }
-            if (o.length() > 0) sub.put("userinfo", o)
-        }
-        lower["profile-title"]?.let { raw ->
-            var title = raw.trim()
-            if (title.startsWith("base64:", ignoreCase = true)) {
-                title = try {
-                    String(SingboxLinks.b64decodeBytes(title.substring(7)), Charsets.UTF_8).trim()
-                } catch (_: Throwable) {
-                    ""
-                }
-            }
-            if (title.isNotEmpty()) sub.put("name", title)
-        }
     }
 
     private fun importFromClipboard(): JSONObject {

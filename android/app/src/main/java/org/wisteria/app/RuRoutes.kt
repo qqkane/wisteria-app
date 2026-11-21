@@ -82,14 +82,19 @@ object RuRoutes {
         return out
     }
 
-    /** Dotted-quad to 4 bytes, or null when the string is not a plain IPv4. */
-    private fun parseIPv4(s: String): ByteArray? {
+    /** Dotted-quad to 4 bytes, or null when the string is not a plain IPv4.
+     *  Internal so the asset refresh can be regression-tested on the JVM. */
+    internal fun parseIPv4(s: String): ByteArray? {
         val parts = s.split('.')
         if (parts.size != 4) return null
         val out = ByteArray(4)
         for (i in 0..3) {
             val p = parts[i]
             if (p.isEmpty() || p.length > 3) return null
+            // "010" is not a dotted-quad: Go's net.ParseIP rejects it, and a
+            // refreshed asset entry with a leading zero must be skipped here
+            // rather than become a route IpPrefix with a different meaning.
+            if (p.length > 1 && p[0] == '0') return null
             var v = 0
             for (c in p) {
                 if (c < '0' || c > '9') return null

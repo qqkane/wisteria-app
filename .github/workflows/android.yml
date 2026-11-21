@@ -122,6 +122,12 @@ jobs:
             -tags='with_conntrack,with_quic,with_dhcp,with_wireguard,with_utls,with_gvisor' \
             -o "$GITHUB_WORKSPACE/android/app/libs/wisteria.aar" ./mobile
 
+      # JVM unit tests: route/DNS classification, subscription metadata and
+      # the RU asset sanity checks. A red test blocks the APK on purpose —
+      # these are the rules that used to break live sessions silently.
+      - name: Unit tests
+        run: gradle -p android --no-daemon testDebugUnitTest
+
       - name: Build APKs
         env:
           WISTERIA_KEYSTORE_PASSWORD: ${{ secrets.WISTERIA_KEYSTORE_PASSWORD }}
