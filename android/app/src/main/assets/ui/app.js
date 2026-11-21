@@ -161,6 +161,7 @@ const I18N = {
     "toast.clipSubs": "подписок: {n}", "toast.clipProfiles": "профилей: {n}", "toast.clipNone": "Ничего нового в буфере", "vpn.tunOn": "TUN активен — весь трафик системы идёт через туннель",
     "toast.stuck": "Подключение зависло — попробуйте ещё раз",
     "traffic.down": "Загрузка", "traffic.up": "Отдача", "traffic.session": "за сессию", "traffic.unsupported": "нет данных",
+    "vpn.notConnected": "Нет подключения",
     "vpn.noProfilesTitle": "Пока нет профилей",
     "vpn.noProfilesText": "Добавьте share-ссылку, подписку или создайте профиль вручную — аккаунт не нужен.",
     "vpn.retry": "Повторить", "vpn.ipHint": "Нажмите, чтобы обновить IP",
@@ -183,7 +184,7 @@ const I18N = {
     "set.battery": "Батарея", "set.batteryNote": "без оптимизации Android не будет убивать туннель",
     "set.batteryOk": "оптимизация отключена", "set.batteryBad": "оптимизация включена — туннель могут убить",
     "set.batteryOpen": "Открыть настройки батареи", "set.vpnOpen": "Системные настройки VPN",
-    "pull.refreshing": "Обновляю…", "pull.done": "Обновлено",
+    "pull.refreshing": "Обновляю…", "pull.done": "Обновлено", "pull.release": "Отпустите",
     "deeplink.added": "Ссылка добавлена в профили", "deeplink.failed": "Ссылка не распознана",
     "toast.copied": "Скопировано",
   },
@@ -295,6 +296,7 @@ const I18N = {
     "toast.clipSubs": "subscriptions: {n}", "toast.clipProfiles": "profiles: {n}", "toast.clipNone": "Nothing new in the clipboard", "vpn.tunOn": "TUN active — all system traffic goes through the tunnel",
     "toast.stuck": "Connection is stuck — please try again",
     "traffic.down": "Download", "traffic.up": "Upload", "traffic.session": "this session", "traffic.unsupported": "no data",
+    "vpn.notConnected": "Not connected",
     "vpn.noProfilesTitle": "No profiles yet",
     "vpn.noProfilesText": "Add a share link, a subscription, or create a profile by hand — no account needed.",
     "vpn.retry": "Retry", "vpn.ipHint": "Tap to refresh the IP",
@@ -317,7 +319,7 @@ const I18N = {
     "set.battery": "Battery", "set.batteryNote": "without optimization Android may kill the tunnel",
     "set.batteryOk": "optimization disabled", "set.batteryBad": "optimization enabled — the tunnel may be killed",
     "set.batteryOpen": "Open battery settings", "set.vpnOpen": "System VPN settings",
-    "pull.refreshing": "Refreshing…", "pull.done": "Refreshed",
+    "pull.refreshing": "Refreshing…", "pull.done": "Refreshed", "pull.release": "Release",
     "deeplink.added": "Link added to profiles", "deeplink.failed": "Link not recognized",
     "toast.copied": "Copied",
   },
@@ -1089,7 +1091,7 @@ async function importFromClipboard() {
 // asynchronous on the bridge: an empty answer means "the result will arrive
 // through the extip event".
 async function checkExtIP() {
-  if (S.state.state !== "connected") { showToast(t("vpn.noProfile")); return; }
+  if (S.state.state !== "connected") { showToast(t("vpn.notConnected")); return; }
   try {
     const ip = await api().GetExternalIP();
     if (!ip) { showToast(t("toast.ipWait")); return; }
@@ -2202,7 +2204,7 @@ document.addEventListener("touchmove", (ev) => {
   const el = ptrIndicator();
   el.classList.toggle("show", ptrDy > 12);
   el.style.transform = "translateY(" + Math.min(56, ptrDy * 0.6) + "px)";
-  el.textContent = ptrDy > 70 ? "↓ " + t("pull.done") : "...";
+  el.textContent = ptrDy > 70 ? "↓ " + t("pull.release") : "...";
 }, { passive: true });
 document.addEventListener("touchend", async () => {
   if (!ptrActive) return;
