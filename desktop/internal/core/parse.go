@@ -303,7 +303,7 @@ func parseTuic(p Profile, userinfo string, q map[string]string) (Profile, error)
 	p.Fields["udp_relay_mode"] = firstNonEmpty(q["udp_relay_mode"], "native")
 	p.Fields["sni"] = q["sni"]
 	p.Fields["alpn"] = q["alpn"]
-	p.Fields["congestion_control"] = firstNonEmpty(q["congestion_control"], p.Fields["congestion_control"])
+	p.Fields["insecure"] = normalizeBool(q["insecure"])
 	return p, nil
 }
 

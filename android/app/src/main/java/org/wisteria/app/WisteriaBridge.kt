@@ -6,18 +6,13 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.net.VpnService
-import android.os.Build
-import android.provider.Settings
 import android.webkit.JavascriptInterface
-import androidx.core.content.FileProvider
 import org.json.JSONArray
 import org.json.JSONObject
 import org.wisteria.mobile.Mobile
 import java.io.ByteArrayOutputStream
-import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
-import java.security.MessageDigest
 import java.util.Base64
 
 /**
@@ -46,10 +41,11 @@ class WisteriaBridge(private val activity: MainActivity) {
         val VERSION: String = BuildConfig.VERSION_NAME
         private const val MAX_SUB_BYTES = 4 shl 20
 
-        /** Set when the unknown-sources settings page was opened mid-update;
-         *  MainActivity.onResume continues the install once the grant lands. */
-        @Volatile
-        var pendingApkInstall = false
+        /** Every "update" now ends on the public release page: Android's
+         *  in-app installer flow (unknown sources + FileProvider + 90 MB
+         *  download in a WebView-hosted app) was removed in favour of the
+         *  browser, which keeps the APK out of the app's own trust boundary. */
+        private const val RELEASES_URL = "https://github.com/qqkane/wisteria-app/releases"
 
         /** Status shape shared with WisteriaVpnService (EngineHub-based).
          *  startedAt (unix seconds) mirrors the desktop's Status.StartedAt:
@@ -140,7 +136,7 @@ class WisteriaBridge(private val activity: MainActivity) {
             .put("singbox_found", false).put("singbox_path", "")
             .put("xray_found", false).put("xray_path", "")
         "CheckAppUpdate" -> checkAppUpdate()
-        "ApplyAppUpdate" -> { startApkUpdate(); null }
+        "ApplyAppUpdate" -> { openReleasePage(args.optString(0)); null }
         "RestartApp" -> { activity.restartApp(); null }
         "CheckCoreUpdate" -> JSONObject().put("current", "-").put("latest", "-").put("has_update", false)
         "UpdateCore" -> throw err("Ядра встроены в приложение (sing-box) — обновление не требуется")
@@ -190,7 +186,7 @@ class WisteriaBridge(private val activity: MainActivity) {
     // ---- connect / disconnect ----
 
     private fun connect(id: String) {
-        val p = store.profile(id) ?: throw err("профиль не найден")
+        store.profile(id) ?: throw err("профиль не найден")
         store.setActive(id)
         val consent = VpnService.prepare(activity)
         if (consent != null) {
@@ -292,8 +288,9 @@ class WisteriaBridge(private val activity: MainActivity) {
             } catch (e: Exception) {
                 -1L
             }
-            p.put("latency_ms", lat)
-            store.updateProfile(p)
+            // Store the latency by itself: a whole-profile replace used to
+            // revert edits made while the ping was in flight (preset change).
+            store.updateProfileLatency(id, lat)
             pushProfiles()
         }.start()
     }
@@ -788,13 +785,19 @@ class WisteriaBridge(private val activity: MainActivity) {
     }
 
     private fun reconnectService() {
+        val intent = Intent(context, WisteriaVpnService::class.java)
+            .setAction(WisteriaVpnService.ACTION_RECONNECT)
+        // A live session means the service is already in the foreground, so
+        // a plain startService is enough here; the FGS path is only a
+        // fallback for vendor ROMs that refuse a background startService.
         try {
-            context.startForegroundService(
-                Intent(context, WisteriaVpnService::class.java)
-                    .setAction(WisteriaVpnService.ACTION_RECONNECT)
-            )
+            context.startService(intent)
         } catch (t: Throwable) {
-            EngineHub.appLog("переподключение: ${t.message}")
+            try {
+                context.startForegroundService(intent)
+            } catch (t2: Throwable) {
+                EngineHub.appLog("переподключение: ${t2.message ?: t.message}")
+            }
         }
     }
 
@@ -825,165 +828,39 @@ class WisteriaBridge(private val activity: MainActivity) {
     private fun latestAppRelease(): JSONObject =
         JSONObject(httpGet("https://api.github.com/repos/qqkane/wisteria-app/releases/latest", 1 shl 20, 15000))
 
-    private fun apkAsset(rel: JSONObject): JSONObject {
-        val assets = rel.optJSONArray("assets") ?: JSONArray()
-        for (i in 0 until assets.length()) {
-            val a = assets.getJSONObject(i)
-            if (a.optString("name") == "Wisteria-android.apk") return a
-        }
-        throw err("в релизе нет Wisteria-android.apk")
-    }
-
     private fun checkAppUpdate(): JSONObject {
         val rel = latestAppRelease()
         val latest = rel.optString("tag_name", "").removePrefix("v")
-        val asset = apkAsset(rel)
+        // The release page is the only update channel now; the APK asset is
+        // optional here (a tag published before the Android job finished
+        // still has a usable release page).
+        val htmlUrl = rel.optString("html_url", "").ifEmpty {
+            if (latest.isNotEmpty()) "$RELEASES_URL/tag/v$latest" else "$RELEASES_URL/latest"
+        }
         return JSONObject()
             .put("current", VERSION)
             .put("latest", latest)
             .put("has_update", cmpVersions(VERSION, latest) < 0)
-            .put("asset_size", asset.optLong("size"))
+            .put("url", htmlUrl)
     }
 
-    /** The JS bridge call is synchronous from the WebView's point of view,
-     *  so the download runs on its own thread and reports through apkupdate
-     *  events; Call itself returns as soon as the thread is started. */
-    private fun startApkUpdate() {
-        Thread {
-            try {
-                val rel = latestAppRelease()
-                val latest = rel.optString("tag_name", "").removePrefix("v")
-                if (cmpVersions(VERSION, latest) >= 0) throw err("установлена актуальная версия")
-                val asset = apkAsset(rel)
-                if (Build.VERSION.SDK_INT >= 26 && !context.packageManager.canRequestPackageInstalls()) {
-                    // Ask FIRST. The old flow downloaded 90+ MB and only then
-                    // bounced the user to the settings page; the grant led to
-                    // a dead end ("press again" = a full silent re-download).
-                    // Now onResume continues the update automatically.
-                    pendingApkInstall = true
-                    context.startActivity(
-                        Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + context.packageName))
-                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    )
-                    EngineHub.pushEvent("apkupdate", JSONObject().put("stage", "permission"))
-                    return@Thread
-                }
-                downloadAndInstall(asset, latest)
-            } catch (e: Throwable) {
-                EngineHub.pushEvent("apkupdate", JSONObject().put("stage", "error").put("message", e.message ?: e.toString()))
-            }
-        }.start()
-    }
-
-    /** MainActivity.onResume calls this once the unknown-sources grant lands. */
-    fun resumeApkUpdate() {
-        Thread {
-            try {
-                val rel = latestAppRelease()
-                val latest = rel.optString("tag_name", "").removePrefix("v")
-                if (cmpVersions(VERSION, latest) >= 0) throw err("установлена актуальная версия")
-                downloadAndInstall(apkAsset(rel), latest)
-            } catch (e: Throwable) {
-                EngineHub.pushEvent("apkupdate", JSONObject().put("stage", "error").put("message", e.message ?: e.toString()))
-            }
-        }.start()
-    }
-
-    private fun downloadAndInstall(asset: JSONObject, latest: String) {
-        val url = asset.optString("browser_download_url")
-        if (url.isEmpty()) throw err("у ассета нет ссылки на скачивание")
-        val dir = File(context.cacheDir, "update")
-        dir.mkdirs()
-        val apk = File(dir, "Wisteria-android.apk")
-        val digest = asset.optString("digest")
-        // A previous attempt may have left a verified APK behind (permission
-        // granted only after the download): reuse it instead of pulling the
-        // whole bundle again.
-        val cached = apk.exists() && digest.startsWith("sha256:") &&
-            sha256Hex(apk).equals(digest.removePrefix("sha256:"), ignoreCase = true)
-        if (!cached) {
-            EngineHub.pushEvent(
-                "apkupdate", JSONObject().put("stage", "downloading").put("latest", latest).put("pct", 0)
-            )
-            downloadToFile(url, apk, asset.optLong("size"))
-            // GitHub publishes a sha256 digest per asset; a mismatch means a
-            // corrupted or tampered download — never install it.
-            if (digest.startsWith("sha256:")) {
-                val got = sha256Hex(apk)
-                if (!got.equals(digest.removePrefix("sha256:"), ignoreCase = true)) {
-                    apk.delete()
-                    throw err("контрольная сумма APK не совпала — файл удалён")
-                }
-            }
+    /** App updates are handed to the browser: the release page is opened
+     *  in the system browser, which downloads and installs the APK through
+     *  its own trust path. The in-app downloader (unknown-sources grant,
+     *  FileProvider, 90 MB into cacheDir) is gone. */
+    private fun openReleasePage(target: String) {
+        val clean = target.trim()
+        val url = when {
+            clean.startsWith("https://") || clean.startsWith("http://") -> clean
+            clean.isNotEmpty() -> "$RELEASES_URL/tag/v${clean.removePrefix("v")}"
+            else -> "$RELEASES_URL/latest"
         }
-        installApk(apk)
-        EngineHub.pushEvent("apkupdate", JSONObject().put("stage", "install"))
-    }
-
-    private fun downloadToFile(url: String, dst: File, expected: Long) {
-        val conn = URL(url).openConnection() as HttpURLConnection
-        conn.connectTimeout = 15000
-        conn.readTimeout = 60000
-        conn.instanceFollowRedirects = true
-        conn.setRequestProperty("User-Agent", "WisteriaAndroid/$VERSION")
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         try {
-            if (conn.responseCode !in 200..299) throw err("HTTP ${conn.responseCode} при скачивании APK")
-            val total = if (expected > 0) expected else conn.contentLengthLong
-            var done = 0L
-            var lastPct = -1
-            conn.inputStream.use { input ->
-                dst.outputStream().use { out ->
-                    val buf = ByteArray(64 * 1024)
-                    while (true) {
-                        val n = input.read(buf)
-                        if (n <= 0) break
-                        out.write(buf, 0, n)
-                        done += n
-                        if (total > 0) {
-                            val pct = (done * 100 / total).toInt().coerceAtMost(100)
-                            if (pct != lastPct) {
-                                lastPct = pct
-                                EngineHub.pushEvent(
-                                    "apkupdate", JSONObject().put("stage", "downloading").put("pct", pct)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        } finally {
-            conn.disconnect()
+            activity.startActivity(intent)
+        } catch (_: Throwable) {
+            context.startActivity(intent)
         }
-    }
-
-    private fun sha256Hex(f: File): String {
-        val md = MessageDigest.getInstance("SHA-256")
-        f.inputStream().use { input ->
-            val buf = ByteArray(64 * 1024)
-            while (true) {
-                val n = input.read(buf)
-                if (n <= 0) break
-                md.update(buf, 0, n)
-            }
-        }
-        return md.digest().joinToString("") { "%02x".format(it) }
-    }
-
-    private fun installApk(apk: File) {
-        if (Build.VERSION.SDK_INT >= 26 && !context.packageManager.canRequestPackageInstalls()) {
-            pendingApkInstall = true
-            context.startActivity(
-                Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + context.packageName))
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
-            throw err("разрешите установку из неизвестных источников — обновление продолжится автоматически")
-        }
-        val uri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", apk)
-        context.startActivity(
-            Intent(Intent.ACTION_VIEW)
-                .setDataAndType(uri, "application/vnd.android.package-archive")
-                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-        )
     }
 
     private fun httpGet(url: String, maxBytes: Int, timeoutMs: Int): String {

@@ -38,7 +38,10 @@
   // Selecting a config (a profile row calls SetActive; the big button and
   // switch-while-connected call Connect) jumps to the main screen. Per user
   // request subscription ops (import / add / refresh) must NOT navigate.
+  // Consecutive calls (switch-while-connected does SetActive then Connect)
+  // are debounced into a single navigation.
   const AUTO_NAV = { SetActive: 1, Connect: 1 };
+  let autoNavTimer = null;
   const activeTab = () =>
     document.querySelector(".sidebar-nav-item.active")?.dataset.tab || "vpn";
   window.go = {
@@ -48,7 +51,11 @@
           return (...args) =>
             call(name, args).then((res) => {
               if (AUTO_NAV[name] && activeTab() !== "vpn") {
-                setTimeout(() => { if (activeTab() !== "vpn") navTo("vpn"); }, 350);
+                clearTimeout(autoNavTimer);
+                autoNavTimer = setTimeout(() => {
+                  autoNavTimer = null;
+                  if (activeTab() !== "vpn") navTo("vpn");
+                }, 350);
               }
               return res;
             });
@@ -213,30 +220,78 @@
     return `<button class="ab-sec-card" data-abgoto="${tab}">${ICONS[tab]}` +
       `<span data-i18n="nav.${tab}">${label}</span><span class="ab-chev">${ICONS.chev}</span></button>`;
   }
-  new MutationObserver(() => {
-    document.body.classList.toggle("ab-modal", !!document.querySelector(".modal-overlay.show"));
+  // ---------- targeted observers ----------
+  // The old code watched EVERY attribute on documentElement (attributes:
+  // true on the subtree root): every CSS animation class toggle and every
+  // button state change re-ran a document-wide scan, which is exactly the
+  // work that makes the WebView drop frames while the connect animation
+  // plays. The observers below watch only the nodes they need.
 
-    // «Отмена» instead of a dead disabled button while connecting. The SPA
-    // marks connecting with the button's disabled attr; once we take over,
-    // our own abCancel marker keeps the state stable across observer runs
-    // (the SPA re-render on state change drops it with the old DOM). Every
-    // write below is guarded: this observer watches attributes on the whole
-    // document, and an unguarded same-value write would re-trigger it on
-    // every pass — a self-sustaining microtask loop, i.e. a frozen app.
+  // Modals: `.modal-overlay.show` is a class change, not a DOM one.
+  const modalSeen = new WeakSet();
+  function syncModalClass() {
+    document.body.classList.toggle("ab-modal", !!document.querySelector(".modal-overlay.show"));
+  }
+  function observeModals() {
+    document.querySelectorAll(".modal-overlay").forEach((m) => {
+      if (modalSeen.has(m)) return;
+      modalSeen.add(m);
+      new MutationObserver(syncModalClass).observe(m, { attributes: true, attributeFilter: ["class"] });
+    });
+  }
+
+  // «Отмена» instead of a dead disabled button while connecting. The SPA
+  // marks connecting with the button's disabled attr; once we take over,
+  // our own abCancel marker keeps the state stable across sync runs (the
+  // SPA re-render on state change replaces the node, and ensureBtnObserver
+  // re-binds to the fresh one). Every write below is guarded: this runs
+  // from an attribute observer on the button itself, and an unguarded
+  // same-value write would retrigger it on every pass — a self-sustaining
+  // microtask loop, i.e. a frozen app.
+  window.__wisteriaSyncBtn = function () {
     const btn = document.getElementById("btn-toggle");
-    if (btn) {
-      const spaConnecting = btn.disabled && !btn.classList.contains("connected");
-      if (spaConnecting || btn.dataset.abCancel === "1") {
-        const txt = btn.querySelector(".connect-text");
-        if (btn.dataset.abCancel !== "1") btn.dataset.abCancel = "1";
-        if (btn.disabled) btn.disabled = false;
-        if (!btn.classList.contains("ab-cancel")) btn.classList.add("ab-cancel");
-        if (txt && txt.dataset.abCancel !== "1") {
-          txt.dataset.abCancel = "1";
-          txt.textContent = document.documentElement.lang === "en" ? "Cancel" : "Отмена";
-        }
+    if (!btn) return;
+    const spaConnecting = btn.disabled && !btn.classList.contains("connected");
+    if (spaConnecting || btn.dataset.abCancel === "1") {
+      const txt = btn.querySelector(".connect-text");
+      if (btn.dataset.abCancel !== "1") btn.dataset.abCancel = "1";
+      if (btn.disabled) btn.disabled = false;
+      if (!btn.classList.contains("ab-cancel")) btn.classList.add("ab-cancel");
+      if (txt && txt.dataset.abCancel !== "1") {
+        txt.dataset.abCancel = "1";
+        txt.textContent = document.documentElement.lang === "en" ? "Cancel" : "Отмена";
       }
     }
+  };
+
+  // The connect button is recreated by every structural SPA render, so the
+  // attribute observer is re-bound whenever the referenced node changes.
+  let btnObserver = null;
+  let btnObserved = null;
+  function ensureBtnObserver() {
+    const btn = document.getElementById("btn-toggle");
+    if (btn === btnObserved && btnObserver) return;
+    if (btnObserver) {
+      btnObserver.disconnect();
+      btnObserver = null;
+    }
+    btnObserved = btn;
+    if (!btn) return;
+    btnObserver = new MutationObserver(() => window.__wisteriaSyncBtn());
+    btnObserver.observe(btn, { attributes: true, attributeFilter: ["disabled", "class"] });
+  }
+
+  observeModals();
+  syncModalClass();
+  ensureBtnObserver();
+  window.__wisteriaSyncBtn();
+
+  new MutationObserver(() => {
+    syncModalClass();
+    observeModals();
+    ensureBtnObserver();
+    // The SPA re-creates the button on state changes; sync the fresh node.
+    window.__wisteriaSyncBtn();
 
     const as = document.querySelector("input#s-autostart");
     if (as) {
@@ -304,8 +359,7 @@
       }));
       sync();
     }
-    // attributes too: .modal-overlay.show is a class change, not a DOM one
-  }).observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+  }).observe(document.documentElement, { childList: true, subtree: true });
 
   // Cold-start safety net: if the SPA boot chain died before its first
   // render (any bridge hiccup leaves an empty content area), replay the

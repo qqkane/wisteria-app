@@ -313,3 +313,93 @@ func TestStatusEqualsCoreTruth(t *testing.T) {
 		t.Fatalf("UI would lie: status CONNECTED while SOCKS %s is dead", st.SocksAddr)
 	}
 }
+
+// TestAutoReconnectSurvivesProfileSwitch: switching profiles used to call
+// Stop() inside Start()'s wait loop, leaving userStop=true for the whole new
+// session. The first watchdog kill after the switch then never reconnected —
+// auto-reconnect was silently dead until the app restarted. p2 must come
+// back on its own, with its own profile id, after its port dies.
+func TestAutoReconnectSurvivesProfileSwitch(t *testing.T) {
+	svc, addr, spawns := fakeService(t, "close_after", "2.0")
+	p1 := fakeProfile()
+	if err := svc.Start(p1); err != nil {
+		t.Fatalf("start p1: %v", err)
+	}
+	if st := waitState(t, svc, StateConnected, 5*time.Second); st.State != StateConnected || st.ProfileID != p1.ID {
+		t.Fatalf("p1 never reached connected: %+v", st)
+	}
+
+	// Switch while p1 is connected. p2 dies 0.6s after spawn so the
+	// watchdog + reconnect choreography completes inside the test budget.
+	t.Setenv("FAKECORE_CLOSE_AFTER", "0.6")
+	p2 := fakeProfile()
+	p2.ID = "fake2"
+	p2.Name = "fake2"
+	if err := svc.Start(p2); err != nil {
+		t.Fatalf("switch to p2: %v", err)
+	}
+	if st := waitState(t, svc, StateConnected, 6*time.Second); st.State != StateConnected || st.ProfileID != "fake2" {
+		t.Fatalf("switch did not connect p2: %+v", st)
+	}
+
+	// The fake closes p2's listener at 0.6s; the watchdog must notice.
+	dropped := false
+	dropDeadline := time.Now().Add(6 * time.Second)
+	for time.Now().Before(dropDeadline) {
+		if svc.Status().State != StateConnected {
+			dropped = true
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !dropped {
+		t.Fatalf("watchdog never noticed p2's death: %+v", svc.Status())
+	}
+
+	// Keep the reconnected fake alive long enough to verify the landing:
+	// without this, it would die again 0.6s after the relaunch and the
+	// CONNECTED window could be missed.
+	t.Setenv("FAKECORE_CLOSE_AFTER", "30")
+	st := waitState(t, svc, StateConnected, 10*time.Second)
+	if st.State != StateConnected || st.ProfileID != "fake2" {
+		t.Fatalf("auto-reconnect after a profile switch landed on %+v (want fake2 connected; spawns=%d)", st, spawns())
+	}
+	if !socksAlive(addr) {
+		t.Fatal("socks port dead after auto-reconnect")
+	}
+}
+
+// TestAutoReconnectExponentialBackoffGrows: consecutive reconnect attempts
+// used to reset reconnNext to 0, so a refused spawn spun the loop at 0ms.
+// The backoff must strictly grow past the initial delay and the spawn count
+// must stay bounded.
+func TestAutoReconnectExponentialBackoffGrows(t *testing.T) {
+	svc, _, spawns := fakeService(t, "no_bind", "")
+	svc.readinessTimeout = 200 * time.Millisecond
+	svc.backoffInit = 200 * time.Millisecond
+	svc.backoffMax = 2 * time.Second
+	if err := svc.Start(fakeProfile()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	attemptDeadline := time.Now().Add(10 * time.Second)
+	for {
+		if svc.Status().Attempt >= 3 {
+			break
+		}
+		if time.Now().After(attemptDeadline) {
+			t.Fatalf("reconnect attempts never reached 3: %+v", svc.Status())
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	svc.mu.Lock()
+	next, init := svc.reconnNext, svc.backoffInit
+	svc.mu.Unlock()
+	if next <= init {
+		t.Fatalf("backoff did not grow past the initial delay: reconnNext=%v init=%v", next, init)
+	}
+	// A 0ms tight loop would spawn cores every few milliseconds; three
+	// legitimate attempts need ~3s, so even a slow CI stays far below this.
+	if n := spawns(); n > 50 {
+		t.Fatalf("too many core spawns for 3 attempts (tight loop?): %d", n)
+	}
+}

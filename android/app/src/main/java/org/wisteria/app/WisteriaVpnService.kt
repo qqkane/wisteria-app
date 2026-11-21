@@ -63,8 +63,33 @@ class WisteriaVpnService : VpnService() {
     @Volatile
     private var boxTun: ParcelFileDescriptor? = null
     private var boxNetCallback: ConnectivityManager.NetworkCallback? = null
+
+    // Native-engine counterpart of the box interface monitor. The wisteria
+    // engine dials once and never re-reads the OS routing table, so a
+    // Wi-Fi ⇄ cellular switch leaves its sockets bound to a dead network
+    // (the tunnel stays "connected" over black hole traffic) until the
+    // health watchdog times out. Watching ConnectivityManager ourselves and
+    // rebuilding the session on a real default-network change closes that
+    // gap; lastActiveNetHandle makes the callback deliver-on-register and
+    // spurious same-network events no-ops.
+    private var wisteriaNetCallback: ConnectivityManager.NetworkCallback? = null
+    @Volatile
+    private var lastActiveNetHandle: Long? = null
+    @Volatile
+    private var netSwitchFuture: ScheduledFuture<*>? = null
+    private val netSwitchLock = Any()
+
     private val executor = Executors.newSingleThreadExecutor()
     private var engineIsBox = false
+
+    /** Serializes an engine start against an engine stop across threads.
+     *  Disconnect tears down on its own thread (on purpose — it must not
+     *  queue behind a blocking start), so teardown() no longer holds
+     *  stateLock while it stops the engine. Without this lock a Connect
+     *  that passed the stateLock guard while such a stop was mid-flight
+     *  could start the next engine and then have the old Mobile.stop()
+     *  cancel the new session's context. */
+    private val engineLock = Any()
 
     /** True while a connect() is between its entry guard and the engine
      *  flags being set; guarded by stateLock. */
@@ -196,9 +221,34 @@ class WisteriaVpnService : VpnService() {
 
         override fun onState(state: String?) {
             try {
+                // A rejected handshake (wrong/rotated key, server-side peer
+                // removed) is terminal: the engine cannot fix it by retrying,
+                // and scheduleReconnect() would hammer the server every 30 s
+                // forever. Stand down and tell the user what to do — only a
+                // fresh Connect (a new link) clears this.
+                if (state == "rejected") {
+                    userStopped = true
+                    EngineHub.pushEvent(
+                        "state",
+                        statusJson("disconnected", "Сервер отклонил рукопожатие — проверьте ключ или обновите ссылку"),
+                    )
+                    // Post the final word first: teardown() removes the
+                    // foreground notification, and re-posting it afterwards
+                    // would leave an undismissable "Отключено" ghost.
+                    updateNotification("disconnected")
+                    WisteriaTileService.refresh(this@WisteriaVpnService)
+                    teardown(pushState = false)
+                    stopSelf()
+                    return
+                }
                 val mapped = when (state) {
                     "connecting", "retrying" -> "connecting"
                     "connected" -> "connected"
+                    // The engine is alive but has no usable network yet and
+                    // keeps retrying on its own; mapping this to
+                    // "disconnected" made scheduleReconnect() tear down the
+                    // session it was about to establish.
+                    "no_network" -> "connecting"
                     else -> "disconnected"
                 }
                 EngineHub.pushEvent("state", statusJson(mapped))
@@ -238,9 +288,11 @@ class WisteriaVpnService : VpnService() {
                 // Serialize with teardown: boxTun must never be assigned after a
                 // teardown already closed it (fd leak), and a Disconnect that
                 // raced the box boot must not hand the dying engine a fresh tun.
-                // The lock spans establish() — a few ms — and teardown (the
-                // other stateLock user) simply waits it out.
+                // The lock spans establish() — a few ms — and teardown only
+                // holds it for the field snapshot, never while it stops the
+                // engine, so the two cannot deadlock.
                 synchronized(stateLock) {
+                    if (tearingDown || userStopped) return -1
                     val builder = Builder()
                         .setSession(EngineHub.profileName.ifEmpty { "Wisteria" })
                         .setMtu(opts.optInt("mtu", TUN_MTU))
@@ -272,6 +324,13 @@ class WisteriaVpnService : VpnService() {
                     builder.addDnsServer(tunDns())
                     applySplitApps(builder)
                     val pfd = builder.establish() ?: return -1
+                    // Re-check under the same lock: a Disconnect that landed
+                    // during establish() must not leave the just-created fd
+                    // owned by a service that is already tearing down.
+                    if (tearingDown || userStopped) {
+                        runCatching { pfd.close() }
+                        return -1
+                    }
                     boxTun = pfd
                     return pfd.fd
                 }
@@ -309,9 +368,19 @@ class WisteriaVpnService : VpnService() {
                 // session down and bring it back up on the same serialized
                 // executor, so a Disconnect racing the restart still wins.
                 val epoch = cancelEpoch
+                // Answer the FGS obligation HERE, synchronously: the intent
+                // usually comes through startService/startForegroundService
+                // while the activity is still visible, and doing it from the
+                // queued task (after a slow teardown) is what threw
+                // ForegroundServiceStartNotAllowedException on Android 12+.
+                tryStartForeground(currentStatusWord())
                 executor.execute {
-                    teardown()
-                    connect("", epoch, fgsRequired = true)
+                    if (userStopped) {
+                        stopSelf()
+                        return@execute
+                    }
+                    teardown(pushState = true, keepForeground = true)
+                    connect("", epoch, fgsRequired = false)
                 }
             }
             else -> {
@@ -353,11 +422,17 @@ class WisteriaVpnService : VpnService() {
     override fun onDestroy() {
         userStopped = true
         stopWatchdog()
-        watchdogExec.shutdownNow()
-        executor.execute {
-            teardown()
+        // The debounced network-switch task must not survive the service.
+        synchronized(netSwitchLock) {
+            netSwitchFuture?.cancel(false)
+            netSwitchFuture = null
         }
-        executor.shutdown()
+        watchdogExec.shutdownNow()
+        // Tear down synchronously: queueing it behind executor.shutdown()
+        // used to drop the task (shutdown() rejects new work), leaking the
+        // engine process and the tun fd on every service destruction.
+        teardown(pushState = false)
+        executor.shutdownNow()
         super.onDestroy()
     }
 
@@ -421,16 +496,24 @@ class WisteriaVpnService : VpnService() {
             // epochChanged() checks in startWisteria / startBox.)
             if (cancelEpoch != myCancelEpoch) return
 
-            // The user wants a tunnel now: arm the watchdog / reconnect path.
-            userStopped = false
-            sessionStartEpoch = System.currentTimeMillis() / 1000
-            reconnectStep = 0
-            reconnectQueued.set(false)
+            // Start under engineLock: a teardown on the Disconnect thread
+            // may still be stopping the previous engine even though its
+            // fields are already cleared (and its Cancel may have landed
+            // after the check above — re-check under the lock).
+            synchronized(engineLock) {
+                if (cancelEpoch != myCancelEpoch) return
 
-            if (profile.optString("type") == "wisteria") {
-                startWisteria(profile, myEpoch)
-            } else {
-                startBox(profile, myEpoch)
+                // The user wants a tunnel now: arm the watchdog / reconnect path.
+                userStopped = false
+                sessionStartEpoch = System.currentTimeMillis() / 1000
+                reconnectStep = 0
+                reconnectQueued.set(false)
+
+                if (profile.optString("type") == "wisteria") {
+                    startWisteria(profile, myEpoch)
+                } else {
+                    startBox(profile, myEpoch)
+                }
             }
         } catch (e: Throwable) {
             // establish()/store failures must not wedge `starting` (see the
@@ -546,6 +629,10 @@ class WisteriaVpnService : VpnService() {
         EngineHub.pushEvent("state", statusJson("connecting"))
         try {
             Mobile.start(cfg, fd.fd.toLong(), callback)
+            // The native engine has no netlink visibility on Android: watch
+            // the default network ourselves so a Wi-Fi ⇄ LTE switch rebuilds
+            // the session instead of black-holing it.
+            registerWisteriaNetworkMonitor()
             // A Disconnect may have landed while we were establishing or
             // starting; honor it by tearing the just-started engine down.
             if (epochChanged(myEpoch)) {
@@ -629,35 +716,47 @@ class WisteriaVpnService : VpnService() {
      */
     private fun registerBoxNetworkMonitor() {
         val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+
+        fun reportDefault() {
+            val active = cm.activeNetwork
+            val lp = active?.let { cm.getLinkProperties(it) }
+            val name = lp?.interfaceName
+            if (name.isNullOrEmpty()) {
+                Mobile.boxUpdateDefaultInterface("", -1, false, false)
+                return
+            }
+            val idx = try {
+                java.net.NetworkInterface.getByName(name)?.index ?: -1
+            } catch (_: Exception) { -1 }
+            val caps = cm.getNetworkCapabilities(active)
+            val expensive =
+                caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == false
+            Mobile.boxUpdateDefaultInterface(name, idx, expensive, false)
+        }
+
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
+                reportDefault()
+            }
+
+            // The default network died (Wi-Fi dropped before the cellular
+            // one came up): the box core must forget the interface it was
+            // told about, or it keeps sending on a dead one.
+            override fun onLost(network: Network) {
                 reportDefault()
             }
 
             override fun onLinkPropertiesChanged(network: Network, properties: android.net.LinkProperties) {
                 reportDefault()
             }
-
-            private fun reportDefault() {
-                val active = cm.activeNetwork
-                val lp = active?.let { cm.getLinkProperties(it) }
-                val name = lp?.interfaceName
-                if (name.isNullOrEmpty()) {
-                    Mobile.boxUpdateDefaultInterface("", -1, false, false)
-                    return
-                }
-                val idx = try {
-                    java.net.NetworkInterface.getByName(name)?.index ?: -1
-                } catch (_: Exception) { -1 }
-                val caps = cm.getNetworkCapabilities(active)
-                val expensive =
-                    caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == false
-                Mobile.boxUpdateDefaultInterface(name, idx, expensive, false)
-            }
         }
         boxNetCallback = cb
         try {
             cm.registerDefaultNetworkCallback(cb)
+            // registerDefaultNetworkCallback() may deliver onAvailable on a
+            // binder thread later; seed the core with the current network
+            // right away so the first dial does not race the callback.
+            reportDefault()
         } catch (e: Exception) {
             EngineHub.coreLog("network monitor: ${e.message}")
         }
@@ -674,47 +773,144 @@ class WisteriaVpnService : VpnService() {
         boxNetCallback = null
     }
 
-    private fun teardown(pushState: Boolean = true) {
+    /**
+     * Default-network watchdog for the native wisteria engine. On a real
+     * Wi-Fi ⇄ cellular switch the engine's sockets are bound to the old
+     * network; rebuilding the session is cheaper and more reliable than
+     * waiting for its health monitor to declare the tunnel dead. Debounced
+     * by 600 ms because the switch itself fires onLost + onAvailable for
+     * several networks in a row.
+     */
+    private fun registerWisteriaNetworkMonitor() {
+        unregisterWisteriaNetworkMonitor()
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        // registerDefaultNetworkCallback() replays onAvailable for the
+        // already-active network immediately; remember it so that replay is
+        // not mistaken for a switch.
+        lastActiveNetHandle = try {
+            cm.activeNetwork?.networkHandle
+        } catch (_: Throwable) {
+            null
+        }
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) = onMaybeSwitched()
+
+            // onLost often lands BEFORE the new default network is picked:
+            // with no active network there is nothing to compare yet, and the
+            // following onAvailable handles the switch. Never tear down on a
+            // null handle here.
+            override fun onLost(network: Network) = onMaybeSwitched()
+
+            private fun onMaybeSwitched() {
+                val currentHandle = try {
+                    cm.activeNetwork?.networkHandle
+                } catch (_: Throwable) {
+                    null
+                } ?: return
+                if (currentHandle == lastActiveNetHandle) return
+                lastActiveNetHandle = currentHandle
+                if (userStopped || tearingDown) return
+                synchronized(netSwitchLock) {
+                    netSwitchFuture?.cancel(false)
+                    netSwitchFuture = try {
+                        watchdogExec.schedule({
+                            executor.execute {
+                                if (userStopped || tearingDown) return@execute
+                                val epoch = cancelEpoch
+                                EngineHub.appLog("сеть изменилась — переподключение")
+                                reconnectStep = 0
+                                reconnectQueued.set(false)
+                                teardown(pushState = true, keepForeground = true)
+                                connect("", epoch, fgsRequired = false)
+                            }
+                        }, 600L, TimeUnit.MILLISECONDS)
+                    } catch (_: Throwable) {
+                        null // executor already shut down (service dying)
+                    }
+                }
+            }
+        }
+        wisteriaNetCallback = cb
+        try {
+            cm.registerDefaultNetworkCallback(cb)
+        } catch (e: Exception) {
+            EngineHub.coreLog("network monitor: ${e.message}")
+        }
+    }
+
+    private fun unregisterWisteriaNetworkMonitor() {
+        wisteriaNetCallback?.let {
+            try {
+                val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                cm.unregisterNetworkCallback(it)
+            } catch (_: Throwable) {
+            }
+        }
+        wisteriaNetCallback = null
+        lastActiveNetHandle = null
+        synchronized(netSwitchLock) {
+            netSwitchFuture?.cancel(false)
+            netSwitchFuture = null
+        }
+    }
+
+    private fun teardown(pushState: Boolean = true, keepForeground: Boolean = false) {
         stopWatchdog()
         tearingDown = true
         try {
-            synchronized(stateLock) {
-            teardownEpoch++
-            if (engineIsBox) {
-                unregisterBoxNetworkMonitor()
-                try {
-                    Mobile.boxStop()
-                } catch (_: Throwable) {
+            // Snapshot and clear the session fields under stateLock, but stop
+            // the engine while holding engineLock instead: Mobile.stop()/
+            // boxStop() can block while the engine is still inside callback
+            // .onOpenTun(), which needs stateLock — so the stop must happen
+            // after that lock is released. engineLock keeps a Connect that
+            // raced this teardown from starting the next engine until this
+            // one is really down.
+            val (curBoxTun, curTun) = synchronized(engineLock) {
+                val (wasBox, boxFd, tunFd) = synchronized(stateLock) {
+                    teardownEpoch++
+                    val snap = Triple(engineIsBox, boxTun, tun)
+                    boxTun = null
+                    engineIsBox = false
+                    tun = null
+                    snap
                 }
-                boxTun?.let {
+                if (wasBox) {
+                    unregisterBoxNetworkMonitor()
                     try {
-                        it.close()
+                        Mobile.boxStop()
+                    } catch (_: Throwable) {
+                    }
+                    try {
+                        boxFd?.close()
+                    } catch (_: Throwable) {
+                    }
+                } else {
+                    try {
+                        Mobile.stop()
                     } catch (_: Throwable) {
                     }
                 }
-                boxTun = null
-                engineIsBox = false
-            } else {
-                try {
-                    Mobile.stop()
-                } catch (_: Throwable) {
-                }
+                boxFd to tunFd
             }
-            tun?.let {
-                try {
-                    it.close()
-                } catch (_: Throwable) {
-                }
+            // After engineLock: a racing start may have registered its own
+            // monitor while this teardown waited for the lock.
+            unregisterWisteriaNetworkMonitor()
+            try {
+                curTun?.close()
+            } catch (_: Throwable) {
             }
-            tun = null
-        }
-        EngineHub.profileId = ""
-        EngineHub.profileName = ""
-        EngineHub.profileType = ""
-        sessionStartEpoch = 0 // the pushed "disconnected" must not carry a stale started_at
-        if (pushState) EngineHub.pushEvent("state", statusJson("disconnected"))
-        WisteriaTileService.refresh(this)
-        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+            EngineHub.profileId = ""
+            EngineHub.profileName = ""
+            EngineHub.profileType = ""
+            sessionStartEpoch = 0 // the pushed "disconnected" must not carry a stale started_at
+            if (pushState) EngineHub.pushEvent("state", statusJson("disconnected"))
+            WisteriaTileService.refresh(this)
+            // Internal restarts (reconnect, network switch) keep the
+            // foreground notification: dropping it here made the following
+            // startForeground() a background FGS start on Android 12+.
+            if (!keepForeground) {
+                ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+            }
         } finally {
             // Only after the whole pass: the engine Stop() above fires
             // onState("disconnected") synchronously — that is our teardown,

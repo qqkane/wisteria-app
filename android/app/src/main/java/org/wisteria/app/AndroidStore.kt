@@ -166,6 +166,26 @@ class AndroidStore(private val context: Context) {
         }
     }
 
+    /** Set just the latency field of one profile. A background ping that
+     *  rewrites the whole stale profile JSON used to silently revert a
+     *  concurrent edit (e.g. a preset picked while the ping was in flight):
+     *  load→patch→save under the store lock keeps the rest of the record. */
+    fun updateProfileLatency(id: String, latencyMs: Long) {
+        synchronized(STORE_LOCK) {
+            val store = load()
+            val arr = store.optJSONArray("profiles") ?: return
+            for (i in 0 until arr.length()) {
+                val item = arr.getJSONObject(i)
+                if (item.optString("id") == id) {
+                    item.put("latency_ms", latencyMs)
+                    break
+                }
+            }
+            store.put("profiles", arr)
+            save(store)
+        }
+    }
+
     fun activeId(): String = synchronized(STORE_LOCK) { load().optString("active") }
 
     fun setActive(id: String) {

@@ -368,7 +368,11 @@ type Service struct {
 	sbProbed   bool
 	userStop   bool          // the user asked to disconnect: suppress auto-reconnect
 	reconnNext time.Duration // backoff delay for the next auto-reconnect attempt
-	startMu    sync.Mutex    // serializes session spawns (UI Connect vs the reconnect loop)
+	// reconnGen invalidates reconnect loops from a superseded session: a
+	// manual Start or Stop bumps it, and every loop carries the generation
+	// it was scheduled for and exits as soon as it no longer matches.
+	reconnGen uint64
+	startMu   sync.Mutex // serializes session spawns (UI Connect vs the reconnect loop)
 
 	// Timing knobs (defaults in newService; tests tighten them):
 	readinessTimeout time.Duration // core must open its local port within this
@@ -477,7 +481,21 @@ func (s *Service) logf(format string, args ...any) {
 // Start connects the profile. A running session is stopped first and its
 // teardown awaited, so clicking another server switches tunnels without a
 // manual disconnect (and a new core never fights the old one for the port).
-func (s *Service) Start(p Profile) (err error) {
+func (s *Service) Start(p Profile) error {
+	// A manual connect starts a new generation: reconnect loops still
+	// sleeping on behalf of the previous session must go away, and the
+	// backoff restarts from the initial delay.
+	s.mu.Lock()
+	s.reconnGen++
+	s.reconnNext = 0
+	s.mu.Unlock()
+	return s.start(p, false, 0)
+}
+
+// start is the shared connect path of a manual Start and the auto-reconnect
+// loop. isReconnect preserves the backoff state across consecutive reconnect
+// attempts; attempt is stamped on the status so the UI can show the number.
+func (s *Service) start(p Profile, isReconnect bool, attempt int) (err error) {
 	// The frontend optimistically renders "connecting" before this call, but
 	// every early failure below returns with the stored state untouched and
 	// no event — the UI then stays wedged on the connecting screen (disabled
@@ -493,12 +511,6 @@ func (s *Service) Start(p Profile) (err error) {
 	// port (the loser dies on checkPortFree and confuses the state machine).
 	s.startMu.Lock()
 	defer s.startMu.Unlock()
-	s.mu.Lock()
-	// A fresh Start is a fresh connect intent: clear any user stop and
-	// restart the auto-reconnect backoff from the initial delay.
-	s.userStop = false
-	s.reconnNext = 0
-	s.mu.Unlock()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		s.mu.Lock()
@@ -512,6 +524,15 @@ func (s *Service) Start(p Profile) (err error) {
 		}
 		s.Stop()
 	}
+	// Only now, with the previous session gone, clear the stop flag: the
+	// Stop() above sets it, and leaving it set silently disabled
+	// auto-reconnect for the whole new session (the profile-switch bug).
+	s.mu.Lock()
+	s.userStop = false
+	if !isReconnect {
+		s.reconnNext = 0
+	}
+	s.mu.Unlock()
 	if err := os.MkdirAll(s.dirs.Runtime, 0o700); err != nil {
 		return err
 	}
@@ -523,16 +544,26 @@ func (s *Service) Start(p Profile) (err error) {
 	// the full 20s readiness deadline. Fail fast with a clear message.
 	// Settings snapshot under the lock: SaveSettings replaces the struct
 	// concurrently, a bare read here is a data race.
+	//
+	// Bind and dial hosts differ with ListenAll: inbounds bind 0.0.0.0, but
+	// every internal client (readiness, watchdog, HTTP bridge, TUN) must
+	// dial 127.0.0.1 — dialing 0.0.0.0 fails on Windows (WSAEADDRNOTAVAIL).
 	s.mu.Lock()
-	socksAddr0 := fmt.Sprintf("%s:%d", s.settings.ListenHost(), s.settings.LocalPort)
+	socksBindAddr := fmt.Sprintf("%s:%d", s.settings.ListenHost(), s.settings.LocalPort)
+	socksAddr := fmt.Sprintf("127.0.0.1:%d", s.settings.LocalPort)
+	httpAddr := fmt.Sprintf("127.0.0.1:%d", s.settings.HttpPort)
 	s.mu.Unlock()
-	if err := checkPortFree(socksAddr0); err != nil {
+	if err := checkPortFree(socksBindAddr); err != nil {
 		return err
 	}
 	s.mu.Lock()
 	if s.settings.ListenAll {
 		s.logf("внимание: прокси слушают на 0.0.0.0 — доступны любой машине в локальной сети без пароля")
 	}
+	// Clear before prepareCore: for wisteria profiles prepareCore sets the
+	// --status path, and clearing it afterwards wiped the diagnostics probe
+	// table (WisteriaDiag always read an empty path).
+	s.wstStatus = ""
 	core, args, confFile, err := s.prepareCore(p)
 	if err != nil {
 		s.mu.Unlock()
@@ -571,12 +602,15 @@ func (s *Service) Start(p Profile) (err error) {
 		cancel:    cancel,
 		done:      make(chan struct{}),
 		confFile:  confFile,
-		socksAddr: socksAddr0,
-		httpAddr:  fmt.Sprintf("%s:%d", s.settings.ListenHost(), s.settings.HttpPort),
+		socksAddr: socksAddr,
+		httpAddr:  httpAddr,
 	}
 	s.sess = sess
-	s.wstStatus = "" // prepareCore re-sets it for wisteria profiles
-	s.wstEvents = nil
+	if !isReconnect {
+		// A fresh manual connect is a fresh diagnostics timeline; an
+		// auto-reconnect keeps the history of the incident it recovers from.
+		s.wstEvents = nil
+	}
 	s.wstHealth = CoreHealth{}
 	s.st = Status{
 		State:       StateConnecting,
@@ -587,6 +621,10 @@ func (s *Service) Start(p Profile) (err error) {
 		PID:         cmd.Process.Pid,
 		SocksAddr:   sess.socksAddr,
 		HttpAddr:    sess.httpAddr,
+	}
+	if isReconnect {
+		s.st.Reconnecting = true
+		s.st.Attempt = attempt
 	}
 	s.logf("запуск %s (pid %d) для %s [%s]", filepath.Base(core), cmd.Process.Pid, p.Endpoint(), p.Type)
 	s.mu.Unlock()
@@ -754,15 +792,19 @@ func (s *Service) supervise(sess *session, ctx context.Context, cancel context.C
 	// CONNECT; the cores speak SOCKS/mixed). Bridge failure is not fatal —
 	// direct SOCKS users keep working.
 	coreName := filepath.Base(sess.cmd.Path)
+	// The bridge listens on the configured bind host (ListenAll included),
+	// while the system proxy and all internal upstreams use loopback: WinINET
+	// rejects a 0.0.0.0 proxy address, and the proxy runs on this machine.
+	bindHttpAddr := fmt.Sprintf("%s:%d", set.ListenHost(), set.HttpPort)
 	s.mu.Lock()
 	if tunActive {
 		s.logf("TUN активен — системный прокси и HTTP-мост не используются")
 	} else {
 		if set.BridgeEnabled {
-			br, err := StartHTTPBridge(httpAddr, socksAddr)
+			br, err := StartHTTPBridge(bindHttpAddr, socksAddr)
 			if err == nil {
 				sess.bridge = br
-				s.logf("HTTP-мост на http://%s → socks://%s", httpAddr, socksAddr)
+				s.logf("HTTP-мост на http://%s → socks://%s", bindHttpAddr, socksAddr)
 			} else {
 				s.logf("HTTP-мост не поднялся (%v) — системный прокси работать не будет", err)
 			}
@@ -896,30 +938,29 @@ func (s *Service) teardownSession(sess *session, waitErr error) {
 		if auto {
 			// The tunnel died on its own (server gone, rekey failure, core
 			// crash, watchdog kill): keep the user's connect intent alive and
-			// relaunch the core with an exponential backoff.
+			// relaunch the core with an exponential backoff. The generation
+			// captured here lets a later Start/Stop cancel this chain.
 			s.mu.Lock()
+			gen := s.reconnGen
 			delay := s.reconnNext
-			if delay == 0 {
+			if delay <= 0 {
 				delay = s.backoffInit
 			}
-			s.reconnNext = 2 * delay
-			if s.reconnNext > s.backoffMax {
-				s.reconnNext = s.backoffMax
-			}
+			s.reconnNext = min(2*delay, s.backoffMax)
 			s.st.Reconnecting = true
 			s.st.Error = fmt.Sprintf("соединение потеряно — автоматическое переподключение (задержка %v)", delay)
 			s.mu.Unlock()
-			go s.reconnectLoop(sess.profile, delay)
+			go s.reconnectLoop(sess.profile, delay, gen)
 		}
 		s.notify()
 	})
 }
 
 // reconnectLoop relaunches the profile's core with exponential backoff
-// until the tunnel is back, the user disconnects, or a newer Start takes
-// over. One loop runs at a time: every teardown schedules the next attempt
-// with the already-doubled delay stored in s.reconnNext.
-func (s *Service) reconnectLoop(p Profile, delay time.Duration) {
+// until the tunnel is back, the user disconnects, or a newer Start/Stop takes
+// over. gen is the reconnGen the loop was scheduled under: any successor
+// generation makes this loop exit at once instead of fighting the new owner.
+func (s *Service) reconnectLoop(p Profile, delay time.Duration, gen uint64) {
 	// Interruptible sleep: react to a user Stop / fresh Start within a
 	// quarter second, not after the full backoff delay.
 	deadline := time.Now().Add(delay)
@@ -928,37 +969,47 @@ func (s *Service) reconnectLoop(p Profile, delay time.Duration) {
 		s.mu.Lock()
 		stop := s.userStop
 		sess := s.sess
+		stale := s.reconnGen != gen
 		s.mu.Unlock()
-		if stop || sess != nil {
+		if stop || sess != nil || stale {
 			return
 		}
 	}
 	s.mu.Lock()
-	if s.userStop || s.sess != nil {
+	if s.userStop || s.sess != nil || s.reconnGen != gen {
 		s.mu.Unlock()
 		return
 	}
 	attempt := s.st.Attempt + 1
 	s.mu.Unlock()
 	s.logf("авто-переподключение: попытка %d", attempt)
-	if err := s.Start(p); err != nil {
-		// Start refused (previous teardown wedged, port taken): the
-		// teardown path of the NEXT failure reschedules us.
+	if err := s.start(p, true, attempt); err != nil {
+		// The spawn was refused before supervise started (busy port, config
+		// error, previous teardown wedged). Schedule the next attempt with
+		// exponential backoff — a zero delay here used to spin the loop at
+		// 0ms, spawning cores as fast as the OS allowed.
 		s.logf("авто-переподключение: %v", err)
 		s.mu.Lock()
-		if !s.userStop && s.sess == nil {
+		if !s.userStop && s.sess == nil && s.reconnGen == gen {
 			d := s.reconnNext
+			if d <= 0 {
+				d = s.backoffInit
+			}
 			s.reconnNext = 2 * d
 			if s.reconnNext > s.backoffMax {
 				s.reconnNext = s.backoffMax
 			}
-			go s.reconnectLoop(p, d)
+			s.st.Reconnecting = true
+			s.st.Attempt = attempt
+			s.st.Error = fmt.Sprintf("ошибка переподключения (%v) — повтор через %v", err, d)
+			go s.reconnectLoop(p, d, gen)
 		}
 		s.mu.Unlock()
+		s.notify()
 		return
 	}
-	// Re-annotate the fresh status: Start() replaced the status struct, so
-	// stamp the attempt number back on it — the UI must distinguish an
+	// Re-annotate the fresh status: start() may have replaced it, so stamp
+	// the attempt number back on it — the UI must distinguish an
 	// auto-reconnect from a first manual connect.
 	s.mu.Lock()
 	if s.st.State == StateConnecting {
@@ -967,16 +1018,17 @@ func (s *Service) reconnectLoop(p Profile, delay time.Duration) {
 	}
 	s.mu.Unlock()
 	s.notify()
-	// Start launched the core; supervise() settles the outcome. Connected →
+	// start launched the core; supervise() settles the outcome. Connected →
 	// the loop's job is done. Failed → failSession's teardown reschedules
-	// the next attempt. User stop → userStop stops the chain.
+	// the next attempt. User stop / a newer generation → exit immediately.
 	for {
 		time.Sleep(300 * time.Millisecond)
 		s.mu.Lock()
 		state := s.st.State
 		stop := s.userStop
+		stale := s.reconnGen != gen
 		s.mu.Unlock()
-		if stop {
+		if stop || stale {
 			return
 		}
 		switch state {
@@ -1126,6 +1178,9 @@ func (s *Service) failSession(sess *session, err error) {
 // it cancels the auto-reconnect chain.
 func (s *Service) Stop() {
 	s.mu.Lock()
+	// A user stop is a new generation: any sleeping reconnect loop must die
+	// even if it wakes up after this session is already gone.
+	s.reconnGen++
 	s.userStop = true
 	sess := s.sess
 	wasConnected := s.st.State == StateConnected
@@ -1152,6 +1207,18 @@ func (s *Service) Stop() {
 		case <-sess.done:
 		case <-time.After(4 * time.Second):
 			s.logf("сессия так и не завершилась — следующее подключение начнётся принудительно")
+			// Never leave the wedged session in s.sess: Start's wait loop
+			// would call Stop() on it forever and every Connect would fail
+			// with "предыдущая сессия не завершилась" until a restart.
+			s.mu.Lock()
+			if s.sess == sess {
+				s.sess = nil
+				s.st.State = StateDisconnected
+				s.st.PID = 0
+				s.st.Tun = false
+			}
+			s.mu.Unlock()
+			s.notify()
 		}
 	}
 }

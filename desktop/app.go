@@ -19,7 +19,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const appVersion = "1.1.20"
+const appVersion = "1.1.21"
 
 type App struct {
 	ctx      context.Context
@@ -182,16 +182,42 @@ func (a *App) startAutoPing() {
 			case <-stop:
 				return
 			case <-t.C:
-				// One batched store write per cycle: per-profile SetLatency
-				// would rewrite profiles.json N times per tick.
-				lat := make(map[string]int64)
-				for _, p := range a.store.List() {
-					ms, _ := core.PingEndpoint(p.Host, p.Port, 3*time.Second)
-					lat[p.ID] = ms
-				}
-				a.store.SetLatencies(lat)
-				runtime.EventsEmit(a.ctx, "profiles")
 			}
+			// One batched store write per cycle: per-profile SetLatency
+			// would rewrite profiles.json N times per tick.
+			profiles := a.store.List()
+			lat := make(map[string]int64, len(profiles))
+			var mu sync.Mutex
+			var wg sync.WaitGroup
+			// Bounded parallelism: sequential pings let a handful of dead
+			// servers stall the sweep for 3s each (20 offline profiles = a
+			// minute of nothing). The stop check before acquiring a slot
+			// keeps shutdown instant even with every slot busy.
+			sem := make(chan struct{}, 8)
+			for _, p := range profiles {
+				select {
+				case <-stop:
+					return
+				case sem <- struct{}{}:
+				}
+				wg.Add(1)
+				go func(id, host string, port int) {
+					defer wg.Done()
+					defer func() { <-sem }()
+					ms, _ := core.PingEndpoint(host, port, 3*time.Second)
+					mu.Lock()
+					lat[id] = ms
+					mu.Unlock()
+				}(p.ID, p.Host, p.Port)
+			}
+			wg.Wait()
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			a.store.SetLatencies(lat)
+			runtime.EventsEmit(a.ctx, "profiles")
 		}
 	}()
 }
@@ -448,9 +474,9 @@ func (a *App) SetProfilePreset(id, preset string) error {
 // the UI call that merely changed a setting.
 func (a *App) reconnectRunning(id string) {
 	go func() {
-		a.logf("пресет изменён — переподключение")
+		a.logf("настройки изменены — переподключение")
 		if err := a.Connect(id); err != nil {
-			a.logf("автопереподключение после смены пресета: %v", err)
+			a.logf("автопереподключение после смены настроек: %v", err)
 		}
 	}()
 }
@@ -646,9 +672,11 @@ func (a *App) ToggleSystemProxy(on bool) error {
 	if on && st.State != core.StateConnected {
 		return errors.New("сначала подключитесь")
 	}
-	addr := st.HttpAddr
-	if !on {
-		addr = ""
+	// WinINET cannot use 0.0.0.0 as a proxy host: with ListenAll the
+	// displayed HttpAddr is the bind address, but the proxy runs locally.
+	addr := ""
+	if on {
+		addr = fmt.Sprintf("127.0.0.1:%d", a.svc.Settings().HttpPort)
 	}
 	if err := core.SetSystemProxy(on, addr); err != nil {
 		return err
@@ -669,8 +697,33 @@ func (a *App) SaveSettings(s core.Settings) core.Settings {
 	core.SetGitHubToken(out.GitHubToken)
 	a.startAutoPing() // interval may have changed
 	a.logf("настройки сохранены")
-	if id := a.svc.RunningProfile(); id != "" && a.effPreset(old, id) != a.effPreset(out, id) {
-		a.reconnectRunning(id)
+	// Anything the running core/bridge/proxy/TUN helper snapshotted at
+	// connect time needs a reconnect to take effect. Profiles can carry
+	// their own preset and engine, so resolve those against the live profile
+	// rather than only the global settings.
+	if id := a.svc.RunningProfile(); id != "" {
+		prof, err := a.store.Get(id)
+		engineChanged := err == nil && old.EngineFor(prof.Type) != out.EngineFor(prof.Type)
+		changed := old.LocalPort != out.LocalPort ||
+			old.HttpPort != out.HttpPort ||
+			old.ListenAll != out.ListenAll ||
+			old.BridgeEnabled != out.BridgeEnabled ||
+			old.SysProxy != out.SysProxy ||
+			old.BypassLAN != out.BypassLAN ||
+			old.NoBypassRU != out.NoBypassRU ||
+			old.RemoteDNS != out.RemoteDNS ||
+			old.LogLevel != out.LogLevel ||
+			old.MemLimitMB != out.MemLimitMB ||
+			old.RouteDirect != out.RouteDirect ||
+			old.RouteBlock != out.RouteBlock ||
+			old.TunEnabled != out.TunEnabled ||
+			old.TunStack != out.TunStack ||
+			old.TunStrictRoute != out.TunStrictRoute ||
+			engineChanged ||
+			a.effPreset(old, id) != a.effPreset(out, id)
+		if changed {
+			a.reconnectRunning(id)
+		}
 	}
 	return out
 }

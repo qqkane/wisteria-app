@@ -389,7 +389,7 @@ function renderVpn() {
           <div class="stat-label">${I.activity} ${esc(t("stat.mode"))}</div>
           <fieldset class="seg">
             <legend class="vh">${esc(t("stat.mode"))}</legend>
-            <div class="seg-track" data-active="${tun ? "tun" : "proxy"}">
+            <div class="seg-track" id="seg-track" data-active="${tun ? "tun" : "proxy"}">
               <span class="seg-thumb" aria-hidden="true"></span>
               <label class="seg-item"><input type="radio" name="mode" value="proxy" ${tun ? "" : "checked"}/><span class="seg-opt">${I.globe}${esc(t("mode.proxy"))}</span></label>
               <label class="seg-item"><input type="radio" name="mode" value="tun" ${tun ? "checked" : ""}/><span class="seg-opt">${I.layers}TUN</span></label>
@@ -893,7 +893,7 @@ function wireContent() {
   on("btn-toggle", "click", async () => {
     if (S.busy) { showToast(t("toast.busy")); return; }
     try {
-      if (S.state.state === "connected") { buzz(12); api().Disconnect(); }
+      if (S.state.state === "connected" || (S.state.reconnecting && S.state.state !== "connecting")) { buzz(12); api().Disconnect(); }
       else {
         if (!S.selected) { openModal(); return; }
         buzz(10);
@@ -1147,10 +1147,10 @@ async function fillSettingsForm(s) {
   setc("s-tunstrict", s.tun_strict_route);
   setv("s-route-direct", s.route_direct || "");
   setv("s-route-block", s.route_block || "");
-  setv("s-core-ss", s.core_ss || "sing-box");
-  setv("s-core-vmess", s.core_vmess || "sing-box");
-  setv("s-core-vless", s.core_vless || "sing-box");
-  setv("s-core-trojan", s.core_trojan || "sing-box");
+  setv("s-core-ss", s.core_ss || "xray");
+  setv("s-core-vmess", s.core_vmess || "xray");
+  setv("s-core-vless", s.core_vless || "xray");
+  setv("s-core-trojan", s.core_trojan || "xray");
   setv("s-xray", s.xray_core || "");
   setv("s-ghtoken", s.github_token || "");
   setv("s-scale", s.ui_scale || 100);
@@ -1228,6 +1228,7 @@ function applyScale() {
   app.style.zoom = z;
   app.style.height = (100 / z) + "vh";
   app.style.width = (100 / z) + "%";
+  app.style.setProperty("--ui-zoom", String(z));
 }
 
 function applyTheme() {
@@ -1282,7 +1283,8 @@ function playConnectFx(btn) {
     btn.animate([{ transform: "scale(.93)" }, { transform: "scale(1.05)", offset: .6 }, { transform: "scale(1)" }], { duration: 520, easing: "cubic-bezier(.34,1.56,.64,1)" });
     const arc = btn.querySelector(".spin-arc");
     if (arc) arc.animate([{ transform: "rotate(0deg)", opacity: 1 }, { transform: "rotate(360deg)", opacity: 0 }], { duration: 700, easing: "ease-out" });
-    btn.querySelectorAll(".ring-anim").forEach((r, i) => r.animate([{ transform: "scale(1)", opacity: .6 }, { transform: "scale(1.5)", opacity: 0 }], { duration: 800, delay: i * 120, easing: "ease-out" }));
+    // The rings are driven by .connected .ring-anim's CSS pulse; a WAAPI
+    // animation here competed with it and froze the pulse mid-lap.
   } catch (e) { /* WAAPI unavailable: CSS still shows the state */ }
 }
 
@@ -1297,8 +1299,7 @@ function beginConnectedLap() {
     // Boot reconciliation, not a fresh connect: no fake connecting lap —
     // start from the power glyph and let the crossfade play on the live node.
     btn.classList.remove("connected");
-    void btn.offsetWidth; // commit the start style so the transition runs
-    revealConnected();
+    requestAnimationFrame(() => requestAnimationFrame(() => revealConnected()));
     return;
   }
   btn.classList.remove("connected");
@@ -1379,7 +1380,7 @@ document.addEventListener("change", async (ev) => {
   cur.tun_enabled = ev.target.value === "tun";
   await api().SaveSettings(cur);
   S.cfg = cur;
-  const track = $("seg-track");
+  const track = $("seg-track") || ev.target.closest(".seg-track");
   if (track) track.dataset.active = ev.target.value;
   return;
 });
@@ -1463,16 +1464,14 @@ function renderState(st) {
   if (S.state.state === "connecting" || S.state.reconnecting) sawConnecting = true;
   if (S.state.error && !(prev && prev.error)) buzz([40, 60, 40]); // a failure surfaced
   if (S.tab !== "vpn") { renderSidebarFooter(); return; }
-  // Rebuild only on structural changes (profile switch, error box, TUN
-  // note, proxy toggle). Same-profile transitions (idle → connecting →
-  // connected) patch the DOM in place: an innerHTML swap would recreate
-  // the button node and restart its CSS animation from frame zero, which
-  // reads as the button animation stuttering on every state event.
+  // Rebuild only on structural changes (profile switch, error box).
+  // Same-profile transitions (idle → connecting → connected) patch the DOM
+  // in place: an innerHTML swap would recreate the button node and restart
+  // its CSS animation from frame zero, which reads as the button animation
+  // stuttering on every state event.
   const structural = !prev ||
     prev.profile_id !== S.state.profile_id ||
-    !!prev.tun !== !!S.state.tun ||
-    (prev.error || "") !== (S.state.error || "") ||
-    !!prev.sys_proxy !== !!S.state.sys_proxy;
+    (prev.error || "") !== (S.state.error || "");
   if (structural) {
     const prevConn = !!prev && prev.state === "connected";
     if (connTimer) { clearTimeout(connTimer); connTimer = null; }
@@ -1649,8 +1648,26 @@ whenReady(async () => {
   });
   window.runtime.EventsOn("profiles", async () => {
     S.profiles = (await api().ListProfiles()) || [];
-    if (S.tab === "profiles" || S.tab === "vpn") renderContent();
-    else renderSidebarFooter();
+    if (S.tab === "profiles") {
+      renderContent();
+    } else if (S.tab === "vpn") {
+      // Auto-ping refreshes profiles in the background: never rebuild the
+      // VPN tab for latency-only changes — an innerHTML swap recreates the
+      // connect button and restarts its animation. Patch the active card
+      // in place instead.
+      const id = S.state.profile_id || S.selected;
+      const p = S.profiles.find((x) => x.id === id);
+      const nameEl = document.querySelector("#card-profile .srv-name");
+      if (nameEl && p) nameEl.innerHTML = esc(p.name) + tlsBadge(p);
+      const pingEl = document.querySelector("#card-profile .srv-ping");
+      if (pingEl && p) {
+        const lat = p.latency_ms ? (p.latency_ms < 0 ? "n/a" : p.latency_ms + " ms") : "";
+        pingEl.textContent = p.host + ":" + p.port + (lat ? " · " + lat : "");
+      }
+      renderSidebarFooter();
+    } else {
+      renderSidebarFooter();
+    }
   });
   await loadSettings();
   await loadProfiles();

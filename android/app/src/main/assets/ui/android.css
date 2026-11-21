@@ -10,6 +10,45 @@ html.platform-android .vpn-tun-row { display: flex; align-items: center; justify
 html.platform-android .vpn-tun-label { font-size: 14px; color: var(--fg); }
 html.platform-android .preset-select { background: var(--card); border: 1px solid var(--border); color: var(--fg); border-radius: 8px; padding: 6px 10px; font-size: 13px; }
 
+/* ---------- Android GPU budget ----------
+   The WebView composites everything on the phone GPU while a tunnel is
+   running. A 600px blur(120px) orb plus stacked 20–30px backdrop-filters
+   was the main source of jank on mid-range devices; a radial gradient
+   draws the same glow as a plain fill. */
+html.platform-android .orb { filter: none !important; }
+html.platform-android .orb-1 { background: radial-gradient(circle, rgba(var(--accent-rgb), 0.24) 0%, rgba(var(--accent-rgb), 0) 70%); }
+html.platform-android .orb-2 { background: radial-gradient(circle, rgba(var(--accent-rgb), 0.16) 0%, rgba(var(--accent-rgb), 0) 70%); }
+html.platform-android .orb-3 { background: radial-gradient(circle, rgba(var(--accent-rgb), 0.12) 0%, rgba(var(--accent-rgb), 0) 70%); }
+
+html.platform-android .profile-card,
+html.platform-android .stat-card,
+html.platform-android .server-list-item,
+html.platform-android .sub-head,
+html.platform-android .log-view,
+html.platform-android .set-grid,
+html.platform-android .theme-option,
+html.platform-android #android-bottom,
+html.platform-android .ab-sec-card,
+html.platform-android .modal-content {
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* No 300 ms double-tap-zoom wait on the controls the user taps to
+   connect; the animated layers get their compositor layers up front
+   instead of being promoted/demoted on every state change. */
+html.platform-android .connect-btn,
+html.platform-android .ab-item,
+html.platform-android .server-list-item,
+html.platform-android .profile-card,
+html.platform-android .ghost-btn,
+html.platform-android .submit-btn { touch-action: manipulation; }
+
+html.platform-android .connect-btn .power-icon,
+html.platform-android .connect-btn .icon-check,
+html.platform-android .connect-btn .spin-arc,
+html.platform-android .ring-anim { will-change: transform, opacity; }
+
 /* Bottom system inset in CSS px: env() is the primary source (the page
    loads with viewport-fit=cover under an edge-to-edge webview), the
    --sat-bottom variable injected by the Kotlin insets listener is the
@@ -164,6 +203,15 @@ html.platform-android .app-content { overflow-x: hidden; }
   .connect-btn { width: 176px; height: 176px; margin: 22px auto; }
   .connect-btn .power-icon { width: 44px; height: 44px; }
   .connect-btn .btn-icons { width: 44px; height: 44px; }
+
+  /* The desktop pulse scales to 1.6 — on a 176px phone button with a
+     -28px outer ring that spills past the viewport edge and gets clipped.
+     A gentler mobile pulse stays inside the screen. */
+  @keyframes pulse-ring-mobile {
+    0% { transform: scale(1); opacity: .5; }
+    100% { transform: scale(1.38); opacity: 0; }
+  }
+  .connected .ring-anim { animation: pulse-ring-mobile 2.5s ease-out 3; }
 
   /* Logs screen: the desktop header crams title + follow + two buttons
      into one row and clips «Очистить» off-screen on a phone. Title gets

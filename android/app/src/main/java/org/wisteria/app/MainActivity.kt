@@ -240,19 +240,6 @@ class MainActivity : AppCompatActivity() {
         handleAutoConnect(intent)
     }
 
-    override fun onResume() {
-        super.onResume()
-        // The unknown-sources grant happened in system settings while the
-        // update was waiting: continue without making the user press again.
-        if (WisteriaBridge.pendingApkInstall &&
-            Build.VERSION.SDK_INT >= 26 &&
-            packageManager.canRequestPackageInstalls()
-        ) {
-            WisteriaBridge.pendingApkInstall = false
-            bridge.resumeApkUpdate()
-        }
-    }
-
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
@@ -262,7 +249,11 @@ class MainActivity : AppCompatActivity() {
             if (resultCode == RESULT_OK && id != null) {
                 bridge.onVpnConsentGranted(id)
             } else {
+                // Dismissing the system dialog must not leave the optimistic
+                // "CONNECTING…" screen up: the service never starts in this
+                // case, so push the reset ourselves.
                 EngineHub.appLog("согласие на VPN не выдано")
+                EngineHub.pushEvent("state", WisteriaBridge.staticStatusJson("disconnected", ""))
             }
         }
     }

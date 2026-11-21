@@ -21,7 +21,9 @@ import (
 
 type HTTPBridge struct {
 	ln       net.Listener
-	upstream string // host:port of the core's SOCKS inbound
+	upstream string       // host:port of the core's SOCKS inbound
+	dialer   proxy.Dialer // CONNECT tunnels reuse one SOCKS dialer
+	tr       *http.Transport
 	mu       sync.Mutex
 	closed   chan struct{}
 	conns    map[net.Conn]struct{}
@@ -33,8 +35,25 @@ func StartHTTPBridge(listenAddr, upstreamSocks string) (*HTTPBridge, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listen %s: %w", listenAddr, err)
 	}
-	b := &HTTPBridge{ln: ln, upstream: upstreamSocks, closed: make(chan struct{}),
-		conns: map[net.Conn]struct{}{}}
+	d, err := proxy.SOCKS5("tcp", upstreamSocks, nil, proxy.Direct)
+	if err != nil {
+		_ = ln.Close()
+		return nil, fmt.Errorf("socks dialer %s: %w", upstreamSocks, err)
+	}
+	// One shared Transport: plain-HTTP requests reuse pooled upstream
+	// connections instead of dialing SOCKS for every request (and leaking
+	// the per-request transport's idle sockets).
+	tr := &http.Transport{
+		MaxIdleConns:        64,
+		MaxIdleConnsPerHost: 8,
+		IdleConnTimeout:     30 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second,
+	}
+	if cd, ok := d.(proxy.ContextDialer); ok {
+		tr.DialContext = cd.DialContext
+	}
+	b := &HTTPBridge{ln: ln, upstream: upstreamSocks, dialer: d, tr: tr,
+		closed: make(chan struct{}), conns: map[net.Conn]struct{}{}}
 	b.wg.Add(1)
 	go b.serve()
 	return b, nil
@@ -60,6 +79,7 @@ func (b *HTTPBridge) Stop() {
 	ln := b.ln
 	b.mu.Unlock()
 	_ = ln.Close()
+	b.tr.CloseIdleConnections()
 
 	done := make(chan struct{})
 	go func() {
@@ -106,14 +126,6 @@ func (b *HTTPBridge) serve() {
 	}
 }
 
-func (b *HTTPBridge) socksDial() (proxy.Dialer, error) {
-	d, err := proxy.SOCKS5("tcp", b.upstream, nil, proxy.Direct)
-	if err != nil {
-		return nil, err
-	}
-	return d, nil
-}
-
 func (b *HTTPBridge) handle(conn net.Conn) {
 	defer conn.Close()
 	br := bufio.NewReader(conn)
@@ -121,10 +133,7 @@ func (b *HTTPBridge) handle(conn net.Conn) {
 	if err != nil {
 		return
 	}
-	dialer, err := b.socksDial()
-	if err != nil {
-		return
-	}
+	dialer := b.dialer
 
 	if req.Method == http.MethodConnect {
 		b.tunnel(conn, req.Host, dialer)
@@ -146,11 +155,7 @@ func (b *HTTPBridge) handle(conn net.Conn) {
 	outReq := req.Clone(req.Context())
 	outReq.URL = target
 	outReq.RequestURI = ""
-	tr := &http.Transport{}
-	if cd, ok := dialer.(proxy.ContextDialer); ok {
-		tr.DialContext = cd.DialContext
-	}
-	resp, err := tr.RoundTrip(outReq)
+	resp, err := b.tr.RoundTrip(outReq)
 	if err != nil {
 		conn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n"))
 		return

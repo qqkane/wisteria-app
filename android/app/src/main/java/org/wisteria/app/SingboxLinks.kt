@@ -250,6 +250,13 @@ object SingboxLinks {
             outbounds.put(JSONObject().put("type", "block").put("tag", "block"))
         }
 
+        // TUN stack / strict route come from the settings screen (they were
+        // hardcoded to "mixed"/false, so the UI toggles did nothing).
+        val tunStack = s.optString("tun_stack", "mixed").let {
+            if (it in setOf("mixed", "gvisor", "system")) it else "mixed"
+        }
+        val tunStrict = s.optBoolean("tun_strict_route", false)
+
         val cfg = JSONObject()
             .put(
                 "log",
@@ -272,8 +279,8 @@ object SingboxLinks {
                         .put("mtu", 1400)
                         .put("address", JSONArray().put("172.19.0.1/30").put("fdfe:dcba:9876::1/126"))
                         .put("auto_route", true)
-                        .put("strict_route", false)
-                        .put("stack", "mixed"),
+                        .put("strict_route", tunStrict)
+                        .put("stack", tunStack),
                 ),
             )
             .put("outbounds", outbounds)
@@ -468,8 +475,11 @@ object SingboxLinks {
 
     private fun trojanOutbound(raw: String, name: String): JSONObject {
         val uri = Uri.parse(raw)
+        // Uri.userInfo is already percent-decoded by android.net.Uri; running
+        // it through URLDecoder again turned literal '+' in a password into
+        // a space and double-decoded '+' → space sequences.
         val o = base("trojan", uri, 443)
-            .put("password", java.net.URLDecoder.decode(uri.userInfo ?: "", "UTF-8"))
+            .put("password", uri.userInfo ?: "")
         tlsBlock(uri, uri.host, true)?.let { o.put("tls", it) }
         transportBlock(uri)?.let { o.put("transport", it) }
         return o
@@ -494,10 +504,11 @@ object SingboxLinks {
     private fun tuicOutbound(raw: String, name: String): JSONObject {
         val uri = Uri.parse(raw)
         val userinfo = uri.userInfo ?: throw IllegalArgumentException("tuic: нет учётных данных")
+        // Already percent-decoded by Uri.parse — see trojanOutbound().
         val o = base("tuic", uri, 443)
-            .put("uuid", java.net.URLDecoder.decode(userinfo.substringBefore(":"), "UTF-8"))
+            .put("uuid", userinfo.substringBefore(":"))
         userinfo.substringAfter(":", missingDelimiterValue = "").takeIf { it.isNotEmpty() }?.let {
-            o.put("password", java.net.URLDecoder.decode(it, "UTF-8"))
+            o.put("password", it)
         }
         uri.getQueryParameter("congestion_control")?.takeIf { it.isNotBlank() }?.let { o.put("congestion_control", it) }
         uri.getQueryParameter("udp_relay_mode")?.takeIf { it.isNotBlank() }?.let { o.put("udp_relay_mode", it) }

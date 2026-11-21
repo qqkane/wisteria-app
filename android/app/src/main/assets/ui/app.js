@@ -279,8 +279,12 @@ const EXTRA = {
 const S = {
   tab: "vpn", setTab: "look", theme: "sunset", profiles: [], selected: "", lastLogSeq: 0,
   state: { state: "disconnected" }, uptimeTimer: null, extIP: "",
+  // Timestamp of the optimistic "connecting" render (markConnecting): lets
+  // the 3 s GetState poll ignore a stale "disconnected" while the Android
+  // VPN service is still booting the engine.
+  connectingAt: 0,
   subs: [], subBusy: {}, busy: false, // busy = a Connect is in flight
-  version: "", upd: null, updBusy: false, updReady: false, coreUpd: {},
+  version: "", upd: null, updReady: false, coreUpd: {},
   apps: null, splitMode: "off", splitApps: [], splitFilter: "",
   wdiag: null, // the Diagnostics page data (wisteria profiles only)
 };
@@ -671,7 +675,7 @@ function renderSettings() {
         <span>${esc(t("set.updAvail"))}: v${esc(S.upd.latest)}</span>
         ${S.updReady
           ? `<button class="ghost-btn" id="btn-restart-app">${esc(t("set.updRestart"))}</button>`
-          : `<button class="ghost-btn" id="btn-apply-upd" ${S.updBusy ? "disabled" : ""}>${esc(t("set.updApply"))}</button>`}
+          : `<button class="ghost-btn" id="btn-apply-upd">${esc(t("set.updApply"))}</button>`}
       </div>` : ""}
     </div>
     <div class="settings-section">
@@ -822,6 +826,7 @@ function renderSettings() {
 function markConnecting(id) {
   const p = S.profiles.find((x) => x.id === id);
   if (!p) return;
+  S.connectingAt = Date.now();
   renderState({ ...S.state, state: "connecting", profile_id: p.id, profile_name: p.name, error: "" });
 }
 
@@ -1071,17 +1076,11 @@ function wireContent() {
     } catch (e) { showToast((e && e.message) || e); }
   });
   on("btn-apply-upd", "click", async () => {
-    if (S.updBusy) return;
-    S.updBusy = true;
-    renderContent();
     try {
-      // The bridge returns immediately; the background download reports
-      // its progress through apkupdate events (downloading/install/error).
-      await api().ApplyAppUpdate();
+      const target = (S.upd && (S.upd.url || S.upd.latest)) || "";
+      await api().ApplyAppUpdate(target);
     } catch (e) {
-      S.updBusy = false;
       showToast("✕ " + ((e && e.message) || e));
-      renderContent();
     }
   });
   on("btn-restart-app", "click", async () => {
@@ -1352,6 +1351,12 @@ setInterval(async () => {
   if (S.busy) return; // the optimistic connecting state is in flight
   try {
     const st = await api().GetState();
+    // Right after Connect the Android VPN service may not have started the
+    // engine yet, so its status is still "disconnected": repainting would
+    // drop the optimistic CONNECTING screen within 3 s. Give the service a
+    // 5 s grace window after the tap (cleared by connected/error).
+    if (st && S.state.state === "connecting" && st.state === "disconnected" && !st.error &&
+        (Date.now() - S.connectingAt) < 5000) return;
     if (st && st.state && st.state !== S.state.state) renderState(st);
     // The exit-IP check runs on the bridge's own thread and reports through
     // the "extip" event; if that event gets lost on the webview bridge, the
@@ -1384,19 +1389,21 @@ async function ensureExtIP() {
 function renderState(st) {
   const prev = S.state;
   S.state = st || S.state;
+  // A real outcome (or a failure) ends the optimistic-connecting grace
+  // window used by the 3 s poll.
+  if (st && (st.state === "connected" || st.error)) S.connectingAt = 0;
   if (S.state.state === "connecting") sawConnecting = true;
   if (S.state.error && !(prev && prev.error)) buzz([40, 60, 40]); // a failure surfaced
   if (S.tab !== "vpn") { renderSidebarFooter(); return; }
-  // Rebuild only on structural changes (profile switch, error box, TUN
-  // note). Same-profile transitions (idle → connecting → connected) patch
-  // the DOM in place: an innerHTML swap recreates the button node and
-  // restarts its CSS animations from frame zero — the connect button
-  // stuttered on every state event while the tunnel was coming up.
+  // Rebuild only on structural changes (profile switch, error box). Same
+  // profile transitions (idle → connecting → connected) patch the DOM in
+  // place: an innerHTML swap recreates the button node and restarts its CSS
+  // animations from frame zero — the connect button stuttered on every
+  // state event while the tunnel was coming up, and a tun/sys_proxy flip
+  // rebuilt (and re-animated) it exactly when the reveal was running.
   const structural = !prev ||
     prev.profile_id !== S.state.profile_id ||
-    !!prev.tun !== !!S.state.tun ||
-    (prev.error || "") !== (S.state.error || "") ||
-    !!prev.sys_proxy !== !!S.state.sys_proxy;
+    (prev.error || "") !== (S.state.error || "");
   if (structural) {
     const prevConn = !!prev && prev.state === "connected";
     if (connTimer) { clearTimeout(connTimer); connTimer = null; }
@@ -1425,9 +1432,11 @@ function beginConnectedLap() {
   if (!sawConnecting) {
     // Boot reconciliation (the tunnel survives app opens): no fake
     // connecting lap — start from the power glyph, crossfade on the live node.
+    // The double rAF lets the removed class commit as a real starting
+    // style first; a single forced reflow restored the class in the same
+    // frame and the CSS crossfade was skipped entirely.
     btn.classList.remove("connected");
-    void btn.offsetWidth; // commit the start style so the transition runs
-    revealConnected();
+    requestAnimationFrame(() => requestAnimationFrame(() => revealConnected()));
     return;
   }
   btn.classList.remove("connected");
@@ -1466,6 +1475,7 @@ function revealConnected() {
   lapStart = 0;
   buzz(20);
   renderSidebarFooter();
+  if (window.__wisteriaSyncBtn) window.__wisteriaSyncBtn();
 }
 
 function patchVpnState() {
@@ -1478,6 +1488,26 @@ function patchVpnState() {
   if (statusEl) {
     statusEl.classList.toggle("on", conn);
     statusEl.classList.toggle("mid", connecting);
+  }
+  // TUN note patched in place: a tun flip must not run the structural
+  // innerHTML rebuild (it recreated the button mid-reveal animation). Done
+  // before the button block: the connecting → connected branch returns
+  // early into beginConnectedLap().
+  const screen = document.querySelector(".vpn-screen");
+  if (screen) {
+    let tunEl = screen.querySelector(".tun-note");
+    if (st.tun) {
+      if (!tunEl) {
+        tunEl = document.createElement("div");
+        tunEl.className = "tun-note";
+        tunEl.textContent = t("vpn.tunOn");
+        const errEl = screen.querySelector(".error-box");
+        if (errEl) screen.insertBefore(tunEl, errEl);
+        else screen.appendChild(tunEl);
+      }
+    } else if (tunEl) {
+      tunEl.remove();
+    }
   }
   const btn = $("btn-toggle");
   if (btn) {
@@ -1502,6 +1532,7 @@ function patchVpnState() {
       if (txt) delete txt.dataset.abCancel;
     }
   }
+  if (window.__wisteriaSyncBtn) window.__wisteriaSyncBtn();
 }
 
 // ---------- modal ----------
@@ -1635,29 +1666,6 @@ whenReady(async () => {
   window.runtime.EventsOn("appupdate", (info) => {
     S.upd = info;
     showToast(t("set.updAvail") + ": v" + (info && info.latest));
-    if (S.tab === "settings") renderContent();
-  });
-  window.runtime.EventsOn("apkupdate", (u) => {
-    if (!u) return;
-    if (u.stage === "downloading") {
-      S.updBusy = true;
-      // Patch the button label in place: a full renderContent() per percent
-      // would wipe unsaved edits in the settings form.
-      const b = $("btn-apply-upd");
-      if (b) b.textContent = t("toast.updDl") + (u.pct != null ? " " + u.pct + "%" : "");
-      else showToast(t("toast.updDl") + " v" + (u.latest || ""));
-      return;
-    }
-    if (u.stage === "permission") {
-      S.updBusy = false;
-      showToast(t("toast.updPerm"));
-    } else if (u.stage === "install") {
-      S.updBusy = false;
-      showToast(t("toast.updApk"));
-    } else {
-      S.updBusy = false;
-      showToast("✕ " + (u.message || t("toast.updFail")));
-    }
     if (S.tab === "settings") renderContent();
   });
   // Launch-time update check, mirroring the desktop (s-updcheck setting).
