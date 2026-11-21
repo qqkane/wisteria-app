@@ -247,3 +247,111 @@ html.platform-android .app-content { overflow-x: hidden; }
   .input-row { flex-wrap: wrap; }
   .settings-title { font-size: 20px; }
 }
+
+/* ---------- Phase 4: traffic, onboarding, profiles toolbar ---------- */
+
+/* Live traffic card (VPN screen, connected only). */
+html.platform-android .traffic-card {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px;
+  width: 100%; margin-top: 12px; padding: 12px 16px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+}
+html.platform-android .traffic-card .tr-item { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--muted); }
+html.platform-android .traffic-card .tr-item svg { width: 14px; height: 14px; color: var(--accent); }
+html.platform-android .traffic-card .tr-item b { color: var(--fg); font-weight: 600; font-variant-numeric: tabular-nums; }
+html.platform-android .traffic-card .tr-total { margin-left: auto; font-size: 11.5px; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
+
+/* The IP card is only a control while a session is up. */
+html.platform-android .stat-card.stat-click { cursor: pointer; }
+html.platform-android .stat-card.stat-click:active { border-color: rgba(var(--accent-rgb), .5); }
+
+/* Empty-state onboarding on the VPN screen. */
+html.platform-android .onboard-card {
+  width: 100%; margin-top: 16px; padding: 20px 18px; text-align: center;
+  background: var(--card); border: 1px solid var(--border); border-radius: 18px;
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+}
+html.platform-android .onboard-icon { width: 44px; height: 44px; margin: 0 auto 10px; color: var(--accent); }
+html.platform-android .onboard-icon svg { width: 44px; height: 44px; }
+html.platform-android .onboard-card h3 { font-size: 16px; margin-bottom: 6px; }
+html.platform-android .onboard-card p { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin-bottom: 14px; }
+html.platform-android .onboard-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+html.platform-android .onboard-actions .ghost-btn { display: inline-flex; align-items: center; gap: 8px; }
+html.platform-android .onboard-actions .ghost-btn svg { width: 15px; height: 15px; }
+
+/* The error line gets a retry control instead of being a dead paragraph. */
+.error-box.actionable { display: flex; align-items: center; gap: 12px; justify-content: space-between; }
+.error-box.actionable span { flex: 1; min-width: 0; }
+.error-box.actionable .ghost-btn { flex-shrink: 0; padding: 8px 12px; font-size: 12.5px; }
+
+/* Profiles toolbar: search + ping-all / fastest / sort. */
+html.platform-android .pf-toolbar { display: flex; flex-direction: column; gap: 10px; width: 100%; margin: 0 0 14px; }
+html.platform-android .pf-search {
+  display: flex; align-items: center; gap: 9px; padding: 0 12px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+}
+html.platform-android .pf-search svg { width: 15px; height: 15px; color: var(--muted); flex-shrink: 0; }
+html.platform-android .pf-search input {
+  flex: 1; min-width: 0; padding: 11px 0; border: none; outline: none;
+  background: none; color: var(--fg); font: inherit; font-size: 13.5px;
+}
+html.platform-android .pf-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+html.platform-android .pf-actions .ghost-btn { display: inline-flex; align-items: center; gap: 7px; padding: 9px 12px; font-size: 12.5px; }
+html.platform-android .pf-actions .ghost-btn svg { width: 14px; height: 14px; }
+html.platform-android .pf-sort {
+  margin-left: auto; max-width: 46%; padding: 9px 10px; font-size: 12.5px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 10px; color: var(--fg);
+}
+
+/* Subscription quota bar from Subscription-Userinfo. */
+html.platform-android .sub-usage { margin-top: 5px; }
+html.platform-android .sub-bar { height: 4px; border-radius: 2px; background: rgba(var(--accent-rgb), .16); overflow: hidden; margin-bottom: 4px; }
+html.platform-android .sub-bar i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
+html.platform-android .sub-usage-line { font-size: 10.5px; color: var(--muted); font-family: 'JetBrains Mono', monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Four row actions (share/edit/ping/delete) only fit if they shrink. */
+html.platform-android .server-list-item .sli-act { width: 28px; height: 30px; }
+
+/* Segmented controls: the native select is hidden, buttons take its cell. */
+html.platform-android select.seg-hidden { display: none !important; }
+html.platform-android .ab-seg {
+  display: flex; width: 100%; background: var(--card);
+  border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+}
+html.platform-android .ab-seg button {
+  flex: 1; padding: 10px 4px; border: none; background: none; cursor: pointer;
+  color: var(--muted); font-family: inherit; font-size: 12.5px; font-weight: 500;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+html.platform-android .ab-seg button + button { border-left: 1px solid var(--border); }
+html.platform-android .ab-seg button.active { color: var(--accent); background: rgba(var(--accent-rgb), .14); }
+
+/* System section in Settings: backup buttons and battery state. */
+html.platform-android .settings-sub { margin: 16px 0 4px; font-size: 13px; color: var(--fg); display: flex; flex-wrap: wrap; gap: 6px; }
+html.platform-android .sys-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+html.platform-android .sys-actions .ghost-btn { display: inline-flex; align-items: center; gap: 8px; }
+html.platform-android .sys-actions .ghost-btn svg { width: 15px; height: 15px; }
+html.platform-android #battery-note.ok { color: var(--accent); }
+
+/* Pull-to-refresh indicator. */
+#ptr-ind {
+  position: fixed; left: 50%; top: 54px; z-index: 500;
+  transform: translateX(-50%);
+  padding: 7px 14px; border-radius: 20px; font-size: 12px;
+  background: var(--card); border: 1px solid var(--border); color: var(--fg);
+  opacity: 0; pointer-events: none; transition: opacity .15s;
+}
+#ptr-ind.show { opacity: 1; }
+
+/* Share/QR modal: the code must stay dark-on-white to scan in any theme. */
+html.platform-android .share-box { max-width: 360px; }
+html.platform-android .qr-wrap {
+  display: flex; justify-content: center; margin: 4px 0 10px;
+  background: #fff; border-radius: 14px; padding: 12px;
+}
+html.platform-android .qr-wrap svg { width: 100%; max-width: 250px; height: auto; display: block; }
+html.platform-android .qr-hint { text-align: center; font-size: 12px; color: var(--muted); margin-bottom: 14px; }
+html.platform-android .share-actions { display: flex; gap: 10px; }
+html.platform-android .share-actions .ghost-btn { flex: 1; }
+html.platform-android .edit-box { max-width: 420px; }

@@ -5,4 +5,5 @@
     <string name="status_connecting">Подключение…</string>
     <string name="status_connected">Защищено</string>
     <string name="notif_disconnect">Отключить</string>
+    <string name="shortcut_toggle">Connect / Disconnect</string>
 </resources>

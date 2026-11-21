@@ -31,6 +31,14 @@ const I = {
   refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>',
   clipboard: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>',
   activity: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
+  share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>',
+  edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
+  search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
+  zap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
+  qr: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><line x1="14" y1="14" x2="14" y2="21"/><line x1="21" y1="14" x2="21" y2="21"/><line x1="17" y1="14" x2="17" y2="17"/></svg>',
+  download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+  upload: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
+  battery: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="1" y="7" width="17" height="10" rx="2"/><line x1="22" y1="11" x2="22" y2="13"/><line x1="5" y1="11" x2="5" y2="13"/><line x1="9" y1="11" x2="9" y2="13"/></svg>',
 };
 
 const THEMES = [
@@ -52,7 +60,7 @@ const I18N = {
     "vpn.connect": "Connect", "vpn.disconnect": "Disconnect", "vpn.connected": "Connected",
     "vpn.noProfile": "Профиль не выбран", "vpn.clickSelect": "Нажмите, чтобы выбрать",
     "stat.uptime": "Аптайм", "stat.proxy": "Системный прокси", "stat.core": "Ядро",
-    "profiles.title": "Профили", "profiles.empty": "Нет профилей — добавьте ссылку или TOML-конфиг",
+    "profiles.title": "Профили", "profiles.empty": "Нет профилей — добавьте ссылку или подписку",
     "profiles.mirrors.one": "+1 зеркало", "profiles.mirrors.few": "+{n} зеркала", "profiles.mirrors.many": "+{n} зеркал",
     "settings.title": "Настройки", "sec.appearance": "Оформление", "sec.connection": "Соединение",
     "sec.general": "Общие", "sec.routing": "Маршрутизация и DNS", "sec.cores": "Ядра", "sec.system": "Система",
@@ -152,6 +160,32 @@ const I18N = {
     "toast.busy": "Идёт подключение — секунду",
     "toast.clipSubs": "подписок: {n}", "toast.clipProfiles": "профилей: {n}", "toast.clipNone": "Ничего нового в буфере", "vpn.tunOn": "TUN активен — весь трафик системы идёт через туннель",
     "toast.stuck": "Подключение зависло — попробуйте ещё раз",
+    "traffic.down": "Загрузка", "traffic.up": "Отдача", "traffic.session": "за сессию", "traffic.unsupported": "нет данных",
+    "vpn.noProfilesTitle": "Пока нет профилей",
+    "vpn.noProfilesText": "Добавьте share-ссылку, подписку или создайте профиль вручную — аккаунт не нужен.",
+    "vpn.retry": "Повторить", "vpn.ipHint": "Нажмите, чтобы обновить IP",
+    "profiles.search": "Поиск по имени или адресу…",
+    "profiles.sortDefault": "Как добавлены", "profiles.sortName": "По имени", "profiles.sortPing": "По пингу",
+    "profiles.pingAll": "Пинговать все", "profiles.fastest": "Самый быстрый",
+    "profiles.share": "Поделиться", "profiles.edit": "Изменить",
+    "profiles.noRaw": "У профиля нет исходной ссылки — он добавлен вручную или из подписки",
+    "profiles.fastestNone": "Нет профилей с известным пингом — сначала пропингуйте",
+    "profiles.fastestDone": "Включён «{name}» · {ms} ms",
+    "edit.title": "Изменить профиль", "edit.save": "Сохранить",
+    "qr.title": "Поделиться профилем", "qr.hint": "Наведите камеру другого телефона",
+    "qr.copy": "Копировать ссылку", "qr.share": "Отправить",
+    "logs.share": "Поделиться", "logs.shareFail": "Не удалось поделиться",
+    "diag.test": "Проверить туннель", "diag.testOk": "Туннель работает · {ms} ms", "diag.testFail": "Туннель не отвечает: {err}",
+    "subs.used": "Использовано", "subs.left": "Осталось", "subs.unlimited": "без лимита", "subs.expires": "до {date}", "subs.expired": "срок истёк",
+    "set.backup": "Резервная копия", "set.export": "Экспорт", "set.import": "Импорт",
+    "set.backupNote": "профили, подписки и настройки; файл содержит ключи — храните его в надёжном месте",
+    "backup.exported": "Копия сохранена", "backup.imported": "Восстановлено: профилей {p}, подписок {s}", "backup.failed": "Не удалось: {err}",
+    "set.battery": "Батарея", "set.batteryNote": "без оптимизации Android не будет убивать туннель",
+    "set.batteryOk": "оптимизация отключена", "set.batteryBad": "оптимизация включена — туннель могут убить",
+    "set.batteryOpen": "Открыть настройки батареи", "set.vpnOpen": "Системные настройки VPN",
+    "pull.refreshing": "Обновляю…", "pull.done": "Обновлено",
+    "deeplink.added": "Ссылка добавлена в профили", "deeplink.failed": "Ссылка не распознана",
+    "toast.copied": "Скопировано",
   },
   en: {
     "brand": "Wisteria",
@@ -160,7 +194,7 @@ const I18N = {
     "vpn.connect": "Connect", "vpn.disconnect": "Disconnect", "vpn.connected": "Connected",
     "vpn.noProfile": "No profile selected", "vpn.clickSelect": "Click to choose",
     "stat.uptime": "Uptime", "stat.proxy": "System proxy", "stat.core": "Core",
-    "profiles.title": "Profiles", "profiles.empty": "No profiles yet — add a link or a TOML config",
+    "profiles.title": "Profiles", "profiles.empty": "No profiles yet — add a link or a subscription",
     "profiles.mirrors.one": "+{n} mirrors", "profiles.mirrors.few": "+{n} mirrors", "profiles.mirrors.many": "+{n} mirrors",
     "settings.title": "Settings", "sec.appearance": "Appearance", "sec.connection": "Connection",
     "sec.general": "General", "sec.routing": "Routing & DNS", "sec.cores": "Cores", "sec.system": "System",
@@ -260,6 +294,32 @@ const I18N = {
     "toast.busy": "Connection in progress — one moment",
     "toast.clipSubs": "subscriptions: {n}", "toast.clipProfiles": "profiles: {n}", "toast.clipNone": "Nothing new in the clipboard", "vpn.tunOn": "TUN active — all system traffic goes through the tunnel",
     "toast.stuck": "Connection is stuck — please try again",
+    "traffic.down": "Download", "traffic.up": "Upload", "traffic.session": "this session", "traffic.unsupported": "no data",
+    "vpn.noProfilesTitle": "No profiles yet",
+    "vpn.noProfilesText": "Add a share link, a subscription, or create a profile by hand — no account needed.",
+    "vpn.retry": "Retry", "vpn.ipHint": "Tap to refresh the IP",
+    "profiles.search": "Search by name or address…",
+    "profiles.sortDefault": "As added", "profiles.sortName": "By name", "profiles.sortPing": "By ping",
+    "profiles.pingAll": "Ping all", "profiles.fastest": "Fastest",
+    "profiles.share": "Share", "profiles.edit": "Edit",
+    "profiles.noRaw": "This profile has no original link — it was added by hand or from a subscription",
+    "profiles.fastestNone": "No profile has a known ping — ping them first",
+    "profiles.fastestDone": "«{name}» is active · {ms} ms",
+    "edit.title": "Edit profile", "edit.save": "Save",
+    "qr.title": "Share profile", "qr.hint": "Point another phone's camera at the code",
+    "qr.copy": "Copy link", "qr.share": "Send",
+    "logs.share": "Share", "logs.shareFail": "Could not share",
+    "diag.test": "Test tunnel", "diag.testOk": "Tunnel works · {ms} ms", "diag.testFail": "Tunnel is not responding: {err}",
+    "subs.used": "Used", "subs.left": "Left", "subs.unlimited": "unlimited", "subs.expires": "until {date}", "subs.expired": "expired",
+    "set.backup": "Backup", "set.export": "Export", "set.import": "Import",
+    "set.backupNote": "profiles, subscriptions and settings; the file contains keys — keep it somewhere safe",
+    "backup.exported": "Backup saved", "backup.imported": "Restored: {p} profiles, {s} subscriptions", "backup.failed": "Failed: {err}",
+    "set.battery": "Battery", "set.batteryNote": "without optimization Android may kill the tunnel",
+    "set.batteryOk": "optimization disabled", "set.batteryBad": "optimization enabled — the tunnel may be killed",
+    "set.batteryOpen": "Open battery settings", "set.vpnOpen": "System VPN settings",
+    "pull.refreshing": "Refreshing…", "pull.done": "Refreshed",
+    "deeplink.added": "Link added to profiles", "deeplink.failed": "Link not recognized",
+    "toast.copied": "Copied",
   },
 };
 let lang = "ru";
@@ -291,6 +351,12 @@ const S = {
   version: "", upd: null, updReady: false, coreUpd: {},
   apps: null, splitMode: "off", splitApps: [], splitFilter: "",
   wdiag: null, // the Diagnostics page data (wisteria profiles only)
+  // Profiles toolbar: a live filter, the chosen ordering and a busy flag for
+  // the concurrent ping pass (the bridge caps it at 6 workers).
+  pfFilter: "", pfSort: "default", pfPingBusy: false,
+  traffic: { rx: 0, tx: 0, rxTotal: 0, txTotal: 0, ok: false },
+  battery: null, // {ignoring: bool} — refreshed when Settings → System renders
+  pendingShare: "", // link shown in the QR modal
 };
 const $ = (id) => document.getElementById(id);
 // Android build (android-shim.js sets __PLATFORM before this file loads).
@@ -395,6 +461,16 @@ function renderSidebarFooter() {
     <div class="sf-ip">${esc(p ? p.host + ":" + p.port : (st.socks_addr || ""))}</div>`;
 }
 
+// Human-readable byte counts for the traffic card and the subscription bar.
+function fmtBytes(n) {
+  n = Number(n) || 0;
+  if (n < 1024) return n + " B";
+  const units = lang === "en" ? ["KB", "MB", "GB", "TB"] : ["КБ", "МБ", "ГБ", "ТБ"];
+  let v = n / 1024, i = 0;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return (v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2)) + " " + units[i];
+}
+
 function renderVpn() {
   const st = S.state;
   const conn = st.state === "connected";
@@ -404,6 +480,7 @@ function renderVpn() {
   const label = conn ? t("vpn.protected") : connecting ? t("vpn.connecting") : t("vpn.unprotected");
   const btnText = conn ? t("vpn.connected") : connecting ? t("vpn.connecting") : t("vpn.disconnected");
   const lat = p && p.latency_ms ? (p.latency_ms < 0 ? "n/a" : p.latency_ms + " ms") : "";
+  const noProfiles = S.profiles.length === 0;
   return `
     <div class="vpn-screen">
       <div class="vpn-status ${conn ? "on" : connecting || reconn ? "mid" : ""}"><div class="label">${esc(label)}</div></div>
@@ -426,9 +503,15 @@ function renderVpn() {
       </div>
       <div class="stats-row">
         <div class="stat-card"><div class="stat-label">${I.clock} ${esc(t("stat.uptime"))}</div><div class="stat-value" id="stat-uptime">${uptimeHTML(st.started_at) || "—"}</div></div>
-        <div class="stat-card"><div class="stat-label">${I.globe} IP</div><div class="stat-value" style="font-size:13px; line-height:2.4;" id="stat-ip">${esc(S.extIP || (conn && S.extIPErr ? "✕" : "—"))}</div></div>
+        <div class="stat-card ${conn ? "stat-click" : ""}" id="card-ip" ${conn ? `title="${esc(t("vpn.ipHint"))}"` : ""}><div class="stat-label">${I.globe} IP</div><div class="stat-value" style="font-size:13px; line-height:2.4;" id="stat-ip">${esc(S.extIP || (conn && S.extIPErr ? "✕" : "—"))}</div></div>
         <div class="stat-card"><div class="stat-label">${I.globe} ${esc(t("stat.proxy"))}</div><div class="stat-value">${st.sys_proxy ? "ON" : "OFF"}</div></div>
       </div>
+      ${conn ? `
+      <div class="traffic-card" id="traffic-card">
+        <div class="tr-item"><span class="tr-label">${I.download} ${esc(t("traffic.down"))}</span><b id="tr-down">${S.traffic.ok ? fmtBytes(S.traffic.rx) + "/s" : "—"}</b></div>
+        <div class="tr-item"><span class="tr-label">${I.upload} ${esc(t("traffic.up"))}</span><b id="tr-up">${S.traffic.ok ? fmtBytes(S.traffic.tx) + "/s" : "—"}</b></div>
+        <div class="tr-total" id="tr-total">${esc(t("traffic.session"))}: ↓ ${fmtBytes(S.traffic.rxTotal)} · ↑ ${fmtBytes(S.traffic.txTotal)}</div>
+      </div>` : ""}
       ${p && p.type === "wisteria" ? `
       <div class="vpn-tun-row">
         <div class="vpn-tun-label">${esc(t("vpn.preset"))}</div>
@@ -436,8 +519,18 @@ function renderVpn() {
           ${["fast", "balance", "stealth"].map((k) => `<option value="${k}" ${((p.fields && p.fields.preset) || (S.cfg && S.cfg.wisteria_preset) || "stealth") === k ? "selected" : ""}>${k}</option>`).join("")}
         </select>
       </div>` : ""}
+      ${noProfiles ? `
+      <div class="onboard-card">
+        <div class="onboard-icon">${I.shield}</div>
+        <h3>${esc(t("vpn.noProfilesTitle"))}</h3>
+        <p>${esc(t("vpn.noProfilesText"))}</p>
+        <div class="onboard-actions">
+          <button class="ghost-btn" id="btn-onboard-clip">${I.clipboard}<span>${esc(t("btn.clip"))}</span></button>
+          <button class="ghost-btn" id="btn-onboard-add">${I.plus}<span>${esc(t("add.title"))}</span></button>
+        </div>
+      </div>` : ""}
       ${st.tun ? `<div class="tun-note">${esc(t("vpn.tunOn"))}</div>` : ""}
-      ${st.error ? `<div class="error-box">${esc(st.error)}</div>` : ""}
+      ${st.error ? `<div class="error-box actionable"><span>${esc(st.error)}</span>${p ? `<button class="ghost-btn" id="btn-retry">${esc(t("vpn.retry"))}</button>` : ""}</div>` : ""}
     </div>`;
 }
 
@@ -472,10 +565,54 @@ function profileCard(p) {
         <div class="sli-addr">${esc(p.host)}:${p.port}${mirrorsLabel(p)}</div>
         ${lat}
       </div>
+      ${p.raw ? `<button class="sli-act shareb" title="${esc(t("profiles.share"))}" data-id="${p.id}">${I.share}</button>` : ""}
+      ${p.type === "wisteria" ? `<button class="sli-act editb" title="${esc(t("profiles.edit"))}" data-id="${p.id}">${I.edit}</button>` : ""}
       <button class="sli-act pingb" title="ping" data-id="${p.id}">${I.ping}</button>
       <button class="sli-act del" title="delete" data-id="${p.id}">${I.trash}</button>
       <span class="sli-check" style="${active ? "" : "display:none"}">${I.check}</span>
     </div>`;
+}
+
+// Subscription quota bar: Subscription-Userinfo is uploaded/downloaded/total
+// in bytes and expire in unix seconds. Old subs have no "userinfo" key.
+function subUserinfoHTML(u) {
+  if (!u) return "";
+  const used = (Number(u.upload) || 0) + (Number(u.download) || 0);
+  const total = Number(u.total) || 0;
+  const left = Math.max(0, total - used);
+  const pct = total > 0 ? Math.min(100, Math.round((used * 100) / total)) : 0;
+  const exp = Number(u.expire) > 0 ? new Date(Number(u.expire) * 1000) : null;
+  const expTxt = exp && !isNaN(exp.getTime())
+    ? " · " + (exp.getTime() < Date.now() ? t("subs.expired") : t("subs.expires").replace("{date}", exp.toLocaleDateString()))
+    : "";
+  return `<div class="sub-usage">
+      ${total > 0 ? `<div class="sub-bar"><i style="width:${pct}%"></i></div>` : ""}
+      <div class="sub-usage-line">${esc(t("subs.used"))} ${fmtBytes(used)}${total > 0 ? " / " + fmtBytes(total) + " · " + esc(t("subs.left")) + " " + fmtBytes(left) : " · " + esc(t("subs.unlimited"))}${esc(expTxt)}</div>
+    </div>`;
+}
+
+// Profiles toolbar: a substring filter over name and host:port, plus the
+// three orderings the screen needs on a phone (the desktop sorted by hand).
+function matchProfile(p) {
+  const f = S.pfFilter.trim().toLowerCase();
+  if (!f) return true;
+  return String(p.name || "").toLowerCase().includes(f) ||
+    (String(p.host || "") + ":" + (p.port || "")).toLowerCase().includes(f);
+}
+
+function sortProfiles(list) {
+  const arr = list.slice();
+  if (S.pfSort === "name") {
+    arr.sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), lang));
+  } else if (S.pfSort === "ping") {
+    // Known pings first (ascending), then unreachable (-1), then never pinged.
+    const rank = (p) => {
+      const l = Number(p.latency_ms) || 0;
+      return l > 0 ? l : l < 0 ? 1e9 : 2e9;
+    };
+    arr.sort((a, b) => rank(a) - rank(b));
+  }
+  return arr;
 }
 
 function profileGrid(items, emptyKey) {
@@ -505,15 +642,16 @@ function renderProfiles() {
   // Profiles whose subscription no longer exists (e.g. a hand-edited
   // store) fall back to the manual group instead of vanishing.
   const manual = S.profiles.filter((p) => !p.sub_id || !S.subs.some((x) => x.id === p.sub_id));
+  const visible = (list) => sortProfiles(list.filter(matchProfile));
   const groups = S.subs.map((s) => {
     const meta = s.error
       ? `<div class="sub-meta sub-err">${esc(s.error)}</div>`
-      : `<div class="sub-meta">${esc(t("subs.updated"))}: ${esc(fmtSubTime(s.updated_at))}</div>`;
+      : `<div class="sub-meta">${esc(t("subs.updated"))}: ${esc(fmtSubTime(s.updated_at))}</div>` + subUserinfoHTML(s.userinfo);
     const actions = `
       <button class="sli-act sub-refresh ${S.subBusy[s.id] ? "spin" : ""}" title="${esc(t("subs.refresh"))}" data-id="${s.id}">${I.refresh}</button>
       <button class="sli-act del" title="delete" data-id="${s.id}">${I.trash}</button>`;
     return renderGroup("sub:" + s.id, s.name, meta,
-      S.profiles.filter((p) => p.sub_id === s.id), "subs.emptyGroup", actions);
+      visible(S.profiles.filter((p) => p.sub_id === s.id)), "subs.emptyGroup", actions);
   }).join("");
   return `
     <div class="servers-header">
@@ -523,10 +661,22 @@ function renderProfiles() {
         <button class="add-btn" id="btn-add" title="${esc(t("add.title"))}">${I.plus}</button>
       </div>
     </div>
+    <div class="pf-toolbar">
+      <div class="pf-search">${I.search}<input id="pf-search" type="search" value="${esc(S.pfFilter)}" placeholder="${esc(t("profiles.search"))}"/></div>
+      <div class="pf-actions">
+        <button class="ghost-btn" id="btn-ping-all" ${S.pfPingBusy ? "disabled" : ""}>${I.ping}<span>${esc(t("profiles.pingAll"))}</span></button>
+        <button class="ghost-btn" id="btn-fastest">${I.zap}<span>${esc(t("profiles.fastest"))}</span></button>
+        <select id="pf-sort" class="pf-sort" title="${esc(t("profiles.sort"))}">
+          <option value="default" ${S.pfSort === "default" ? "selected" : ""}>${esc(t("profiles.sortDefault"))}</option>
+          <option value="name" ${S.pfSort === "name" ? "selected" : ""}>${esc(t("profiles.sortName"))}</option>
+          <option value="ping" ${S.pfSort === "ping" ? "selected" : ""}>${esc(t("profiles.sortPing"))}</option>
+        </select>
+      </div>
+    </div>
     ${groups}
     ${S.subs.length
-      ? renderGroup("manual", t("profiles.manual"), "", manual, "profiles.empty", "")
-      : profileGrid(manual, "profiles.empty")}`;
+      ? renderGroup("manual", t("profiles.manual"), "", visible(manual), "profiles.empty", "")
+      : profileGrid(visible(manual), "profiles.empty")}`;
 }
 
 function renderLogs() {
@@ -535,6 +685,7 @@ function renderLogs() {
       <h2>${esc(t("logs.title"))}</h2>
       <div class="logs-tools">
         <button class="ghost-btn" id="btn-copy-logs">${esc(t("logs.copy"))}</button>
+        <button class="ghost-btn" id="btn-share-logs">${esc(t("logs.share"))}</button>
         <button class="ghost-btn" id="btn-clear-logs">${esc(t("logs.clear"))}</button>
       </div>
     </div>
@@ -630,7 +781,9 @@ function diagInner(d) {
 }
 
 function renderDiag() {
-  return `<div class="logs-header"><h2>${esc(t("diag.title"))}</h2></div><div id="diag-root">${S.wdiag ? diagInner(S.wdiag) : ""}</div>`;
+  return `<div class="logs-header"><h2>${esc(t("diag.title"))}</h2>
+    <button class="ghost-btn" id="btn-test-tunnel">${I.activity}<span>${esc(t("diag.test"))}</span></button></div>
+    <div id="diag-root">${S.wdiag ? diagInner(S.wdiag) : ""}</div>`;
 }
 
 let wdiagBusy = false;
@@ -705,7 +858,22 @@ function renderSettings() {
         <select id="s-autoconnect"><option value="">—</option></select>
       </div>
       <div style="margin-top:10px;"><button class="ghost-btn" id="btn-checkip">${esc(t("set.checkIpNow"))}</button></div>
-    </div>`;
+    </div>
+    ${isAndroid ? `
+    <div class="settings-section">
+      <h3>${esc(t("sec.system"))}</h3>
+      <div class="set-grid">
+        <label>${esc(t("set.battery"))}<span class="set-note" id="battery-note">${esc(t("set.batteryNote"))}</span></label>
+        <button class="ghost-btn" id="btn-battery-settings">${I.battery}<span>${esc(t("set.batteryOpen"))}</span></button>
+        <label>${esc(t("set.vpnOpen"))}</label>
+        <button class="ghost-btn" id="btn-vpn-settings">${esc(t("set.vpnOpen"))}</button>
+      </div>
+      <div class="settings-sub">${esc(t("set.backup"))}<span class="set-note">${esc(t("set.backupNote"))}</span></div>
+      <div class="sys-actions">
+        <button class="ghost-btn" id="btn-backup-export">${I.download}<span>${esc(t("set.export"))}</span></button>
+        <button class="ghost-btn" id="btn-backup-import">${I.upload}<span>${esc(t("set.import"))}</span></button>
+      </div>
+    </div>` : ""}`;
   } else if (S.setTab === "conn") {
     body = `
     <div class="settings-section">
@@ -899,8 +1067,194 @@ function relabelCoreButtons(info) {
 }
 
 // ---------- per-render event wiring ----------
+// Shared by «Из буфера» and the empty-state onboarding card: the clipboard
+// may hold subscription URLs, share links or both — the backend routes lines.
+async function importFromClipboard() {
+  try {
+    const r = await api().ImportFromClipboard();
+    await loadSubs();
+    await loadProfiles();
+    const parts = [];
+    if (r.subscriptions) parts.push(t("toast.clipSubs").replace("{n}", r.subscriptions));
+    if (r.added && r.added.length) parts.push(t("toast.clipProfiles").replace("{n}", r.added.length));
+    showToast(parts.length ? parts.join(" · ") : t("toast.clipNone"));
+    if (r.errors && r.errors.length) {
+      const fe = r.errors[0];
+      showToast((fe.line ? fe.line + ": " : "") + fe.error);
+    }
+  } catch (e) { showToast((e && e.message) || e); }
+}
+
+// The IP stat card and «Проверить IP сейчас» share this. GetExternalIP is
+// asynchronous on the bridge: an empty answer means "the result will arrive
+// through the extip event".
+async function checkExtIP() {
+  if (S.state.state !== "connected") { showToast(t("vpn.noProfile")); return; }
+  try {
+    const ip = await api().GetExternalIP();
+    if (!ip) { showToast(t("toast.ipWait")); return; }
+    S.extIP = ip;
+    const el = $("stat-ip");
+    if (el) el.textContent = ip;
+    showToast("IP: " + ip);
+  } catch (e) {
+    const msg = (e && e.message) || String(e);
+    showToast(msg.indexOf("туннель переподключается") >= 0
+      ? t("toast.ipRetry")
+      : "✕ " + t("toast.ipFail") + ": " + msg);
+  }
+}
+
+function closeShareModal() { const m = $("modal-share"); if (m) m.classList.remove("show"); }
+function closeEditModal() { const m = $("modal-edit"); if (m) m.classList.remove("show"); }
+
+// Offline QR of the profile's original share link. The encoder lives in
+// qr.js (no network, no library): a 61x61 symbol is a few KB of SVG.
+function openQrModal(id) {
+  const p = S.profiles.find((x) => x.id === id);
+  if (!p) return;
+  if (!p.raw) { showToast(t("profiles.noRaw")); return; }
+  try {
+    const r = window.WisteriaQR.qrSvg(p.raw, { quiet: 4 });
+    $("qr-wrap").innerHTML = r.svg;
+    S.pendingShare = p.raw;
+    $("qr-wrap").dataset.name = p.name || "";
+    $("modal-share").classList.add("show");
+  } catch (e) {
+    showToast((e && e.message) || String(e));
+  }
+}
+
+let editId = "";
+function openEditModal(id) {
+  const p = S.profiles.find((x) => x.id === id);
+  if (!p) return;
+  editId = id;
+  $("e-name").value = p.name || "";
+  $("e-host").value = p.host || "";
+  $("e-port").value = p.port || "";
+  $("e-transport").value = p.transport === "tls" ? "tls" : "tcp";
+  $("e-sni").value = p.tls_sni || "";
+  $("e-insecure").checked = !!p.tls_insecure;
+  $("modal-edit").classList.add("show");
+}
+
+async function saveEditedProfile() {
+  const payload = {
+    id: editId,
+    name: $("e-name").value.trim(),
+    host: $("e-host").value.trim(),
+    port: parseInt($("e-port").value, 10) || 0,
+    transport: $("e-transport").value,
+    tls_sni: $("e-sni").value.trim(),
+    tls_insecure: $("e-insecure").checked,
+  };
+  try {
+    await api().EditProfile(payload);
+    closeEditModal();
+    showToast(t("toast.saved"));
+    await loadProfiles();
+  } catch (e) { showToast((e && e.message) || e); }
+}
+
+async function runPingAll() {
+  if (S.pfPingBusy) return;
+  S.pfPingBusy = true;
+  renderContent();
+  try {
+    await api().PingAllProfiles();
+    showToast(t("profiles.pingAll") + " ✓");
+  } catch (e) { showToast((e && e.message) || e); }
+  finally {
+    S.pfPingBusy = false;
+    await loadProfiles();
+  }
+}
+
+// Fastest = the lowest positive ping among the currently visible profiles.
+// Anything else would silently pick a server the user filtered out.
+async function pickFastest() {
+  const candidates = S.profiles.filter(matchProfile).filter((p) => Number(p.latency_ms) > 0);
+  if (!candidates.length) { showToast(t("profiles.fastestNone")); return; }
+  candidates.sort((a, b) => Number(a.latency_ms) - Number(b.latency_ms));
+  const best = candidates[0];
+  const wasConnected = S.state.state === "connected";
+  try {
+    S.selected = best.id;
+    await api().SetActive(best.id);
+    if (wasConnected) {
+      S.busy = true;
+      markConnecting(best.id);
+      await withTimeout(api().Connect(best.id), 45000, t("toast.stuck"));
+      S.busy = false;
+    }
+    showToast(t("profiles.fastestDone").replace("{name}", best.name).replace("{ms}", String(best.latency_ms)));
+    await loadProfiles();
+  } catch (e) {
+    S.busy = false;
+    showToast((e && e.message) || e);
+  }
+}
+
+async function testTunnel() {
+  try {
+    const r = await api().TestTunnel();
+    if (r && r.ok) showToast(t("diag.testOk").replace("{ms}", String(r.rtt_ms)));
+    else showToast("✕ " + t("diag.testFail").replace("{err}", (r && r.error) || "?"));
+  } catch (e) {
+    showToast("✕ " + t("diag.testFail").replace("{err}", (e && e.message) || String(e)));
+  }
+}
+
+async function refreshBatteryNote() {
+  const el = $("battery-note");
+  if (!el) return;
+  try {
+    const b = await api().GetBatteryStatus();
+    S.battery = b;
+    el.textContent = b && b.ignoring ? t("set.batteryOk") : t("set.batteryBad");
+    el.classList.toggle("ok", !!(b && b.ignoring));
+  } catch (e) { /* older bridge */ }
+}
+
+// Segmented control instead of Android's native <select> dialog for the few
+// option sets that fit on one row. The select stays in the DOM (hidden) as
+// the source of truth, so saveSettings() keeps reading it unchanged.
+function segmentify(id) {
+  const sel = $(id);
+  if (!sel || sel.dataset.segmented === "1") return;
+  sel.dataset.segmented = "1";
+  const wrap = document.createElement("div");
+  wrap.className = "ab-seg";
+  Array.from(sel.options).forEach((o) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = o.textContent;
+    b.dataset.value = o.value;
+    b.classList.toggle("active", o.value === sel.value);
+    b.addEventListener("click", () => {
+      sel.value = o.value;
+      wrap.querySelectorAll("button").forEach((x) => x.classList.toggle("active", x === b));
+      sel.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    wrap.appendChild(b);
+  });
+  sel.classList.add("seg-hidden");
+  sel.after(wrap);
+  sel.addEventListener("change", () => syncSegments());
+}
+
+function syncSegments() {
+  document.querySelectorAll(".ab-seg").forEach((wrap) => {
+    const sel = wrap.previousElementSibling;
+    if (!sel || sel.tagName !== "SELECT") return;
+    wrap.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.value === sel.value));
+  });
+}
+
 function wireContent() {
   const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
+  if (isAndroid) { segmentify("s-loglevel"); segmentify("s-tunstack"); segmentify("s-splitmode"); segmentify("s-wist-preset"); }
 
   on("btn-toggle", "click", async () => {
     if (S.busy) { showToast(t("toast.busy")); return; }
@@ -969,26 +1323,38 @@ function wireContent() {
     try { await api().DeleteProfile(b.dataset.id); await loadProfiles(); }
     catch (e) { showToast((e && e.message) || e); }
   }));
+  document.querySelectorAll(".sli-act.shareb").forEach((b) => b.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    openQrModal(b.dataset.id);
+  }));
+  document.querySelectorAll(".sli-act.editb").forEach((b) => b.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    openEditModal(b.dataset.id);
+  }));
+
+  // ---- profiles toolbar ----
+  on("pf-search", "input", (ev) => {
+    S.pfFilter = ev.target.value;
+    // Re-render on every keystroke would steal the caret: filter in place by
+    // re-rendering the groups only, then restore focus/selection.
+    const pos = ev.target.selectionStart;
+    renderContent();
+    const again = $("pf-search");
+    if (again) { again.focus(); try { again.setSelectionRange(pos, pos); } catch (e) {} }
+  });
+  on("pf-sort", "change", (ev) => { S.pfSort = ev.target.value; renderContent(); });
+  on("btn-ping-all", "click", runPingAll);
+  on("btn-fastest", "click", pickFastest);
 
   // subscriptions are added from the clipboard ("From clipboard");
   // AddSubscription remains as an API for future import paths.
   // One-button import: the clipboard may hold subscription URLs, share
   // links or both — the backend routes every line.
-  on("btn-clip", "click", async () => {
-    try {
-      const r = await api().ImportFromClipboard();
-      await loadSubs();
-      await loadProfiles();
-      const parts = [];
-      if (r.subscriptions) parts.push(t("toast.clipSubs").replace("{n}", r.subscriptions));
-      if (r.added && r.added.length) parts.push(t("toast.clipProfiles").replace("{n}", r.added.length));
-      showToast(parts.length ? parts.join(" · ") : t("toast.clipNone"));
-      if (r.errors && r.errors.length) {
-        const fe = r.errors[0];
-        showToast((fe.line ? fe.line + ": " : "") + fe.error);
-      }
-    } catch (e) { showToast((e && e.message) || e); }
-  });
+  on("btn-clip", "click", importFromClipboard);
+  on("btn-onboard-clip", "click", importFromClipboard);
+  on("btn-onboard-add", "click", openModal);
+  on("btn-retry", "click", () => { const b = $("btn-toggle"); if (b) b.click(); });
+  on("card-ip", "click", () => { if (S.state.state === "connected") checkExtIP(); });
   // Collapse/expand profile groups; state persists in localStorage.
   document.querySelectorAll(".sub-head").forEach((h) => h.addEventListener("click", (ev) => {
     if (ev.target.closest(".sli-act")) return;
@@ -1040,26 +1406,29 @@ function wireContent() {
     document.querySelectorAll(".theme-option").forEach((o) => o.classList.toggle("selected", o === opt));
     await saveSettings();
   }));
-  on("btn-checkip", "click", async () => {
-    try {
-      const ip = await api().GetExternalIP();
-      if (!ip) { // the Android bridge checks on its own thread → "extip" event
-        showToast(t("toast.ipWait"));
-        return;
-      }
-      S.extIP = ip;
-      const el = $("stat-ip");
-      if (el) el.textContent = ip;
-      showToast("IP: " + ip);
-    } catch (e) {
-      const msg = (e && e.message) || String(e);
-      // A reconnect is not a failure: the core has no live session yet and the
-      // SOCKS layer reports that as "host unreachable".
-      showToast(msg.indexOf("туннель переподключается") >= 0
-        ? t("toast.ipRetry")
-        : "✕ " + t("toast.ipFail") + ": " + msg);
-    }
+  on("btn-checkip", "click", checkExtIP);
+  on("btn-share-logs", "click", async () => {
+    try { await api().ShareLogs(); }
+    catch (e) { showToast(t("logs.shareFail") + ": " + ((e && e.message) || e)); }
   });
+  on("btn-test-tunnel", "click", testTunnel);
+  on("btn-battery-settings", "click", async () => {
+    try { await api().OpenBatterySettings(); setTimeout(refreshBatteryNote, 1200); }
+    catch (e) { showToast((e && e.message) || e); }
+  });
+  on("btn-vpn-settings", "click", async () => {
+    try { await api().OpenVpnSettings(); }
+    catch (e) { showToast((e && e.message) || e); }
+  });
+  on("btn-backup-export", "click", async () => {
+    try { await api().ExportBackup(); }
+    catch (e) { showToast((e && e.message) || e); }
+  });
+  on("btn-backup-import", "click", async () => {
+    try { await api().ImportBackup(); }
+    catch (e) { showToast((e && e.message) || e); }
+  });
+  if ($("battery-note")) refreshBatteryNote();
   document.querySelectorAll("[data-i18n]").forEach(applyI18nEl);
 
   on("btn-detect", "click", async () => {
@@ -1196,9 +1565,13 @@ async function fillSettingsForm(s) {
       `<option value="${p.id}">${esc(p.name)} (${esc(p.type)})</option>`).join("");
     sel.value = s.auto_connect || "";
   }
+  // The form is filled after the segments were built (async GetSettings):
+  // move the highlight to the real values, not the template defaults.
+  syncSegments();
 }
 
-async function saveSettings() {
+async function saveSettings(opts) {
+  const silent = !!(opts && opts.silent);
   const cur = await api().GetSettings();
   const g = (id) => { const el = $(id); return el ? el : null; };
   const num = (id, def) => { const v = parseInt($(id).value, 10); return Number.isFinite(v) ? v : def; };
@@ -1245,8 +1618,39 @@ async function saveSettings() {
   await api().SaveSettings(next);
   const as = g("s-autostart");
   if (as && as.checked !== (await api().GetAutostart())) await api().SetAutostart(as.checked);
-  showToast(t("toast.saved"));
+  if (!silent) showToast(t("toast.saved"));
 }
+
+// Settings save themselves 600 ms after the last edit (the explicit button
+// is still there). One save at a time: a second edit during a save queues
+// exactly one follow-up instead of racing the first.
+let autoSaveTimer = null, autoSaveBusy = false, autoSaveQueued = false;
+function scheduleAutoSave() {
+  if (S.tab !== "settings") return;
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(async () => {
+    if (autoSaveBusy) { autoSaveQueued = true; return; }
+    autoSaveBusy = true;
+    try { await saveSettings({ silent: true }); }
+    catch (e) { /* the visible Save button reports failures */ }
+    finally {
+      autoSaveBusy = false;
+      if (autoSaveQueued) { autoSaveQueued = false; scheduleAutoSave(); }
+    }
+  }, 600);
+}
+
+// Any settings control (or a split-tunnel checkbox) is enough of a signal.
+// The language select has its own change handler that re-renders first.
+function isSettingsControl(el) {
+  if (!el) return false;
+  const splitBox = !!(el.matches && el.matches("input[data-pkg]"));
+  if (!splitBox && (!el.id || !/^s-/.test(el.id))) return false;
+  const wrap = $("content-wrapper");
+  return !!wrap && wrap.contains(el);
+}
+document.addEventListener("input", (ev) => { if (isSettingsControl(ev.target)) scheduleAutoSave(); });
+document.addEventListener("change", (ev) => { if (isSettingsControl(ev.target)) scheduleAutoSave(); });
 
 // ---------- split tunnel picker ----------
 async function loadApps() {
@@ -1559,9 +1963,14 @@ function patchVpnState() {
 // ---------- modal ----------
 function openModal() {
   $("modal-add").classList.add("show");
-  $("import-area").value = "";
-  $("import-errors").innerHTML = "";
-  $("toml-status").innerHTML = "";
+  // The TOML tab (and its status node) is removed on Android by
+  // applyAndroidLimits: every optional node here must be null-checked.
+  const area = $("import-area");
+  if (area) area.value = "";
+  const errs = $("import-errors");
+  if (errs) errs.innerHTML = "";
+  const toml = $("toml-status");
+  if (toml) toml.innerHTML = "";
 }
 function closeModal() { $("modal-add").classList.remove("show"); }
 window.UI = { closeModal };
@@ -1572,6 +1981,26 @@ document.querySelectorAll(".modal-tab").forEach((tb) => tb.addEventListener("cli
 }));
 document.querySelector(".modal-overlay").addEventListener("click", (ev) => {
   if (ev.target.classList.contains("modal-overlay")) closeModal();
+});
+
+// Share / edit modals (static markup in index.html).
+document.querySelectorAll("#modal-share, #modal-edit").forEach((ov) => {
+  ov.addEventListener("click", (ev) => {
+    if (ev.target === ov) { closeShareModal(); closeEditModal(); }
+  });
+});
+$("qr-close").addEventListener("click", closeShareModal);
+$("edit-close").addEventListener("click", closeEditModal);
+$("btn-edit-save").addEventListener("click", saveEditedProfile);
+$("btn-qr-copy").addEventListener("click", async () => {
+  try { await api().CopyToClipboard(S.pendingShare); showToast(t("toast.copied")); }
+  catch (e) { showToast((e && e.message) || e); }
+});
+$("btn-qr-share").addEventListener("click", async () => {
+  try {
+    const name = $("qr-wrap").dataset.name || "Wisteria";
+    await api().ShareText(S.pendingShare, name);
+  } catch (e) { showToast((e && e.message) || e); }
 });
 
 // manual form extra fields
@@ -1721,6 +2150,84 @@ async function maybeAutoConnect() {
     S.busy = false;
   }
 }
+// ---------- live traffic ----------
+// TrafficStats counters are monotonic per process; the bridge keeps the
+// session baseline and computes the rate. Poll only while the VPN screen is
+// visible and a session is up: on a phone a 1 s timer is real battery.
+let trafficBusy = false;
+setInterval(async () => {
+  if (S.tab !== "vpn" || S.state.state !== "connected" || trafficBusy) return;
+  trafficBusy = true;
+  try {
+    const r = await api().GetTrafficStats();
+    if (r) {
+      S.traffic = {
+        rx: r.rx_speed || 0, tx: r.tx_speed || 0,
+        rxTotal: r.rx_total || 0, txTotal: r.tx_total || 0, ok: !!r.ok,
+      };
+      const d = $("tr-down"), u = $("tr-up"), tot = $("tr-total");
+      if (d) d.textContent = r.ok ? fmtBytes(S.traffic.rx) + "/s" : t("traffic.unsupported");
+      if (u) u.textContent = r.ok ? fmtBytes(S.traffic.tx) + "/s" : "—";
+      if (tot) tot.textContent = t("traffic.session") + ": ↓ " + fmtBytes(S.traffic.rxTotal) + " · ↑ " + fmtBytes(S.traffic.txTotal);
+    }
+  } catch (e) { /* bridge not ready */ }
+  finally { trafficBusy = false; }
+}, 1000);
+
+// ---------- pull to refresh (profiles) ----------
+// The WebView cannot use the desktop wheel gestures; pulling down at the top
+// of the list is the one refresh gesture every phone user knows. The pull is
+// passive (native scrolling stays smooth) and only a short drag triggers it.
+let ptrStartY = 0, ptrDy = 0, ptrActive = false, ptrBusy = false;
+function ptrIndicator() {
+  let el = $("ptr-ind");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "ptr-ind";
+    $("app").appendChild(el);
+  }
+  return el;
+}
+document.addEventListener("touchstart", (ev) => {
+  if (S.tab !== "profiles" || !ev.touches || !ev.touches.length) return;
+  const sc = document.querySelector(".app-content");
+  if (sc && sc.scrollTop > 0) return;
+  ptrStartY = ev.touches[0].clientY;
+  ptrDy = 0;
+  ptrActive = true;
+}, { passive: true });
+document.addEventListener("touchmove", (ev) => {
+  if (!ptrActive) return;
+  ptrDy = Math.max(0, ev.touches[0].clientY - ptrStartY);
+  const el = ptrIndicator();
+  el.classList.toggle("show", ptrDy > 12);
+  el.style.transform = "translateY(" + Math.min(56, ptrDy * 0.6) + "px)";
+  el.textContent = ptrDy > 70 ? "↓ " + t("pull.done") : "...";
+}, { passive: true });
+document.addEventListener("touchend", async () => {
+  if (!ptrActive) return;
+  ptrActive = false;
+  const el = ptrIndicator();
+  el.classList.remove("show");
+  el.style.transform = "";
+  if (ptrDy <= 70 || ptrBusy) return;
+  ptrBusy = true;
+  showToast(t("pull.refreshing"));
+  try {
+    await loadSubs();
+    await loadProfiles();
+    // Bounded: each refresh runs on the bridge's own thread pool; refreshing
+    // dozens of subs at once would just queue them behind each other.
+    for (const s of S.subs.slice(0, 8)) {
+      try { await api().RefreshSubscription(s.id); } catch (e) { /* row keeps its error */ }
+    }
+    await loadSubs();
+    await loadProfiles();
+    showToast(t("pull.done"));
+  } catch (e) { showToast((e && e.message) || e); }
+  finally { ptrBusy = false; }
+}, { passive: true });
+
 // ---------- boot ----------
 whenReady(async () => {
   document.querySelectorAll("[data-icon]").forEach((el) => { el.innerHTML = I[el.dataset.icon] || ""; });
@@ -1753,6 +2260,15 @@ whenReady(async () => {
     if (ev.target && ev.target.closest && ev.target.closest("#btn-diag-logs")) switchTab("logs");
   });
   window.runtime.EventsOn("extip", (d) => {
+    // split_mode "only": the app itself is outside the tunnel, so the probe
+    // would show the real ISP address. The bridge refuses and explains.
+    if (d && d.mode_only) {
+      S.extIP = ""; S.extIPErr = d.error || "";
+      const el = $("stat-ip");
+      if (el) el.textContent = "—";
+      showToast(d.error || t("set.splitNote"));
+      return;
+    }
     S.extIP = (d && d.ip) || "";
     S.extIPErr = (d && d.error) || "";
     const el = $("stat-ip");
@@ -1761,6 +2277,34 @@ whenReady(async () => {
     // reconnecting: explain it instead of showing a scary ✕.
     if (!S.extIP && d && d.error && String(d.error).indexOf("туннель переподключается") >= 0) {
       showToast(t("toast.ipRetry"));
+    }
+  });
+  // A share link opened from a browser/messenger was imported by
+  // MainActivity on its own thread; show the result and jump to the list.
+  window.runtime.EventsOn("deeplink", async (d) => {
+    if (d && d.ok) {
+      showToast(t("deeplink.added"));
+      await loadSubs();
+      await loadProfiles();
+      switchTab("profiles");
+    } else {
+      showToast(t("deeplink.failed"));
+    }
+  });
+  // SAF backup/restore finished (MainActivity writes the file off-thread).
+  window.runtime.EventsOn("backup", async (d) => {
+    if (!d) return;
+    if (d.ok) {
+      showToast(d.action === "import"
+        ? t("backup.imported").replace("{p}", String(d.profiles || 0)).replace("{s}", String(d.subs || 0))
+        : t("backup.exported"));
+      if (d.action === "import") {
+        await loadSettings();
+        await loadProfiles();
+        await loadSubs();
+      }
+    } else {
+      showToast(t("backup.failed").replace("{err}", d.error || "?"));
     }
   });
   // The backend auto-pinger emits this; don't wipe an open settings form.

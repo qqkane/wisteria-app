@@ -184,6 +184,24 @@ class WisteriaBridge(activity: MainActivity) {
             maybeReconnect(old, next)
             null
         }
+        // ---- vpn screen extras ----
+        "GetTrafficStats" -> trafficStats()
+        "TestTunnel" -> testTunnel()
+        // ---- profiles power features ----
+        "PingAllProfiles" -> pingAllProfiles()
+        "EditProfile" -> editProfile(args.getJSONObject(0))
+        "GetShareLink" -> JSONObject.quote(shareLink(args.getString(0)))
+        // ---- logs / backup / system ----
+        "ShareLogs" -> { shareLogs(); null }
+        // Share sheet for a profile link / backup text (QR screen and edit
+        // dialog reuse it instead of only copying to the clipboard).
+        "ShareText" -> { shareText(args.getString(0), args.optString(1, "Wisteria")); null }
+        "ExportBackup" -> { liveActivity()?.exportBackup() ?: throw err("приложение в фоне — откройте его"); null }
+        "ImportBackup" -> { liveActivity()?.importBackup() ?: throw err("приложение в фоне — откройте его"); null }
+        "GetBackupJson" -> JSONObject.quote(backupJson())
+        "GetBatteryStatus" -> batteryStatus()
+        "OpenBatterySettings" -> { openBatterySettings(); null }
+        "OpenVpnSettings" -> { openVpnSettings(); null }
         "ListApps" -> listApps(args.optBoolean(0, false))
         "ListRuApps" -> listRuApps()
         // The Логи screen's «Очистить» used to clear only the DOM: the ring
@@ -881,6 +899,416 @@ class WisteriaBridge(activity: MainActivity) {
 
     // ---- helpers ----
 
+    // ---- live traffic ----
+    // TrafficStats counters are process-wide and monotonic; the bridge keeps
+    // the baseline of the current session and the previous sample, so the UI
+    // can show "down/up now" plus "transferred this session". Everything
+    // degrades to zeros when the OS reports UNSUPPORTED (some emulators and
+    // vendor ROMs do).
+    private var trafficSessionKey = ""
+    private var trafficBaseRx = -1L
+    private var trafficBaseTx = -1L
+    private var trafficLastRx = -1L
+    private var trafficLastTx = -1L
+    private var trafficLastAt = 0L
+
+    private fun rxBytes(): Long {
+        val uid = try {
+            android.net.TrafficStats.getUidRxBytes(android.os.Process.myUid())
+        } catch (_: Throwable) {
+            android.net.TrafficStats.UNSUPPORTED.toLong()
+        }
+        if (uid >= 0) return uid
+        val total = try {
+            android.net.TrafficStats.getTotalRxBytes()
+        } catch (_: Throwable) {
+            -1L
+        }
+        return if (total >= 0) total else -1L
+    }
+
+    private fun txBytes(): Long {
+        val uid = try {
+            android.net.TrafficStats.getUidTxBytes(android.os.Process.myUid())
+        } catch (_: Throwable) {
+            android.net.TrafficStats.UNSUPPORTED.toLong()
+        }
+        if (uid >= 0) return uid
+        val total = try {
+            android.net.TrafficStats.getTotalTxBytes()
+        } catch (_: Throwable) {
+            -1L
+        }
+        return if (total >= 0) total else -1L
+    }
+
+    /** {rx_speed, tx_speed (bytes/s), rx_total, tx_total (bytes), ok} */
+    private fun trafficStats(): JSONObject {
+        val now = System.currentTimeMillis()
+        val st = try { JSONObject(Mobile.status()) } catch (_: Throwable) { JSONObject() }
+        val running = isRunning(st)
+        val out = JSONObject()
+        if (!running) {
+            trafficSessionKey = ""
+            trafficBaseRx = -1L
+            trafficBaseTx = -1L
+            trafficLastRx = -1L
+            trafficLastTx = -1L
+            trafficLastAt = 0L
+            return out.put("ok", false)
+                .put("rx_speed", 0).put("tx_speed", 0)
+                .put("rx_total", 0).put("tx_total", 0)
+        }
+        // A new engine session invalidates every counter baseline. The
+        // mobile status has no monotonic "since" counter; started_at is the
+        // per-session wall clock, so a reconnect with the same profile still
+        // starts a fresh total.
+        val key = EngineHub.profileId + "@" + st.optString("started_at", st.optString("since", ""))
+        val rx = rxBytes()
+        val tx = txBytes()
+        if (key != trafficSessionKey) {
+            trafficSessionKey = key
+            trafficBaseRx = rx
+            trafficBaseTx = tx
+            trafficLastRx = rx
+            trafficLastTx = tx
+            trafficLastAt = now
+        }
+        val dt = if (trafficLastAt > 0) now - trafficLastAt else 0
+        val down = if (rx >= 0 && trafficLastRx >= 0 && dt > 0) {
+            ((rx - trafficLastRx).coerceAtLeast(0) * 1000 / dt)
+        } else 0
+        val up = if (tx >= 0 && trafficLastTx >= 0 && dt > 0) {
+            ((tx - trafficLastTx).coerceAtLeast(0) * 1000 / dt)
+        } else 0
+        trafficLastRx = rx
+        trafficLastTx = tx
+        trafficLastAt = now
+        return out.put("ok", rx >= 0)
+            .put("rx_speed", down)
+            .put("tx_speed", up)
+            .put("rx_total", if (rx >= 0 && trafficBaseRx >= 0) (rx - trafficBaseRx).coerceAtLeast(0) else 0)
+            .put("tx_total", if (tx >= 0 && trafficBaseTx >= 0) (tx - trafficBaseTx).coerceAtLeast(0) else 0)
+    }
+
+    /** Real end-to-end check through the tunnel: a 204 from gstatic proves
+     *  DNS, TCP and TLS all work over the established session. */
+    private fun testTunnel(): JSONObject {
+        val started = System.nanoTime()
+        return try {
+            val conn = URL("https://www.gstatic.com/generate_204").openConnection() as HttpURLConnection
+            conn.connectTimeout = 5000
+            conn.readTimeout = 5000
+            conn.instanceFollowRedirects = true
+            conn.setRequestProperty("User-Agent", "WisteriaAndroid/$VERSION")
+            try {
+                val code = conn.responseCode
+                val ms = (System.nanoTime() - started) / 1_000_000
+                if (code in 200..399) {
+                    JSONObject().put("ok", true).put("rtt_ms", ms).put("status", code)
+                } else {
+                    JSONObject().put("ok", false).put("error", "HTTP $code")
+                }
+            } finally {
+                conn.disconnect()
+            }
+        } catch (e: Throwable) {
+            JSONObject().put("ok", false).put("error", e.message ?: e.javaClass.simpleName)
+        }
+    }
+
+    // ---- ping all / edit / share ----
+
+    private fun pingOne(p: JSONObject): Long = try {
+        if (p.optString("type") == "wisteria") {
+            Mobile.ping(endpointOf(p))
+        } else {
+            tcpPing(p.optString("host"), p.optInt("port", 443))
+        }
+    } catch (_: Throwable) {
+        -1L
+    }
+
+    /** Every profile pinged with a bounded pool (6 workers): a sequential
+     *  pass over 30 profiles is a minute of dead UI, an unbounded one hammers
+     *  the radio and the servers. */
+    private fun pingAllProfiles(): JSONArray {
+        val list = store.listProfiles()
+        val n = list.length()
+        val results = java.util.Collections.synchronizedList(ArrayList<JSONObject>(n))
+        val workers = maxOf(1, minOf(6, n))
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(workers) { r ->
+            Thread(r, "wisteria-ping").apply { isDaemon = true }
+        }
+        try {
+            val futures = ArrayList<java.util.concurrent.Future<*>>(n)
+            for (i in 0 until n) {
+                val p = list.getJSONObject(i)
+                val id = p.optString("id")
+                futures.add(pool.submit {
+                    val lat = pingOne(p)
+                    store.updateProfileLatency(id, lat)
+                    results.add(JSONObject().put("id", id).put("latency_ms", lat))
+                })
+            }
+            for (f in futures) {
+                try {
+                    f.get()
+                } catch (_: Throwable) {
+                }
+            }
+        } finally {
+            pool.shutdown()
+        }
+        pushProfiles()
+        val out = JSONArray()
+        for (r in results) out.put(r)
+        return out
+    }
+
+    /** Rename + endpoint + wisteria TLS fields. Only the keys present in the
+     *  payload are touched, so an old UI cannot erase a field it does not
+     *  know about. */
+    private fun editProfile(o: JSONObject): JSONObject {
+        val id = o.optString("id")
+        val p = store.profile(id) ?: throw err("профиль не найден")
+        val name = o.optString("name").trim()
+        if (name.isNotEmpty()) p.put("name", name)
+        val host = o.optString("host").trim()
+        if (host.isNotEmpty()) p.put("host", host)
+        val port = o.optInt("port", 0)
+        if (port in 1..65535) p.put("port", port)
+        // A bundle profile stores the whole mirror list and the engine dials
+        // THAT, not host/port: without rewriting servers[0] an edit was a
+        // no-op for the live engine (and for the row the card displays).
+        val servers = p.optJSONArray("servers")
+        if (servers != null && servers.length() > 0) {
+            val row = servers.getJSONObject(0)
+            val h = if (host.isNotEmpty()) host else p.optString("host")
+            val prt = if (port in 1..65535) port else p.optInt("port", 0)
+            row.put("endpoint", if (prt > 0) "$h:$prt" else h)
+            if (o.has("transport")) {
+                if (o.optString("transport") == "tls") row.put("transport", "tls") else row.remove("transport")
+            }
+            if (o.has("tls_sni")) {
+                val sni = o.optString("tls_sni").trim()
+                if (sni.isEmpty()) row.remove("tls_sni") else row.put("tls_sni", sni)
+            }
+            if (o.has("tls_insecure")) {
+                if (o.optBoolean("tls_insecure")) row.put("tls_insecure", true) else row.remove("tls_insecure")
+            }
+            p.put("servers", servers)
+            // The profile-level TLS keys mirror the primary row (see
+            // applyPrimaryTls); rebuild them so the badge and the store
+            // validation match what the engine will dial.
+            p.remove("transport")
+            p.remove("tls_sni")
+            p.remove("tls_insecure")
+            TlsTransport.applyPrimaryTls(p, servers)
+        } else {
+            if (o.has("transport")) p.put("transport", o.optString("transport"))
+            if (o.has("tls_sni")) p.put("tls_sni", o.optString("tls_sni").trim())
+            if (o.has("tls_insecure")) p.put("tls_insecure", o.optBoolean("tls_insecure"))
+        }
+        // Same validation choke point as every import path.
+        TlsTransport.normalizeTls(p)
+        store.updateProfile(p)
+        EngineHub.appLog("профиль «${p.optString("name")}» изменён")
+        // A live session keeps the config it started with: rebuild it so the
+        // edit is not a no-op until the next manual reconnect.
+        if (id == EngineHub.profileId && running()) {
+            EngineHub.appLog("профиль активен — переподключение")
+            reconnectService()
+        }
+        pushProfiles()
+        return p
+    }
+
+    /** The original share link. Profiles imported from a link keep it in
+     *  `raw`; manual and subscription profiles have none (a wisteria link
+     *  carries the client key, which is why the store keeps raw instead of
+     *  reconstructing it). */
+    private fun shareLink(id: String): String {
+        val p = store.profile(id) ?: throw err("профиль не найден")
+        val raw = p.optString("raw")
+        if (raw.isNotEmpty()) return raw
+        throw err("у этого профиля нет share-ссылки — он добавлен вручную или из подписки")
+    }
+
+    // ---- logs sharing / backup ----
+
+    private fun shareText(text: String, subject: String) {
+        if (text.isEmpty()) throw err("нечего отправлять")
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, subject)
+            putExtra(Intent.EXTRA_TEXT, text)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        try {
+            context.startActivity(Intent.createChooser(send, subject).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (t: Throwable) {
+            throw err("некому поделиться: ${t.message}")
+        }
+    }
+
+    private fun shareLogs(): String {
+        val lines = EngineHub.logsSince(0)
+        val sb = StringBuilder()
+        sb.append("Wisteria ").append(VERSION).append(" · state=")
+            .append(try { JSONObject(Mobile.status()).optString("state") } catch (_: Throwable) { "?" })
+            .append("\n--- logs ---\n")
+        for (i in 0 until lines.length()) {
+            val l = lines.getJSONObject(i)
+            sb.append(l.optString("at")).append(" [").append(l.optString("tag")).append("] ")
+                .append(l.optString("text")).append('\n')
+        }
+        val text = sb.toString()
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "Wisteria logs")
+            putExtra(Intent.EXTRA_TEXT, text)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        try {
+            context.startActivity(Intent.createChooser(send, "Wisteria logs").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (t: Throwable) {
+            throw err("некому поделиться: ${t.message}")
+        }
+        return text
+    }
+
+    /** Everything worth restoring: profiles, subscriptions, settings. The
+     *  client keys live inside the profiles, so this file IS a credential —
+     *  the UI says as much. */
+    internal fun backupJson(): String {
+        val out = JSONObject()
+            .put("format", "wisteria-android-backup")
+            .put("version", 1)
+            .put("exported_at", AndroidStore.nowIso())
+            .put("app_version", VERSION)
+            .put("profiles", store.listProfiles())
+            .put("subs", store.listSubs())
+            .put("settings", store.settings())
+            .put("active", store.activeId())
+            .put("autostart", store.autostart())
+        return out.toString(2)
+    }
+
+    /** Restores a backup produced by backupJson(). Field names match the
+     *  store's own JSON, so old data keeps working. Returns a summary. */
+    internal fun restoreBackup(text: String): JSONObject {
+        val o = try {
+            JSONObject(text)
+        } catch (e: Exception) {
+            throw err("это не файл резервной копии Wisteria")
+        }
+        if (o.optString("format") != "wisteria-android-backup") {
+            throw err("это не файл резервной копии Wisteria")
+        }
+        val profiles = o.optJSONArray("profiles") ?: JSONArray()
+        val subs = o.optJSONArray("subs") ?: JSONArray()
+        var pAdd = 0
+        var sAdd = 0
+        // Profiles reference their subscription by id. addSub() mints a new
+        // id (and returns null for a URL that is already stored), so the
+        // backup's ids must be remapped — otherwise every restored profile
+        // pointed at a sub row that does not exist and landed in "manual".
+        val subIdMap = HashMap<String, String>()
+        for (i in 0 until subs.length()) {
+            val s = subs.getJSONObject(i)
+            val url = s.optString("url")
+            if (url.isEmpty()) continue
+            val oldId = s.optString("id")
+            val created = store.addSub(url)
+            if (created == null) {
+                // Already stored: reuse the existing row's id.
+                val all = store.listSubs()
+                for (j in 0 until all.length()) {
+                    val ex = all.getJSONObject(j)
+                    if (ex.optString("url") == url) {
+                        if (oldId.isNotEmpty()) subIdMap[oldId] = ex.optString("id")
+                        break
+                    }
+                }
+                continue
+            }
+            s.put("id", created.optString("id"))
+            if (oldId.isNotEmpty()) subIdMap[oldId] = created.optString("id")
+            // Keep the backup's name/counters on the freshly created row.
+            store.updateSub(s)
+            sAdd++
+        }
+        for (i in 0 until profiles.length()) {
+            val p = profiles.getJSONObject(i)
+            if (p.optString("id").isEmpty()) continue
+            if (store.profile(p.optString("id")) != null) continue
+            subIdMap[p.optString("sub_id")]?.let { p.put("sub_id", it) }
+            try {
+                if (store.addProfile(p) != null) pAdd++
+            } catch (_: Throwable) {
+                // A profile whose TLS combo no longer validates is skipped,
+                // not fatal: the rest of the backup still restores.
+            }
+        }
+        if (o.has("settings")) {
+            val cur = store.settings()
+            val src = o.optJSONObject("settings") ?: JSONObject()
+            // Only known keys: an old backup must not inject new ones.
+            src.keys().forEach { k -> if (cur.has(k)) cur.put(k, src.opt(k)) }
+            store.saveSettings(cur)
+        }
+        val active = o.optString("active")
+        if (active.isNotEmpty() && store.profile(active) != null) store.setActive(active)
+        if (o.has("autostart")) store.setAutostart(o.optBoolean("autostart"))
+        EngineHub.appLog("восстановление: профилей $pAdd, подписок $sAdd")
+        pushProfiles()
+        return JSONObject().put("profiles", pAdd).put("subs", sAdd)
+    }
+
+    // ---- battery / system settings ----
+
+    private fun batteryStatus(): JSONObject {
+        val pm = context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+        val ignoring = try {
+            pm?.isIgnoringBatteryOptimizations(context.packageName) ?: false
+        } catch (_: Throwable) {
+            false
+        }
+        return JSONObject().put("ignoring", ignoring)
+    }
+
+    private fun openBatterySettings() {
+        val intent = Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        // Some ROMs rename/remove the list; the per-app request dialog is the
+        // fallback (it needs the REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+        // permission, which the manifest declares).
+        try {
+            context.startActivity(intent)
+        } catch (_: Throwable) {
+            try {
+                context.startActivity(
+                    Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                        .setData(Uri.parse("package:${context.packageName}"))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            } catch (t: Throwable) {
+                throw err("настройки батареи недоступны: ${t.message}")
+            }
+        }
+    }
+
+    private fun openVpnSettings() {
+        try {
+            context.startActivity(
+                Intent(android.provider.Settings.ACTION_VPN_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        } catch (t: Throwable) {
+            throw err("настройки VPN недоступны: ${t.message}")
+        }
+    }
+
     private fun pushProfiles() {
         EngineHub.pushEvent("profiles", null)
     }
@@ -1026,6 +1454,35 @@ class WisteriaBridge(activity: MainActivity) {
         val id = store.activeId()
         if (id.isEmpty()) {
             EngineHub.appLog("тайл: нет активного профиля — выберите его в приложении")
+            return
+        }
+        connect(id)
+    }
+
+    /** Deep link (wisteria://…, vless://… opened from a browser/manifest):
+     *  same import path as the Links tab. */
+    fun importDeepLink(uri: String): JSONObject {
+        val blank = JSONObject().put("added", JSONArray()).put("errors", JSONArray())
+        if (uri.isBlank()) return blank
+        val res = addLinks(uri)
+        val added = res.optJSONArray("added")?.length() ?: 0
+        EngineHub.appLog(if (added > 0) "deep link: профиль добавлен" else "deep link: ссылка не распознана")
+        return res
+    }
+
+    /** Launcher shortcut «Connect/Disconnect»: mirrors the QS tile. */
+    fun toggleFromShortcut() {
+        if (running()) {
+            disconnect()
+        } else {
+            connectActive()
+        }
+    }
+
+    /** Launcher shortcut for a specific profile. */
+    fun connectFromShortcut(id: String) {
+        if (store.profile(id) == null) {
+            EngineHub.appLog("ярлык: профиль больше не существует")
             return
         }
         connect(id)

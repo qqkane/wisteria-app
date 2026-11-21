@@ -14,6 +14,9 @@
     <!-- Short haptic ticks on connect/disconnect (navigator.vibrate in the
          WebView); normal-level, no runtime prompt. -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Settings → «Не оптимизировать батарею»: the request dialog needs it;
+         no runtime prompt, the user grants it in the system sheet. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- Package visibility (Android 11+): the split-tunnel picker lists
          every launchable app, not just the few visible by default. -->
@@ -41,6 +44,22 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- Share links and subscriptions opened from a browser or a
+                 messenger: the activity imports the URI through the same
+                 bridge path as the Links tab. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="wisteria" />
+                <data android:scheme="vless" />
+                <data android:scheme="vmess" />
+                <data android:scheme="trojan" />
+                <data android:scheme="ss" />
+                <data android:scheme="hysteria2" />
+                <data android:scheme="hy2" />
+                <data android:scheme="tuic" />
             </intent-filter>
         </activity>
 

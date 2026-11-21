@@ -32,12 +32,18 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val REQ_VPN = 41
         private const val REQ_NOTIF = 42
+        private const val REQ_EXPORT = 43
+        private const val REQ_IMPORT = 44
         private const val TAG = "WisteriaUI"
 
         /** Set by the QS tile when it cannot start the tunnel itself (VPN
          *  consent pending / no active profile): the activity connects on
          *  launch instead. */
         const val EXTRA_AUTO_CONNECT = "org.wisteria.app.AUTO_CONNECT"
+
+        /** Launcher-shortcut actions. */
+        const val ACTION_SHORTCUT_TOGGLE = "org.wisteria.app.SHORTCUT_TOGGLE"
+        const val ACTION_SHORTCUT_CONNECT = "org.wisteria.app.SHORTCUT_CONNECT"
     }
 
     private lateinit var web: WebView
@@ -229,6 +235,8 @@ class MainActivity : AppCompatActivity() {
         web.loadUrl("file:///android_asset/ui/index.html")
         applyThemeFromSettings()
         handleAutoConnect(intent)
+        handleIntentExtras(intent)
+        refreshShortcuts()
 
         // Android 13+ hides the VPN notification without the runtime grant;
         // denial is harmless (the foreground service still runs).
@@ -266,11 +274,189 @@ class MainActivity : AppCompatActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleAutoConnect(intent)
+        handleIntentExtras(intent)
+    }
+
+    /**
+     * Deep links and launcher shortcuts. A share link opened from a browser
+     * (`wisteria://…`, `vless://…`) is imported through the same bridge path
+     * as the Links tab, then the SPA is told to show the Profiles tab. The
+     * consumed action/URI is cleared so a rotation or a resume does not
+     * import the link twice.
+     */
+    private fun handleIntentExtras(intent: Intent?) {
+        if (intent == null) return
+        val data = intent.data
+        if (data != null) {
+            intent.data = null
+            val uri = data.toString()
+            // Run off the UI thread: parsing + a store write must never
+            // block the first frame.
+            Thread {
+                try {
+                    val res = bridge.importDeepLink(uri)
+                    val added = res.optJSONArray("added")?.length() ?: 0
+                    EngineHub.pushEvent(
+                        "deeplink",
+                        JSONObject().put("added", added).put("ok", added > 0)
+                    )
+                } catch (t: Throwable) {
+                    EngineHub.appLog("deep link: ${t.message}")
+                    EngineHub.pushEvent("deeplink", JSONObject().put("added", 0).put("ok", false))
+                }
+            }.start()
+            return
+        }
+        when (intent.action) {
+            ACTION_SHORTCUT_TOGGLE -> {
+                intent.action = null
+                Thread { bridge.toggleFromShortcut() }.start()
+            }
+            ACTION_SHORTCUT_CONNECT -> {
+                val id = intent.getStringExtra(WisteriaVpnService.EXTRA_PROFILE_ID).orEmpty()
+                intent.action = null
+                intent.removeExtra(WisteriaVpnService.EXTRA_PROFILE_ID)
+                if (id.isNotEmpty()) {
+                    Thread {
+                        try {
+                            bridge.connectFromShortcut(id)
+                        } catch (t: Throwable) {
+                            EngineHub.appLog("ярлык: ${t.message}")
+                        }
+                    }.start()
+                }
+            }
+        }
+    }
+
+    /** SAF: write the backup the bridge produces into a user-picked file. */
+    fun exportBackup() {
+        runOnUiThread {
+            if (isFinishing || isDestroyed) return@runOnUiThread
+            val name = "wisteria-backup-" +
+                java.text.SimpleDateFormat("yyyyMMdd-HHmm", java.util.Locale.US).format(java.util.Date()) + ".json"
+            try {
+                startActivityForResult(
+                    Intent(Intent.ACTION_CREATE_DOCUMENT)
+                        .addCategory(Intent.CATEGORY_OPENABLE)
+                        .setType("application/json")
+                        .putExtra(Intent.EXTRA_TITLE, name),
+                    REQ_EXPORT,
+                )
+            } catch (t: Throwable) {
+                EngineHub.appLog("экспорт: ${t.message}")
+            }
+        }
+    }
+
+    /** SAF: read a backup file the user picked and hand it to the bridge. */
+    fun importBackup() {
+        runOnUiThread {
+            if (isFinishing || isDestroyed) return@runOnUiThread
+            try {
+                startActivityForResult(
+                    Intent(Intent.ACTION_OPEN_DOCUMENT)
+                        .addCategory(Intent.CATEGORY_OPENABLE)
+                        .setType("*/*"),
+                    REQ_IMPORT,
+                )
+            } catch (t: Throwable) {
+                EngineHub.appLog("импорт: ${t.message}")
+            }
+        }
+    }
+
+    private fun writeBackup(uri: android.net.Uri?) {
+        if (uri == null) return
+        Thread {
+            try {
+                val json = bridge.backupJson()
+                contentResolver.openOutputStream(uri)?.use { it.write(json.toByteArray(Charsets.UTF_8)) }
+                EngineHub.appLog("резервная копия сохранена")
+                EngineHub.pushEvent("backup", JSONObject().put("ok", true).put("action", "export"))
+            } catch (t: Throwable) {
+                EngineHub.appLog("экспорт: ${t.message}")
+                EngineHub.pushEvent("backup", JSONObject().put("ok", false).put("action", "export").put("error", t.message))
+            }
+        }.start()
+    }
+
+    private fun readBackup(uri: android.net.Uri?) {
+        if (uri == null) return
+        Thread {
+            try {
+                val text = contentResolver.openInputStream(uri)?.use {
+                    it.readBytes().toString(Charsets.UTF_8)
+                } ?: ""
+                if (text.isBlank()) throw IllegalStateException("пустой файл")
+                val res = bridge.restoreBackup(text)
+                EngineHub.pushEvent(
+                    "backup",
+                    JSONObject().put("ok", true).put("action", "import")
+                        .put("profiles", res.optInt("profiles")).put("subs", res.optInt("subs"))
+                )
+            } catch (t: Throwable) {
+                EngineHub.appLog("импорт: ${t.message}")
+                EngineHub.pushEvent("backup", JSONObject().put("ok", false).put("action", "import").put("error", t.message))
+            }
+        }.start()
+    }
+
+    /**
+     * Launcher shortcuts: one toggle plus up to two most recent profiles.
+     * Re-registered on every launch (the profile list changes), which is
+     * also how the "recent" ordering stays right.
+     */
+    private fun refreshShortcuts() {
+        try {
+            val icon = androidx.core.graphics.drawable.IconCompat.createWithResource(this, R.mipmap.ic_launcher)
+            val list = ArrayList<androidx.core.content.pm.ShortcutInfoCompat>()
+            list.add(
+                androidx.core.content.pm.ShortcutInfoCompat.Builder(this, "toggle")
+                    .setShortLabel(getString(R.string.shortcut_toggle))
+                    .setIcon(icon)
+                    .setIntent(
+                        Intent(this, MainActivity::class.java)
+                            .setAction(ACTION_SHORTCUT_TOGGLE)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                    .build()
+            )
+            val profiles = AndroidStore(this).listProfiles()
+            var n = 0
+            for (i in 0 until profiles.length()) {
+                if (n >= 2) break
+                val p = profiles.getJSONObject(i)
+                val id = p.optString("id")
+                if (id.isEmpty()) continue
+                val name = p.optString("name").ifEmpty { p.optString("host") }.take(40)
+                list.add(
+                    androidx.core.content.pm.ShortcutInfoCompat.Builder(this, "p$id")
+                        .setShortLabel(name)
+                        .setIcon(icon)
+                        .setIntent(
+                            Intent(this, MainActivity::class.java)
+                                .setAction(ACTION_SHORTCUT_CONNECT)
+                                .putExtra(WisteriaVpnService.EXTRA_PROFILE_ID, id)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                        .build()
+                )
+                n++
+            }
+            androidx.core.content.pm.ShortcutManagerCompat.setDynamicShortcuts(this, list)
+        } catch (t: Throwable) {
+            android.util.Log.w(TAG, "shortcuts", t)
+        }
     }
 
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        when (requestCode) {
+            REQ_EXPORT -> if (resultCode == RESULT_OK) writeBackup(data?.data)
+            REQ_IMPORT -> if (resultCode == RESULT_OK) readBackup(data?.data)
+        }
         if (requestCode == REQ_VPN) {
             val id = VpnConsentHolder.pendingId
             VpnConsentHolder.pendingId = null

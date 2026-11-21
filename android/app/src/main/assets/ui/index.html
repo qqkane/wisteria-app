@@ -106,6 +106,44 @@
     </div>
   </div>
 
+  <div class="modal-overlay" id="modal-share">
+    <div class="modal-content share-box">
+      <div class="modal-header">
+        <h2 data-i18n="qr.title">Поделиться профилем</h2>
+        <button class="modal-close" id="qr-close" data-icon="xmark"></button>
+      </div>
+      <div class="qr-wrap" id="qr-wrap"></div>
+      <p class="qr-hint" data-i18n="qr.hint">Наведите камеру другого телефона</p>
+      <div class="share-actions">
+        <button class="ghost-btn" id="btn-qr-copy" data-i18n="qr.copy">Копировать ссылку</button>
+        <button class="ghost-btn" id="btn-qr-share" data-i18n="qr.share">Отправить</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="modal-edit">
+    <div class="modal-content edit-box">
+      <div class="modal-header">
+        <h2 data-i18n="edit.title">Изменить профиль</h2>
+        <button class="modal-close" id="edit-close" data-icon="xmark"></button>
+      </div>
+      <div class="input-group"><label data-i18n="lbl.name">Имя</label><input id="e-name" type="text"/></div>
+      <div class="input-row">
+        <div class="input-group"><label data-i18n="lbl.host">Адрес</label><input id="e-host" type="text"/></div>
+        <div class="input-group small"><label data-i18n="lbl.port">Порт</label><input id="e-port" type="number" min="1" max="65535"/></div>
+      </div>
+      <div class="input-row">
+        <div class="input-group small">
+          <label data-i18n="lbl.transport">Транспорт</label>
+          <select id="e-transport"><option value="tcp">TCP</option><option value="tls">TLS</option></select>
+        </div>
+        <div class="input-group"><label data-i18n="lbl.tlsSni">TLS SNI</label><input id="e-sni" type="text"/></div>
+      </div>
+      <label class="tls-insec"><input id="e-insecure" type="checkbox"/><span data-i18n="lbl.tlsInsecure">Не проверять сертификат</span></label>
+      <button class="submit-btn" id="btn-edit-save" data-i18n="edit.save">Сохранить</button>
+    </div>
+  </div>
+
   <div class="modal-overlay" id="modal-confirm">
     <div class="modal-content confirm-box">
       <div class="confirm-icon" data-icon="trash"></div>
@@ -122,6 +160,7 @@
 </div>
 
 <script src="android-shim.js"></script>
+<script src="qr.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
