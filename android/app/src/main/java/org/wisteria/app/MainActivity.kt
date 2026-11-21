@@ -302,6 +302,18 @@ class MainActivity : AppCompatActivity() {
         finishAffinity()
     }
 
+    /** Evaluate JS on the UI thread; used by WisteriaBridge.CallAsync() to
+     *  resolve a pending promise without touching the WebView off-thread. */
+    fun evalJs(js: String) {
+        runOnUiThread {
+            if (isFinishing || isDestroyed) return@runOnUiThread
+            try {
+                web.evaluateJavascript(js, null)
+            } catch (_: Throwable) {
+            }
+        }
+    }
+
     override fun onDestroy() {
         // Remove ONLY this activity's emitter and holder slot: with
         // restartApp() the successor is already registered when this runs,

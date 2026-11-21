@@ -7,7 +7,40 @@
 // same contract the frontend's try/catch expects.
 "use strict";
 (function () {
-  function call(name, args) {
+  // ---------- async bridge ----------
+  // CallAsync returns immediately and answers through __wisteriaResolve();
+  // Call (synchronous, holds the JS thread) stays as a fallback for an
+  // older Kotlin side. Every binding the SPA issues goes through the async
+  // path, so package enumeration, a 15 s subscription fetch or an HTTP probe
+  // can never freeze the interface again.
+  const pending = new Map();
+  const CALL_TIMEOUT_MS = 60000;
+  let reqSeq = 0;
+
+  function settle(reqId, replyJson, fail) {
+    const p = pending.get(reqId);
+    if (!p) return;
+    pending.delete(reqId);
+    clearTimeout(p.timer);
+    if (fail) return p.reject(fail);
+    let v;
+    try {
+      v = JSON.parse(replyJson);
+    } catch (e) {
+      // Unparseable reply: treat it as a bare string (Version used to come
+      // back unquoted). An empty reply means null.
+      v = typeof replyJson === "string" && replyJson !== "" ? replyJson : null;
+    }
+    if (v && v.__error) return p.reject(new Error(v.__error));
+    p.resolve(v === undefined ? null : v);
+  }
+
+  // The Kotlin side evaluates this for every finished async call.
+  window.__wisteriaResolve = function (reqId, replyJson) {
+    settle(reqId, replyJson, null);
+  };
+
+  function callSync(name, args) {
     const n = window.WisteriaAndroid;
     if (!n) return Promise.reject(new Error("мост ещё не готов"));
     return new Promise((resolve, reject) => {
@@ -22,8 +55,6 @@
           try {
             v = JSON.parse(raw);
           } catch (e) {
-            // Wails JSON-encodes Go strings; the raw bridge returns them
-            // verbatim (Version). Treat an unparseable reply as a string.
             v = typeof raw === "string" && raw !== "" ? raw : null;
           }
           if (v && v.__error) return reject(new Error(v.__error));
@@ -32,6 +63,28 @@
           reject(e);
         }
       }, 0);
+    });
+  }
+
+  function call(name, args) {
+    const n = window.WisteriaAndroid;
+    if (!n) return Promise.reject(new Error("мост ещё не готов"));
+    if (typeof n.CallAsync !== "function") return callSync(name, args);
+    return new Promise((resolve, reject) => {
+      const id = "r" + (++reqSeq);
+      // A wedged binding must not lock the SPA's busy guard forever.
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error("таймаут вызова " + name));
+      }, CALL_TIMEOUT_MS);
+      pending.set(id, { resolve, reject, timer });
+      try {
+        n.CallAsync(id, name, args === undefined ? "[]" : JSON.stringify(args));
+      } catch (e) {
+        pending.delete(id);
+        clearTimeout(timer);
+        reject(e);
+      }
     });
   }
 
@@ -207,11 +260,12 @@
   });
 
   // The settings form is re-rendered on every visit; re-apply each time:
-  // - drop the Windows-only switch pairs (start minimized / confirm exit)
-  // - relabel the autostart toggle (it maps to Android boot autostart)
   // - quick links to Логи/Диагностика at the top of the settings view
   // - segmented RU/EN toggle instead of the native <select> dialog
-  const killPairs = ["s-startmin", "s-confirmexit"];
+  // (The desktop-only rows — start minimized / confirm exit / autoping — and
+  // the Android autostart wording are handled by app.js itself, gated on
+  // window.__PLATFORM: mutating rendered DOM from a global observer was both
+  // fragile and expensive.)
   let abLangWanted = null; // language picked via the segmented toggle
   function secCard(tab) {
     // the boot-time i18n pass has already run by the time these render, so
@@ -286,30 +340,19 @@
   ensureBtnObserver();
   window.__wisteriaSyncBtn();
 
-  new MutationObserver(() => {
+  // ---------- the one remaining DOM pass ----------
+  // It runs only when #content-wrapper's direct children change, i.e. on a
+  // tab switch or a full view re-render — NOT on subtitle/log/uptime text
+  // updates deep inside the view. The old observer watched
+  // documentElement+subtree, so the 1 s uptime tick and every appended log
+  // line re-ran a document-wide scan several times per second.
+  let shimSyncTimer = 0;
+  function shimSync() {
     syncModalClass();
     observeModals();
     ensureBtnObserver();
     // The SPA re-creates the button on state changes; sync the fresh node.
     window.__wisteriaSyncBtn();
-
-    const as = document.querySelector("input#s-autostart");
-    if (as) {
-      const lbl = as.closest("label.switch")?.previousElementSibling;
-      if (lbl && lbl.tagName === "LABEL" && (lbl.textContent.includes("входе в систему") || lbl.textContent.includes("on login")))
-        lbl.textContent = lbl.textContent
-          .replace("при входе в систему", "при включении телефона")
-          .replace("Start on login", "Start on device boot");
-    }
-
-    killPairs.forEach((id) => {
-      const el = document.getElementById(id);
-      if (!el) return;
-      const ctl = el.closest("label.switch") || el;
-      const lbl = ctl.previousElementSibling;
-      if (lbl && lbl.tagName === "LABEL") lbl.remove();
-      ctl.remove();
-    });
 
     const title = document.querySelector(".settings-title");
     if (title && !document.getElementById("ab-sec-grid")) {
@@ -359,7 +402,22 @@
       }));
       sync();
     }
-  }).observe(document.documentElement, { childList: true, subtree: true });
+  }
+
+  // Coalesce bursts (a tab switch fires several childList records) into one
+  // pass, and never run more than a few times a second.
+  function scheduleShimSync() {
+    if (shimSyncTimer) return;
+    shimSyncTimer = setTimeout(() => {
+      shimSyncTimer = 0;
+      try { shimSync(); } catch (e) { /* never let the shim break the SPA */ }
+    }, 80);
+  }
+
+  const contentHost = document.getElementById("content-wrapper");
+  if (contentHost) {
+    new MutationObserver(scheduleShimSync).observe(contentHost, { childList: true });
+  }
 
   // Cold-start safety net: if the SPA boot chain died before its first
   // render (any bridge hiccup leaves an empty content area), replay the

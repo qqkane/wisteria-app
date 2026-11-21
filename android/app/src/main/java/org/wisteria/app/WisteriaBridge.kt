@@ -50,6 +50,10 @@ class WisteriaBridge(activity: MainActivity) {
         val VERSION: String = BuildConfig.VERSION_NAME
         private const val MAX_SUB_BYTES = 4 shl 20
 
+        /** Package-list cache lifetime. A minute keeps the Routing tab
+         *  instant without hiding a just-installed app for long. */
+        private const val APPS_TTL_MS = 60_000L
+
         /** Every "update" now ends on the public release page: Android's
          *  in-app installer flow (unknown sources + FileProvider + 90 MB
          *  download in a WebView-hosted app) was removed in favour of the
@@ -87,6 +91,50 @@ class WisteriaBridge(activity: MainActivity) {
             EngineHub.appLog("✕ $name: $msg")
             JSONObject().put("__error", msg).toString()
         }
+    }
+
+    /**
+     * Asynchronous entry point. Call() runs on the WebView's JS thread, so a
+     * single slow binding (ListApps enumerating 300 packages, a 15s HTTP
+     * probe, PingProfile) froze the entire UI — including the Cancel button.
+     * CallAsync returns immediately, runs the work on a bounded pool and
+     * resolves the JS promise through window.__wisteriaResolve() on the UI
+     * thread.
+     */
+    @JavascriptInterface
+    fun CallAsync(reqId: String, name: String, argsJson: String) {
+        val json = argsJson.ifBlank { "[]" }
+        val task = Runnable {
+            val reply = try {
+                val args = try { JSONArray(json) } catch (_: Exception) { JSONArray() }
+                dispatch(name, args)?.toString() ?: "null"
+            } catch (t: Throwable) {
+                val msg = t.message ?: t.toString()
+                EngineHub.appLog("✕ $name: $msg")
+                JSONObject().put("__error", msg).toString()
+            }
+            val act = liveActivity() ?: return@Runnable
+            // reqId and reply are quoted: a JSON string literal is a valid JS
+            // expression, and the shim JSON.parses the reply itself.
+            act.evalJs(
+                "window.__wisteriaResolve && window.__wisteriaResolve(" +
+                    "${JSONObject.quote(reqId)}, ${JSONObject.quote(reply)})"
+            )
+        }
+        try {
+            asyncPool.execute(task)
+        } catch (_: Throwable) {
+            // Pool rejected (process shutting down): answer inline so the
+            // promise still settles instead of hanging the UI forever.
+            try { task.run() } catch (_: Throwable) {}
+        }
+    }
+
+    /** Bounded: four in-flight bindings is more than the SPA ever issues at
+     *  once, and an unbounded pool would let a misbehaving page spawn
+     *  hundreds of package-manager scans. */
+    private val asyncPool = java.util.concurrent.Executors.newFixedThreadPool(4) {
+        Thread(it, "wisteria-bridge").apply { isDaemon = true }
     }
 
     private fun err(msg: String): IllegalStateException = IllegalStateException(msg)
@@ -136,7 +184,7 @@ class WisteriaBridge(activity: MainActivity) {
             maybeReconnect(old, next)
             null
         }
-        "ListApps" -> listApps()
+        "ListApps" -> listApps(args.optBoolean(0, false))
         "ListRuApps" -> listRuApps()
         // The Логи screen's «Очистить» used to clear only the DOM: the ring
         // kept growing and came back on the next tab switch.
@@ -877,8 +925,18 @@ class WisteriaBridge(activity: MainActivity) {
 
     /** Installed apps for the per-app split-tunnel picker: launchable apps
      *  plus user-installed ones, minus ourselves. The manifest <queries>
-     *  (MAIN/LAUNCHER) makes them visible under Android 11+ package rules. */
-    private fun listApps(): JSONArray {
+     *  (MAIN/LAUNCHER) makes them visible under Android 11+ package rules.
+     *  Cached: enumerating ~300 packages is the single slowest binding the
+     *  Routing tab touches, and the list only changes on install/uninstall. */
+    @Volatile
+    private var appsCache: JSONArray? = null
+
+    @Volatile
+    private var appsCacheAt = 0L
+
+    private fun listApps(force: Boolean = false): JSONArray {
+        val now = System.currentTimeMillis()
+        appsCache?.let { if (!force && now - appsCacheAt < APPS_TTL_MS) return it }
         val pm = context.packageManager
         val rows = ArrayList<Pair<String, String>>()
         for (ai in pm.getInstalledApplications(0)) {
@@ -891,6 +949,8 @@ class WisteriaBridge(activity: MainActivity) {
         rows.sortBy { it.second.lowercase() }
         val out = JSONArray()
         for ((pkg, label) in rows) out.put(JSONObject().put("pkg", pkg).put("label", label))
+        appsCache = out
+        appsCacheAt = now
         return out
     }
 

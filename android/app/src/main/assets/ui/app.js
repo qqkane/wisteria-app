@@ -59,6 +59,7 @@ const I18N = {
     "set.lang": "Язык", "set.socksPort": "Локальный SOCKS-порт", "set.httpPort": "Локальный HTTP-порт",
     "set.sysproxy": "Системный прокси при подключении", "set.bridge": "HTTP-мост (нужен для системного прокси)",
     "set.autoconnect": "Автоподключение при старте", "set.autostart": "Запускать при входе в систему",
+    "set.autostartAndroid": "Подключаться при включении телефона",
     "set.wisteriaCore": "Путь к wisteria-client", "set.singboxCore": "Путь к sing-box",
     "set.detect": "Найти ядра", "set.save": "Сохранить настройки",
     "set.startMin": "Запускать свёрнутым", "set.startMinNote": "окно свернётся в панель задач",
@@ -166,6 +167,7 @@ const I18N = {
     "set.lang": "Language", "set.socksPort": "Local SOCKS port", "set.httpPort": "Local HTTP port",
     "set.sysproxy": "Set system proxy on connect", "set.bridge": "HTTP bridge (required for the system proxy)",
     "set.autoconnect": "Auto-connect on start", "set.autostart": "Start on login",
+    "set.autostartAndroid": "Connect when the phone boots",
     "set.wisteriaCore": "Path to wisteria-client", "set.singboxCore": "Path to sing-box",
     "set.detect": "Detect cores", "set.save": "Save settings",
     "set.startMin": "Start minimized", "set.startMinNote": "the window opens minimized",
@@ -279,7 +281,7 @@ const EXTRA = {
 
 // ---------- state ----------
 const S = {
-  tab: "vpn", setTab: "look", theme: "sunset", profiles: [], selected: "", lastLogSeq: 0,
+  tab: "vpn", setTab: "look", theme: "lilac", profiles: [], selected: "", lastLogSeq: 0,
   state: { state: "disconnected" }, uptimeTimer: null, extIP: "",
   // Timestamp of the optimistic "connecting" render (markConnecting): lets
   // the 3 s GetState poll ignore a stale "disconnected" while the Android
@@ -291,6 +293,10 @@ const S = {
   wdiag: null, // the Diagnostics page data (wisteria profiles only)
 };
 const $ = (id) => document.getElementById(id);
+// Android build (android-shim.js sets __PLATFORM before this file loads).
+// Desktop-only controls are skipped at render time instead of being deleted
+// from the DOM afterwards by a MutationObserver.
+const isAndroid = window.__PLATFORM === "android";
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const typeIcon = (tp) => ({ wisteria: I.lock }[tp] || I.globe);
 // Bundle links carry mirror endpoints in p.servers; the card shows the
@@ -683,16 +689,18 @@ function renderSettings() {
     <div class="settings-section">
       <h3>${esc(t("sec.general"))}</h3>
       <div class="set-grid">
-        <label>${esc(t("set.autostart"))}</label>
+        <label>${esc(t(isAndroid ? "set.autostartAndroid" : "set.autostart"))}</label>
         <label class="switch"><input id="s-autostart" type="checkbox"/><span class="slider"></span></label>
+        ${isAndroid ? "" : `
         <label>${esc(t("set.startMin"))}<span class="set-note">${esc(t("set.startMinNote"))}</span></label>
         <label class="switch"><input id="s-startmin" type="checkbox"/><span class="slider"></span></label>
         <label>${esc(t("set.confirmExit"))}</label>
-        <label class="switch"><input id="s-confirmexit" type="checkbox"/><span class="slider"></span></label>
+        <label class="switch"><input id="s-confirmexit" type="checkbox"/><span class="slider"></span></label>`}
         <label>${esc(t("set.checkIp"))}<span class="set-note">${esc(t("set.checkIpNote"))}</span></label>
         <label class="switch"><input id="s-checkip" type="checkbox"/><span class="slider"></span></label>
+        ${isAndroid ? "" : `
         <label>${esc(t("set.autoping"))}<span class="set-note">${esc(t("set.autopingNote"))}</span></label>
-        <input id="s-autoping" type="number" min="0" max="3600"/>
+        <input id="s-autoping" type="number" min="0" max="3600"/>`}
         <label>${esc(t("set.autoconnect"))}</label>
         <select id="s-autoconnect"><option value="">—</option></select>
       </div>
@@ -1670,6 +1678,49 @@ document.addEventListener("change", async (ev) => {
   }
 });
 
+// ---------- Android-only surface limits ----------
+// Done once at boot on the real DOM, not from a global MutationObserver:
+// the TOML importer is a desktop feature (the bridge answers ImportTOML with
+// an honest error), and the manual form only builds wisteria profiles —
+// every other protocol arrives through Links / Clipboard.
+function applyAndroidLimits() {
+  if (!isAndroid) return;
+  const tomlTab = document.querySelector('.modal-tab[data-mtab="toml"]');
+  if (tomlTab) tomlTab.remove();
+  const tomlBody = document.querySelector('.modal-body[data-mbody="toml"]');
+  if (tomlBody) tomlBody.remove();
+  const sel = $("m-type");
+  if (sel) {
+    Array.from(sel.options).forEach((o) => { if (o.value !== "wisteria") o.remove(); });
+    sel.value = "wisteria";
+    renderExtraFields();
+  }
+}
+
+// "Auto-connect on start": on Android the setting names a profile id (the
+// desktop uses a *-toast path for its own). Fire once per page load, only
+// when nothing is running — a tunnel that survived an app restart must not
+// be rebuilt just because the screen opened.
+let autoConnectDone = false;
+async function maybeAutoConnect() {
+  if (!isAndroid || autoConnectDone) return;
+  autoConnectDone = true;
+  try {
+    const s = S.cfg || await api().GetSettings();
+    const id = (s && s.auto_connect) || "";
+    if (!id) return;
+    if (S.state.state === "connected" || S.state.state === "connecting") return;
+    if (!S.profiles.some((p) => p.id === id)) return;
+    S.selected = id;
+    S.busy = true;
+    markConnecting(id);
+    await withTimeout(api().Connect(id), 45000, t("toast.stuck"));
+  } catch (e) {
+    // The service reports failures through "state"; nothing to add here.
+  } finally {
+    S.busy = false;
+  }
+}
 // ---------- boot ----------
 whenReady(async () => {
   document.querySelectorAll("[data-icon]").forEach((el) => { el.innerHTML = I[el.dataset.icon] || ""; });
@@ -1730,4 +1781,6 @@ whenReady(async () => {
   try { st0 = await api().GetState(); } catch (e) { /* engine not ready */ }
   renderState(st0 || { state: "disconnected" });
   renderExtraFields();
+  applyAndroidLimits();
+  await maybeAutoConnect();
 });
