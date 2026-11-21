@@ -72,6 +72,7 @@ const I18N = {
     "set.bypassRuNote": "сайты из РФ увидят реальный IP; нужен Android 13+",
     "set.wistDirect": "Свои подсети напрямую",
     "set.wistDirectNote": "CIDR, по одному в строке; домены на Android не поддерживаются",
+    "set.wistPresetNote": "по умолчанию для профилей без своего пресета",
     "sec.split": "Split-tunnel по приложениям",
     "set.splitMode": "Режим",
     "set.splitOff": "Весь трафик в туннель",
@@ -178,6 +179,7 @@ const I18N = {
     "set.bypassRuNote": "Russian sites see your real IP; needs Android 13+",
     "set.wistDirect": "Custom direct routes",
     "set.wistDirectNote": "CIDRs, one per line; domains are not supported on Android",
+    "set.wistPresetNote": "default for profiles without their own preset",
     "sec.split": "Per-app split tunnel",
     "set.splitMode": "Mode",
     "set.splitOff": "All traffic through the tunnel",
@@ -749,6 +751,12 @@ function renderSettings() {
         <label class="switch"><input id="s-bypassru" type="checkbox"/><span class="slider"></span></label>
         <label>${esc(t("set.wistDirect"))}<span class="set-note">${esc(t("set.wistDirectNote"))}</span></label>
         <textarea id="s-wistcidrs" rows="3" placeholder="203.0.113.0/24"></textarea>
+        <label>${esc(t("vpn.preset"))}<span class="set-note">${esc(t("set.wistPresetNote"))}</span></label>
+        <select id="s-wist-preset">
+          <option value="fast">fast</option>
+          <option value="balance">balance</option>
+          <option value="stealth">stealth</option>
+        </select>
       </div>
     </div>
     <div class="settings-section">
@@ -1158,6 +1166,7 @@ async function fillSettingsForm(s) {
   setc("s-bypasslan", s.bypass_lan);
   setc("s-bypassru", !s.no_bypass_ru); // checkbox states the feature, the flag states the opt-out
   setv("s-wistcidrs", s.wisteria_direct_cidrs || "");
+  setv("s-wist-preset", s.wisteria_preset || "stealth");
   setv("s-splitmode", S.splitMode);
   renderSplitList();
   setv("s-remotedns", s.remote_dns || "");
@@ -1204,6 +1213,10 @@ async function saveSettings() {
     bypass_lan: g("s-bypasslan") ? $("s-bypasslan").checked : cur.bypass_lan,
     no_bypass_ru: g("s-bypassru") ? !$("s-bypassru").checked : cur.no_bypass_ru,
     wisteria_direct_cidrs: g("s-wistcidrs") ? $("s-wistcidrs").value.trim() : cur.wisteria_direct_cidrs,
+    // Obfuscation preset is edited on the VPN screen (per-profile) and in
+    // Settings → Routing (global fallback). Omitting it from this payload
+    // reset the global choice to the default on every save.
+    wisteria_preset: g("s-wist-preset") ? $("s-wist-preset").value : (cur.wisteria_preset || "stealth"),
     split_mode: S.splitMode,
     split_apps: S.splitApps,
     remote_dns: g("s-remotedns") ? $("s-remotedns").value.trim() : cur.remote_dns,

@@ -13,7 +13,6 @@ import org.wisteria.mobile.Mobile
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
-import java.util.Base64
 
 /**
  * The desktop App API re-implemented over the mobile engine: one
@@ -105,7 +104,10 @@ class WisteriaBridge(activity: MainActivity) {
 
         // ---- profiles ----
         "ListProfiles" -> store.listProfiles()
-        "GetActiveID" -> store.activeId()
+        // JSON-encode the id: a numeric-only 16-char id (the store can hand
+        // one out) would otherwise arrive in JS as a NUMBER and every
+        // `p.id === S.selected` comparison would fail.
+        "GetActiveID" -> JSONObject.quote(store.activeId())
         "SetActive" -> { store.setActive(args.getString(0)); null }
         "Connect" -> { connect(args.getString(0)); null }
         "Disconnect" -> { disconnect(); null }
@@ -136,6 +138,9 @@ class WisteriaBridge(activity: MainActivity) {
         }
         "ListApps" -> listApps()
         "ListRuApps" -> listRuApps()
+        // The Логи screen's «Очистить» used to clear only the DOM: the ring
+        // kept growing and came back on the next tab switch.
+        "ClearLogs" -> { EngineHub.clearLogs(); null }
         "GetAutostart" -> store.autostart()
         "SetAutostart" -> { store.setAutostart(args.getBoolean(0)); null }
 
@@ -270,7 +275,10 @@ class WisteriaBridge(activity: MainActivity) {
     }
 
     private fun deleteProfile(id: String) {
-        if (id == EngineHub.profileId && isRunning(JSONObject(Mobile.status()))) {
+        // running(), not a bare JSONObject(Mobile.status()): the native
+        // library may be unavailable and Mobile.status() then throws straight
+        // through the bridge instead of a clean refusal.
+        if (id == EngineHub.profileId && running()) {
             throw err("профиль подключён — сначала отключитесь")
         }
         if (!store.deleteProfile(id)) throw err("профиль не найден")
@@ -283,7 +291,7 @@ class WisteriaBridge(activity: MainActivity) {
      *  not block the delete (the old active-based guard did). */
     private fun deleteSubscription(id: String) {
         val running = EngineHub.profileId
-        if (running.isNotEmpty() && isRunning(JSONObject(Mobile.status()))) {
+        if (running.isNotEmpty() && running()) {
             val profiles = store.listProfiles()
             for (i in 0 until profiles.length()) {
                 val p = profiles.getJSONObject(i)
@@ -422,6 +430,21 @@ class WisteriaBridge(activity: MainActivity) {
             .put("client_priv", keypair.optString("priv"))
             .put("latency_ms", 0)
         fields.optString("pub").takeIf { it.isNotEmpty() }?.let { p.put("pub", it) }
+        // Wisteria obfuscation knobs from the manual form. They ride the
+        // profile's `fields` object (same shape the desktop saves and
+        // WisteriaVpnService.presetOf() reads), otherwise the manual form
+        // silently dropped every value the user typed.
+        val obs = JSONObject()
+        for (key in listOf("min_pad", "max_pad", "mimic", "obf_mu", "obf_sigma")) {
+            val v = fields.optString(key).trim()
+            if (v.isNotEmpty()) obs.put(key, v)
+        }
+        fields.optJSONObject("obs")?.let { src ->
+            for (key in listOf("min_pad", "max_pad", "mimic", "obf_mu", "obf_sigma")) {
+                if (!obs.has(key)) src.optString(key).takeIf { it.isNotEmpty() }?.let { obs.put(key, it) }
+            }
+        }
+        if (obs.length() > 0) p.put("fields", obs)
         // TLS fields ride the payload top-level (the select always sends
         // "tcp"/"tls"; the SNI and the checkbox only matter with TLS).
         // Validation+canonicalization happen in addProfile → normalizeTls:
@@ -458,13 +481,30 @@ class WisteriaBridge(activity: MainActivity) {
         Thread {
             try {
                 fetchIntoSub(sub)
-            } catch (e: Exception) {
-                sub.put("error", e.message ?: "ошибка сети")
-                store.updateSub(sub)
-                EngineHub.appLog("подписка «${sub.optString("name")}»: ${e.message}")
+            } catch (t: Throwable) {
+                // Throwable, not Exception: an Error (OOM on a huge body, an
+                // android.util.AndroidRuntimeException from a stub) on this
+                // bare thread would kill the whole process.
+                val msg = t.message ?: t.javaClass.simpleName
+                try {
+                    sub.put("error", msg)
+                    store.updateSub(sub)
+                } catch (_: Throwable) {
+                }
+                EngineHub.appLog("подписка «${sub.optString("name")}»: $msg")
             }
             pushProfiles()
         }.start()
+    }
+
+    /** True for an HTML page served instead of the link list: captive
+     *  portals, expired tokens and 404 pages all answer with markup, and
+     *  parsing it yields zero profiles — which used to WIPE a working
+     *  subscription. */
+    private fun looksLikeHtml(text: String): Boolean {
+        val head = text.take(2048).lowercase()
+        return "<!doctype" in head || "<html" in head || "<head" in head ||
+            ("<body" in head && "</" in head)
     }
 
     /** Fetches the subscription body, parses every link (wisteria and
@@ -472,8 +512,11 @@ class WisteriaBridge(activity: MainActivity) {
      *  profiles, keeping the client keys of endpoints seen before (the
      *  desktop merge rule). */
     private fun fetchIntoSub(sub: JSONObject): JSONObject {
-        val body = httpGet(sub.optString("url"), MAX_SUB_BYTES, 15_000)
-        val text = decodeSubBody(body)
+        val res = httpGetWithHeaders(sub.optString("url"), MAX_SUB_BYTES, 15_000)
+        val text = decodeSubBody(res.body)
+        if (looksLikeHtml(text)) {
+            throw err("сервер вернул HTML-страницу вместо списка ссылок — подписка не изменена")
+        }
 
         // sing-box protocol lines never reach Mobile.parseLinks; pull them
         // out first and hand Mobile only the rest (wisteria invites).
@@ -499,6 +542,18 @@ class WisteriaBridge(activity: MainActivity) {
             JSONArray()
         }
 
+        // Nothing parseable at all: the body is junk (or every line was an
+        // invite without a key). Deleting the old profiles now would leave
+        // the user with an empty subscription and no way back.
+        if (sbProfiles.isEmpty() && entries.length() == 0) {
+            throw err("в подписке не найдено ни одной рабочей ссылки — профили сохранены")
+        }
+
+        // Everything parsed: apply the response metadata before touching the
+        // profiles, so the row shows the real name/counters even if the merge
+        // below hits the store's dedup.
+        applySubMetadata(sub, res.headers)
+
         val old = JSONArray()
         val profiles = store.listProfiles()
         for (i in 0 until profiles.length()) {
@@ -517,21 +572,29 @@ class WisteriaBridge(activity: MainActivity) {
         // from the fresh body would duplicate it (wisteria entries carry
         // no raw link, so the store's raw-dedup never fires), so the
         // matching entry is skipped instead.
+        val activeId = store.activeId()
         var keptActiveEndpoint: String? = null
+        var keptActiveBoxKey: String? = null
         for (i in 0 until old.length()) {
             val p = old.getJSONObject(i)
-            if (p.optString("id") == store.activeId()) {
+            if (p.optString("id") == activeId && activeId.isNotEmpty()) {
                 keptActiveEndpoint = p.optString("host") + ":" + p.optInt("port")
+                // sing-box profiles: dedup by endpoint+type as well, or a
+                // refreshed link with changed parameters (new uuid/password,
+                // same server) added a second row next to the running one.
+                keptActiveBoxKey = p.optString("type") + "|" + keptActiveEndpoint
                 break
             }
         }
 
         for (i in 0 until old.length()) {
             val p = old.getJSONObject(i)
-            if (p.optString("id") != store.activeId()) store.deleteProfile(p.optString("id"))
+            if (p.optString("id") != activeId) store.deleteProfile(p.optString("id"))
         }
 
-        var count = 0
+        // The preserved active profile is part of the subscription: count it,
+        // otherwise the row says "3 профиля" next to 4 visible rows.
+        var count = if (keptActiveEndpoint != null) 1 else 0
         for (j in 0 until entries.length()) {
             val entry = entries.getJSONObject(j)
             if (entry.optString("key").isEmpty()) continue // invites: unusable on Android
@@ -556,6 +619,8 @@ class WisteriaBridge(activity: MainActivity) {
         }
         for (p in sbProfiles) {
             p.put("sub_id", sub.optString("id")).put("latency_ms", 0)
+            val ep = p.optString("host") + ":" + p.optInt("port")
+            if (keptActiveBoxKey != null && keptActiveBoxKey == p.optString("type") + "|" + ep) continue
             store.addProfile(p)?.let { count++ }
         }
         sub.put("count", count).put("updated_at", AndroidStore.nowIso()).put("error", "")
@@ -563,6 +628,40 @@ class WisteriaBridge(activity: MainActivity) {
         EngineHub.appLog("подписка «${sub.optString("name")}» обновлена: профилей $count")
         pushProfiles()
         return sub
+    }
+
+    /**
+     * Subscription metadata from the response headers, the way v2rayN/SFA
+     * read it:
+     *   Subscription-Userinfo: upload=1; download=2; total=3; expire=1700000000
+     *   Profile-Title: My sub   |   base64:<encoded title>
+     * Field names on the stored sub are new (`userinfo`) — old rows simply
+     * have no such key, so existing user data stays valid.
+     */
+    internal fun applySubMetadata(sub: JSONObject, headers: Map<String, String>) {
+        val lower = headers.entries.associate { it.key.lowercase() to it.value }
+        lower["subscription-userinfo"]?.let { raw ->
+            val o = JSONObject()
+            for (part in raw.split(";", ",")) {
+                val idx = part.indexOf('=')
+                if (idx <= 0) continue
+                val k = part.substring(0, idx).trim().lowercase()
+                val v = part.substring(idx + 1).trim().toLongOrNull() ?: continue
+                if (k in setOf("upload", "download", "total", "expire")) o.put(k, v)
+            }
+            if (o.length() > 0) sub.put("userinfo", o)
+        }
+        lower["profile-title"]?.let { raw ->
+            var title = raw.trim()
+            if (title.startsWith("base64:", ignoreCase = true)) {
+                title = try {
+                    String(SingboxLinks.b64decodeBytes(title.substring(7)), Charsets.UTF_8).trim()
+                } catch (_: Throwable) {
+                    ""
+                }
+            }
+            if (title.isNotEmpty()) sub.put("name", title)
+        }
     }
 
     private fun importFromClipboard(): JSONObject {
@@ -651,12 +750,29 @@ class WisteriaBridge(activity: MainActivity) {
 
     private fun externalIP(): String {
         if (!isRunning(JSONObject(Mobile.status()))) throw err("нет активного подключения")
+        // split_mode "only" means Wisteria itself is NOT in the tunnel (the
+        // app is never added to addAllowedApplication). Any IP probe we make
+        // therefore reports the real ISP address while the UI calls it
+        // "protected" — say so instead of lying.
+        if (store.settings().optString("split_mode") == "only") {
+            EngineHub.pushEvent(
+                "extip",
+                JSONObject()
+                    .put("mode_only", true)
+                    .put("error", "режим «только выбранные»: приложение вне туннеля, внешний IP — реальный")
+            )
+            return ""
+        }
         requestExtIP()
         return "" // the result arrives via the "extip" event
     }
 
     fun onConnectedCheckIP() {
-        if (!store.settings().optBoolean("check_ext_ip", true)) return
+        val s = store.settings()
+        if (!s.optBoolean("check_ext_ip", true)) return
+        // In "only" mode the app itself is outside the tunnel: the probe
+        // would report the real ISP address as if it were the exit IP.
+        if (s.optString("split_mode") == "only") return
         requestExtIP()
     }
 
@@ -679,12 +795,15 @@ class WisteriaBridge(activity: MainActivity) {
     /** The diagnostics page chips (best RTT / reachable servers) are computed
      *  from the WServerStat list the desktop core fills in; the mobile engine
      *  has no such report, so synthesize it from the active profile: one row
-     *  per configured endpoint, with the stored ping and reachability known
-     *  only for the primary (the one host:port the engine dials). */
+     *  per configured endpoint. The engine reports the endpoint it is
+     *  ACTUALLY connected to in status.endpoint (socks_addr here) — with a
+     *  multi-server profile that is not servers[0], and the old code marked
+     *  servers[0] reachable no matter which mirror carried the session. */
     private fun diagServersJson(st: JSONObject): JSONArray {
         if (st.optString("state") == "disconnected") return JSONArray()
         val prof = store.profile(EngineHub.profileId) ?: return JSONArray()
         val connected = st.optString("state") == "connected"
+        val activeEndpoint = st.optString("socks_addr").trim()
         val primary = endpointOf(prof)
         val latency = prof.optLong("latency_ms", 0)
         val endpoints = LinkedHashSet<String>()
@@ -694,15 +813,19 @@ class WisteriaBridge(activity: MainActivity) {
                 if (ep.isNotEmpty()) endpoints.add(ep)
             }
         }
-        endpoints.add(primary) // sing-box profiles (no servers array) land here
+        if (primary.isNotEmpty()) endpoints.add(primary) // sing-box profiles (no servers array) land here
+        if (activeEndpoint.isNotEmpty()) endpoints.add(activeEndpoint)
         val out = JSONArray()
         for (ep in endpoints) {
+            val isActive = activeEndpoint.isNotEmpty() && ep == activeEndpoint
+            val isPrimary = ep == primary
             out.put(
                 JSONObject()
                     .put("endpoint", ep)
-                    .put("rtt_ms", if (ep == primary && latency > 0) latency else 0)
-                    .put("reachable", connected && ep == primary)
-                    .put("failures", if (ep == primary) EngineHub.retryEvents else 0)
+                    .put("rtt_ms", if ((isActive || isPrimary) && latency > 0) latency else 0)
+                    .put("reachable", connected && (isActive || (activeEndpoint.isEmpty() && isPrimary)))
+                    .put("active", isActive)
+                    .put("failures", if (isActive || isPrimary) EngineHub.retryEvents else 0)
             )
         }
         return out
@@ -806,7 +929,16 @@ class WisteriaBridge(activity: MainActivity) {
             old.optBoolean("no_bypass_ru", false) != next.optBoolean("no_bypass_ru", false) ||
                 old.optString("wisteria_direct_cidrs") != next.optString("wisteria_direct_cidrs")
         val presetChanged = effPreset(old) != effPreset(next)
-        if (splitChanged || routesChanged || presetChanged) {
+        // sing-box bakes its whole routing/DNS/tun block into the config it
+        // was started with: changing any of these used to take effect only
+        // after a manual reconnect, which read as "the toggle does nothing".
+        val boxSettings = listOf(
+            "bypass_lan", "route_direct", "route_block", "remote_dns",
+            "log_level", "tun_stack", "tun_strict_route",
+        )
+        val boxChanged = EngineHub.profileType != "wisteria" && EngineHub.profileType.isNotEmpty() &&
+            boxSettings.any { old.optString(it) != next.optString(it) }
+        if (splitChanged || routesChanged || presetChanged || boxChanged) {
             EngineHub.appLog("настройки маршрутизации изменены — переподключение")
             reconnectService()
         }
@@ -893,14 +1025,31 @@ class WisteriaBridge(activity: MainActivity) {
         }
     }
 
-    private fun httpGet(url: String, maxBytes: Int, timeoutMs: Int): String {
+    /** Status + headers + body of one GET. The header map is what makes
+     *  Subscription-Userinfo / Profile-Title usable at all. */
+    internal class HttpResponse(val status: Int, val headers: Map<String, String>, val body: String)
+
+    private fun httpGet(url: String, maxBytes: Int, timeoutMs: Int): String =
+        httpGetWithHeaders(url, maxBytes, timeoutMs).body
+
+    internal fun httpGetWithHeaders(url: String, maxBytes: Int, timeoutMs: Int): HttpResponse {
         val conn = URL(url).openConnection() as HttpURLConnection
         conn.connectTimeout = timeoutMs
         conn.readTimeout = timeoutMs
         conn.instanceFollowRedirects = true
         conn.setRequestProperty("User-Agent", "WisteriaAndroid/$VERSION")
+        // v2rayN/SFA servers only emit Subscription-Userinfo when the client
+        // identifies as one of them; the plain UA still works everywhere.
+        conn.setRequestProperty("Accept", "*/*")
         try {
             if (conn.responseCode !in 200..299) throw err("HTTP ${conn.responseCode}")
+            val headers = HashMap<String, String>()
+            for ((k, v) in conn.headerFields) {
+                if (k == null || v == null || v.isEmpty()) continue
+                // Multi-valued headers arrive as lists; the subscription
+                // metadata fields are single-valued, so first entry is right.
+                headers[k] = v[0]
+            }
             val input = conn.inputStream
             val out = ByteArrayOutputStream()
             val buf = ByteArray(8192)
@@ -912,27 +1061,25 @@ class WisteriaBridge(activity: MainActivity) {
                     throw err("ответ больше $limit")
                 }
             }
-            return out.toString("UTF-8")
+            return HttpResponse(conn.responseCode, headers, out.toString("UTF-8"))
         } finally {
             conn.disconnect()
         }
     }
 
     /** Subscription bodies are either a plain link list or a base64 blob
-     *  (the v2rayN convention); decode only when no scheme is present. */
-    private fun decodeSubBody(body: String): String {
+     *  (the v2rayN convention); decode only when no scheme is present.
+     *  Decoding goes through SingboxLinks.b64decodeBytes(): java.util.Base64
+     *  is API 26+ and minSdk is 24, so on Android 7.0/7.1 every base64
+     *  subscription died with NoClassDefFoundError. */
+    internal fun decodeSubBody(body: String): String {
         val trimmed = body.trim()
         if (trimmed.contains("://")) return trimmed
         val compact = trimmed.replace(Regex("\\s"), "")
         return try {
-            val padded = compact.padEnd((compact.length + 3) / 4 * 4, '=')
-            String(Base64.getDecoder().decode(padded), Charsets.UTF_8)
+            String(SingboxLinks.b64decodeBytes(compact), Charsets.UTF_8)
         } catch (_: Exception) {
-            try {
-                String(Base64.getUrlDecoder().decode(compact), Charsets.UTF_8)
-            } catch (_: Exception) {
-                throw err("подписка: не список ссылок и не base64")
-            }
+            throw err("подписка: не список ссылок и не base64")
         }
     }
 }
