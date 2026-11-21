@@ -106,6 +106,18 @@ const I18N = {
     "toast.updReady": "Обновление загружено — можно перезапускать",
     "set.restartAdmin": "Перезапустить от администратора",
     "set.notAdmin": "Без прав администратора TUN недоступен.",
+    "tun.needSingbox": "Для TUN нужно ядро sing-box",
+    "tun.needWintun": "Для TUN нужен wintun.dll",
+    "tun.needAdmin": "Для TUN нужны права администратора",
+    "tun.needCap": "Для TUN нужны права на сетевой интерфейс",
+    "tun.dlSingbox": "Скачать sing-box",
+    "tun.dlWintun": "Скачать wintun.dll",
+    "tun.restartAdmin": "Перезапустить от администратора",
+    "tun.copy": "Скопировать",
+    "tun.copied": "Команда скопирована",
+    "tun.notReady": "TUN не готов: {why}",
+    "vpn.cancel": "Отмена",
+    "err.openLogs": "Открыть логи",
     "set.mpCore": "Ядро для ss/vmess/vless/trojan",
     "set.xrayCore": "Путь к xray",
     "logs.title": "Логи", "logs.follow": "Автопрокрутка", "logs.clear": "Очистить",
@@ -201,6 +213,18 @@ const I18N = {
     "toast.updReady": "Update staged — restart to apply",
     "set.restartAdmin": "Restart as administrator",
     "set.notAdmin": "TUN needs administrator rights.",
+    "tun.needSingbox": "TUN requires sing-box",
+    "tun.needWintun": "TUN requires wintun.dll",
+    "tun.needAdmin": "TUN requires administrator rights",
+    "tun.needCap": "TUN needs network-interface rights",
+    "tun.dlSingbox": "Download sing-box",
+    "tun.dlWintun": "Download wintun.dll",
+    "tun.restartAdmin": "Restart as administrator",
+    "tun.copy": "Copy",
+    "tun.copied": "Command copied",
+    "tun.notReady": "TUN is not ready: {why}",
+    "vpn.cancel": "Cancel",
+    "err.openLogs": "Open logs",
     "set.mpCore": "Engine for ss/vmess/vless/trojan",
     "set.xrayCore": "Path to xray",
     "logs.title": "Logs", "logs.follow": "Auto-scroll", "logs.clear": "Clear",
@@ -263,6 +287,7 @@ const S = {
   state: { state: "disconnected" }, uptimeTimer: null,
   subs: [], subBusy: {}, busy: false, // busy = a Connect is in flight
   version: "", upd: null, updBusy: false, updReady: false, coreUpd: {},
+  tunStatus: null, // last TunPreflight snapshot (VPN tab card)
   wdiag: null, // the Diagnostics page data (wisteria profiles only)
 };
 const $ = (id) => document.getElementById(id);
@@ -335,6 +360,7 @@ function renderContent() {
   else if (S.tab === "settings") { w.innerHTML = renderSettings(); fillSettingsForm(); }
   wireContent();
   renderSidebarFooter();
+  if (S.tab === "vpn" && S.cfg && S.cfg.tun_enabled) refreshTunPreflight();
 }
 
 function renderSidebarFooter() {
@@ -360,14 +386,16 @@ function renderVpn() {
   // backend status ever mentions one (i.e. before the first Connect).
   const p = S.profiles.find((x) => x.id === (st.profile_id || S.selected)) || null;
   const label = conn ? t("vpn.protected") : reconn ? t("vpn.reconnecting") + (st.attempt ? " " + t("vpn.attempt").replace("{n}", st.attempt) : "") : connecting ? t("vpn.connecting") : t("vpn.unprotected");
-  const btnText = conn ? t("vpn.connected") : connecting ? t("vpn.connecting") : reconn ? t("vpn.reconnecting") : t("vpn.disconnected");
+  // Connecting and reconnecting are cancellable, so the button says
+  // "Отмена" instead of repeating the status the label above already shows.
+  const btnText = conn ? t("vpn.connected") : (connecting || reconn) ? t("vpn.cancel") : t("vpn.disconnected");
   const lat = p && p.latency_ms ? (p.latency_ms < 0 ? "n/a" : p.latency_ms + " ms") : "";
   const tun = !!(S.cfg && S.cfg.tun_enabled);
   return `
     <div class="vpn-screen">
       <div class="vpn-status ${conn ? "on" : connecting || reconn ? "mid" : ""}"><div class="label">${esc(label)}</div></div>
       <div id="btn-wrap" style="position:relative; display:flex; justify-content:center;">
-        <button class="connect-btn ${conn ? "connected" : ""} ${connecting || reconn ? "connecting" : ""}" id="btn-toggle" ${connecting ? "disabled" : ""}>
+        <button class="connect-btn ${conn ? "connected" : ""} ${connecting || reconn ? "connecting" : ""}" id="btn-toggle">
           <div class="ring-anim"></div>
           <div class="ring-anim d2"></div>
           <svg class="spin-arc" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="46"/></svg>
@@ -397,6 +425,7 @@ function renderVpn() {
           </fieldset>
         </div>
       </div>
+      ${tun ? `<div id="tun-preflight">${tunPreflightHTML(S.tunStatus)}</div>` : ""}
       ${p && p.type === "wisteria" ? `
       <div class="vpn-tun-row">
         <div class="vpn-tun-label">${esc(t("vpn.preset"))}</div>
@@ -404,8 +433,64 @@ function renderVpn() {
           ${["fast", "balance", "stealth"].map((k) => `<option value="${k}" ${((p.fields && p.fields.preset) || (S.cfg && S.cfg.wisteria_preset) || "stealth") === k ? "selected" : ""}>${k}</option>`).join("")}
         </select>
       </div>` : ""}
-      ${st.error ? `<div class="error-box">${esc(st.error)}</div>` : ""}
+      ${st.error ? `<div class="error-box">${esc(st.error)}<button class="ghost-btn err-logs-btn" id="btn-err-logs">${esc(t("err.openLogs"))}</button></div>` : ""}
     </div>`;
+}
+
+
+// ---------- TUN preflight ----------
+// The card lists only what is actually missing, each row with the one
+// click that fixes it. The backend mirrors the startTun gate, so this can
+// never promise something Connect would still reject.
+function tunPreflightHTML(pf) {
+  if (!pf || pf.ready) return "";
+  const rows = [];
+  if (!pf.singbox_found) {
+    rows.push(`<div class="tun-pf-row"><span>${esc(t("tun.needSingbox"))}</span>` +
+      `<button class="ghost-btn" data-tun-act="singbox">${esc(t("tun.dlSingbox"))}</button></div>`);
+  } else if (pf.os === "windows" && !pf.wintun_found) {
+    // Downloading sing-box also installs wintun.dll, so this row only
+    // appears when the core exists and the DLL is still missing.
+    rows.push(`<div class="tun-pf-row"><span>${esc(t("tun.needWintun"))}</span>` +
+      `<button class="ghost-btn" data-tun-act="wintun">${esc(t("tun.dlWintun"))}</button></div>`);
+  }
+  if (pf.os === "windows" && !pf.elevated) {
+    rows.push(`<div class="tun-pf-row"><span>${esc(t("tun.needAdmin"))}</span>` +
+      `<button class="ghost-btn" data-tun-act="admin">${esc(t("tun.restartAdmin"))}</button></div>`);
+  }
+  if (pf.os === "linux" && pf.singbox_found && !pf.has_cap) {
+    const cmd = "sudo setcap cap_net_admin=+ep " + (pf.singbox_path || "<путь к sing-box>");
+    rows.push(`<div class="tun-pf-row"><span>${esc(t("tun.needCap"))}</span>` +
+      `<button class="ghost-btn" data-tun-act="cap">${esc(t("tun.copy"))}</button></div>` +
+      `<code class="tun-pf-cmd">${esc(cmd)}</code>`);
+  }
+  if (!rows.length) return "";
+  return `<div class="tun-preflight"><div class="tun-pf-title">${esc(t("set.tun"))}</div>${rows.join("")}</div>`;
+}
+
+function tunMissingShort(pf) {
+  if (!pf || !pf.singbox_found) return t("tun.needSingbox");
+  if (pf.os === "windows" && !pf.wintun_found) return t("tun.needWintun");
+  if (pf.os === "windows" && !pf.elevated) return t("tun.needAdmin");
+  if (pf.os === "linux" && !pf.has_cap) return t("tun.needCap");
+  return "";
+}
+
+// Fetches the snapshot and patches the card in place: a full render here
+// would recreate the connect button mid-animation.
+async function refreshTunPreflight() {
+  let pf = null;
+  try { pf = await api().TunPreflight(); } catch (e) { pf = null; }
+  S.tunStatus = pf;
+  const box = $("tun-preflight");
+  if (box) {
+    const sig = JSON.stringify(pf);
+    if (box._sig !== sig) {
+      box.innerHTML = tunPreflightHTML(pf);
+      box._sig = sig;
+    }
+  }
+  return pf;
 }
 
 function fmtSubTime(iso) {
@@ -837,6 +922,9 @@ async function updateCore(name) {
     if (note && info) note.innerHTML = coreNoteHTML(info);
     if (info) relabelCoreButtons(info);
   } catch (e) { /* detection is cosmetic */ }
+  // A fresh sing-box also installs wintun.dll on Windows: the VPN tab's
+  // preflight card must stop asking for what just arrived.
+  refreshTunPreflight();
 }
 
 // One-button wintun.dll install (the Windows-only row next to the core
@@ -859,6 +947,7 @@ async function installWintun() {
     const note = $("core-note");
     if (note && info) note.innerHTML = coreNoteHTML(info);
   } catch (e) { /* detection is cosmetic */ }
+  refreshTunPreflight();
 }
 
 function coreNoteHTML(info) {
@@ -891,16 +980,27 @@ function wireContent() {
   const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
 
   on("btn-toggle", "click", async () => {
+    // A connecting/reconnecting attempt is cancellable: the button says
+    // "Отмена", and this click must not be swallowed by the busy guard the
+    // in-flight Connect call holds for up to 45 seconds.
+    if (S.state.state === "connecting" || S.state.reconnecting) {
+      buzz(12);
+      S.busy = false;
+      try { await api().Disconnect(); } catch (e) { showToast((e && e.message) || e); }
+      return;
+    }
+    if (S.state.state === "connected") {
+      buzz(12);
+      try { await api().Disconnect(); } catch (e) { showToast((e && e.message) || e); }
+      return;
+    }
     if (S.busy) { showToast(t("toast.busy")); return; }
+    if (!S.selected) { openModal(); return; }
     try {
-      if (S.state.state === "connected" || (S.state.reconnecting && S.state.state !== "connecting")) { buzz(12); api().Disconnect(); }
-      else {
-        if (!S.selected) { openModal(); return; }
-        buzz(10);
-        S.busy = true;
-        markConnecting(S.selected);
-        await withTimeout(api().Connect(S.selected), 45000, t("toast.stuck"));
-      }
+      buzz(10);
+      S.busy = true;
+      markConnecting(S.selected);
+      await withTimeout(api().Connect(S.selected), 45000, t("toast.stuck"));
     } catch (e) {
       showToast((e && e.message) || e);
       // markConnecting drew a local "connecting" screen; a fast backend
@@ -910,6 +1010,7 @@ function wireContent() {
     }
     finally { S.busy = false; }
   });
+  on("btn-err-logs", "click", () => switchTab("logs"));
   on("card-profile", "click", () => switchTab("profiles"));
 
   on("btn-add", "click", openModal);
@@ -1372,16 +1473,45 @@ document.addEventListener("change", async (ev) => {
   }
   if (ev.target.name !== "mode") return;
   // The segmented control replaces the old TUN checkbox: proxy = system
-  // proxy, tun = the sing-box helper over the core's SOCKS. Saved at
-  // once; the backend applies it on the next connect (no forced
-  // reconnect blip, same as the checkbox had). The thumb moves via
-  // data-active without a re-render — focus stays on the control.
+  // proxy, tun = the sing-box helper over the core's SOCKS. The backend
+  // applies a changed tun_enabled immediately (it reconnects a running
+  // session), which is exactly why a non-ready TUN must be refused below.
+  // The thumb moves via data-active without a re-render — focus stays on
+  // the control.
+  const target = ev.target.value;
+  const track = $("seg-track") || ev.target.closest(".seg-track");
+  if (target === "tun" && S.state.state === "connected") {
+    // Switching mode is saved for the NEXT connect, but a reconnect (the
+    // server drops, the user hits reconnect) would apply it immediately.
+    // Turning a working proxy into a TUN session that cannot start is not
+    // a "mode preference": keep the working session and say what is
+    // missing first.
+    const pf = await refreshTunPreflight();
+    if (!pf || !pf.ready) {
+      S.tunStatus = pf;
+      if (track) track.dataset.active = "proxy";
+      const proxy = document.querySelector('input[name="mode"][value="proxy"]');
+      if (proxy) proxy.checked = true;
+      showToast(t("tun.notReady").replace("{why}", tunMissingShort(pf)));
+      return;
+    }
+  }
   const cur = await api().GetSettings();
-  cur.tun_enabled = ev.target.value === "tun";
+  cur.tun_enabled = target === "tun";
   await api().SaveSettings(cur);
   S.cfg = cur;
-  const track = $("seg-track") || ev.target.closest(".seg-track");
-  if (track) track.dataset.active = ev.target.value;
+  if (target === "tun") {
+    if (S.state.state !== "connected") {
+      // Re-render so the preflight card (with its one-click setup) appears
+      // right away; the connect button is idle here, so a rebuild is safe.
+      renderContent();
+      await refreshTunPreflight();
+    } else if (track) {
+      track.dataset.active = "tun";
+    }
+  } else if (track) {
+    track.dataset.active = "proxy";
+  }
   return;
 });
 
@@ -1504,9 +1634,10 @@ function patchVpnState() {
     if (!conn && connTimer) { clearTimeout(connTimer); connTimer = null; }
     btn.classList.toggle("connected", conn);
     btn.classList.toggle("connecting", connecting || reconn);
-    btn.disabled = connecting;
+    // Never disable while connecting: the same button cancels the attempt.
+    btn.disabled = false;
     const txt = btn.querySelector(".connect-text");
-    if (txt) txt.textContent = conn ? t("vpn.connected") : connecting ? t("vpn.connecting") : reconn ? t("vpn.reconnecting") : t("vpn.disconnected");
+    if (txt) txt.textContent = conn ? t("vpn.connected") : (connecting || reconn) ? t("vpn.cancel") : t("vpn.disconnected");
     setSpin(connecting || reconn);
   }
 }
@@ -1645,6 +1776,32 @@ whenReady(async () => {
   // instead, so the binding survives re-renders.
   document.addEventListener("click", (ev) => {
     if (ev.target && ev.target.closest && ev.target.closest("#btn-diag-logs")) switchTab("logs");
+  });
+  // TUN preflight actions are delegated: the card is patched in place and
+  // rebuilt on every state event, which would strip per-node listeners.
+  document.addEventListener("click", async (ev) => {
+    const el = ev.target && ev.target.closest ? ev.target.closest("[data-tun-act]") : null;
+    if (!el) return;
+    const act = el.dataset.tunAct;
+    el.disabled = true;
+    try {
+      if (act === "singbox") {
+        await updateCore("sing-box");
+      } else if (act === "wintun") {
+        await installWintun();
+      } else if (act === "admin") {
+        await api().RestartAsAdmin();
+        return;
+      } else if (act === "cap") {
+        const cmd = "sudo setcap cap_net_admin=+ep " + ((S.tunStatus && S.tunStatus.singbox_path) || "<путь к sing-box>");
+        await api().CopyToClipboard(cmd);
+        showToast(t("tun.copied"));
+      }
+    } catch (e) {
+      showToast((e && e.message) || e);
+    }
+    el.disabled = false;
+    await refreshTunPreflight();
   });
   window.runtime.EventsOn("profiles", async () => {
     S.profiles = (await api().ListProfiles()) || [];

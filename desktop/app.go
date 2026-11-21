@@ -764,6 +764,46 @@ func (a *App) DetectCores() CoreInfo {
 	return info
 }
 
+// TunStatus is the VPN tab's TUN readiness snapshot: what the helper needs
+// and what is missing right now. The UI renders one actionable row per
+// missing prerequisite instead of letting Connect fail with a generic error.
+type TunStatus struct {
+	OS           string `json:"os"`
+	Elevated     bool   `json:"elevated"` // admin on Windows, root on Linux
+	HasCap       bool   `json:"has_cap"`  // Linux: root or cap_net_admin on sing-box
+	SingBoxFound bool   `json:"singbox_found"`
+	SingBoxPath  string `json:"singbox_path,omitempty"`
+	WintunFound  bool   `json:"wintun_found"`
+	Ready        bool   `json:"ready"`
+}
+
+// TunPreflight reports whether a TUN connect can succeed right now. It
+// mirrors the startTun gate (same core resolution, same wintun lookup, same
+// capability check) so the card can never promise a setup that Connect
+// would still reject.
+func (a *App) TunPreflight() TunStatus {
+	info := a.DetectCores()
+	st := TunStatus{
+		OS:           info.OS,
+		Elevated:     core.IsElevated(),
+		SingBoxFound: info.SingBoxFound,
+		SingBoxPath:  info.SingBoxPath,
+	}
+	switch info.OS {
+	case "windows":
+		st.HasCap = st.Elevated
+		st.WintunFound = info.WintunFound
+		st.Ready = st.Elevated && st.SingBoxFound && st.WintunFound
+	case "linux":
+		st.HasCap = core.TunAvailable(info.SingBoxPath)
+		st.Ready = st.HasCap && st.SingBoxFound
+	default:
+		st.HasCap = st.Elevated
+		st.Ready = st.HasCap && st.SingBoxFound
+	}
+	return st
+}
+
 // IsElevated reports whether the app runs with administrator rights
 // (required for the TUN mode).
 func (a *App) IsElevated() bool { return core.IsElevated() }

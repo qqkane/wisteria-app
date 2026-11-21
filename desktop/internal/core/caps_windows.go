@@ -12,3 +12,8 @@ import "errors"
 func tunGrantHint(singbox string) (string, error) {
 	return "", errors.New("TUN требует прав администратора — перезапустите приложение от администратора")
 }
+
+// TunAvailable mirrors the Unix helper for callers that probe TUN
+// readiness generically. Windows has no file capabilities: the whole
+// process runs elevated or TUN is unavailable.
+func TunAvailable(string) bool { return IsElevated() }
