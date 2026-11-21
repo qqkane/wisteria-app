@@ -81,14 +81,26 @@ func pickCoreAsset(name string, assets []ghAsset) (ghAsset, error) {
 		l := strings.ToLower(a.Name)
 		switch name {
 		case "sing-box":
+			// Exact platform suffix first: the release also carries
+			// -legacy-windows-7 and -fips variants whose names contain the
+			// plain one as a substring.
+			want := "-linux-amd64.tar.gz"
 			if runtime.GOOS == "windows" {
-				// "legacy-windows-7" builds also contain "windows-amd64"
-				// and may be listed first; only the main build matches.
-				if strings.HasSuffix(l, ".zip") && strings.Contains(l, "windows-amd64") && !strings.Contains(l, "android") && !strings.Contains(l, "legacy") {
+				want = "-windows-amd64.zip"
+			}
+			if strings.HasSuffix(l, want) {
+				return a, nil
+			}
+			// Fallback for an unexpected naming scheme, still excluding
+			// the build variants that must never be picked automatically.
+			if runtime.GOOS == "windows" {
+				if strings.HasSuffix(l, ".zip") && strings.Contains(l, "windows-amd64") &&
+					!strings.Contains(l, "android") && !strings.Contains(l, "legacy") && !strings.Contains(l, "fips") {
 					return a, nil
 				}
 			} else {
-				if strings.HasSuffix(l, ".tar.gz") && strings.Contains(l, "linux-amd64") && !strings.Contains(l, "android") {
+				if strings.HasSuffix(l, ".tar.gz") && strings.Contains(l, "linux-amd64") &&
+					!strings.Contains(l, "android") && !strings.Contains(l, "fips") {
 					return a, nil
 				}
 			}
@@ -180,7 +192,10 @@ func corePathFor(name, explicitPath string) string {
 			return p
 		}
 	}
-	return FindCore(exe)
+	// FindCore appends exeSuffix itself; passing "sing-box.exe" made it
+	// look for "sing-box.exe.exe" on Windows and report the installed core
+	// as absent (check → false "update available" loop).
+	return FindCore(coreBinary(name))
 }
 
 // CoreUpdateApply downloads the latest release and replaces the app's own

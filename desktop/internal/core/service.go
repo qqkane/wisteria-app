@@ -789,7 +789,11 @@ func (s *Service) supervise(sess *session, ctx context.Context, cancel context.C
 	if set.TunEnabled {
 		tunWait, err := s.startTun(sess, ctx, socksAddr, set)
 		if err != nil {
-			s.failSession(sess, err)
+			// A TUN failure is a missing prerequisite (rights, wintun.dll,
+			// a config the installed engine rejects), not a flaky server:
+			// auto-reconnect would loop forever and replace the real reason
+			// with "connection lost — reconnecting".
+			s.failSessionFatal(sess, err)
 			return
 		}
 		tunActive = true
@@ -1120,8 +1124,16 @@ func (s *Service) startTun(sess *session, ctx context.Context, socksAddr string,
 			return nil, err
 		}
 	}
-	if runtime.GOOS == "windows" && !hasWintunDLL(singbox, s.dirs) {
-		return nil, errors.New("wintun.dll не найден — скачайте его в Настройках → Ядра (кнопка wintun; там же скачается sing-box)")
+	// sing-box loads wintun.dll from disk. Resolve the file itself, not a
+	// boolean: the working directory below must be the directory the DLL
+	// actually landed in, otherwise LoadLibrary fails even though the gate
+	// passed.
+	dllPath := ""
+	if runtime.GOOS == "windows" {
+		dllPath = WintunPath(singbox, s.dirs)
+		if dllPath == "" {
+			return nil, errors.New("wintun.dll не найден — скачайте его в Настройках → Ядра (кнопка wintun; там же скачается sing-box)")
+		}
 	}
 	// The main core's own upstream connection must bypass the tunnel,
 	// otherwise it loops back into the TUN.
@@ -1156,7 +1168,14 @@ func (s *Service) startTun(sess *session, ctx context.Context, socksAddr string,
 	}
 	tcmd := exec.CommandContext(ctx, singbox, "run", "-c", confFile)
 	hideConsole(tcmd)
+	// confFile is absolute, so the working directory is free to follow the
+	// DLL: Windows resolves wintun.dll against the process directory before
+	// PATH, and the install may have chosen bin/ or the data dir because the
+	// sing-box directory was read-only.
 	tcmd.Dir = s.dirs.Runtime
+	if runtime.GOOS == "windows" && filepath.Dir(dllPath) != filepath.Dir(cleanCorePath(singbox)) {
+		tcmd.Dir = filepath.Dir(dllPath)
+	}
 	tout, e1 := tcmd.StdoutPipe()
 	terr, e2 := tcmd.StderrPipe()
 	if e1 != nil || e2 != nil {
@@ -1168,8 +1187,23 @@ func (s *Service) startTun(sess *session, ctx context.Context, socksAddr string,
 	if err := keepCoreInJob(tcmd.Process.Pid); err != nil {
 		s.logf("job object (tun): %v", err)
 	}
-	go pumpPipe(tout, "tun", s.ring, nil)
-	go pumpPipe(terr, "tun", s.ring, nil)
+	// Keep the last output lines: the fatal line (why the adapter did not
+	// come up) is printed by sing-box itself, and the generic timeout
+	// message alone sends the user hunting through the log tab.
+	tail := &lineTail{}
+	var pumps sync.WaitGroup
+	pumps.Add(2)
+	go func() { defer pumps.Done(); pumpPipeTail(tout, "tun", s.ring, tail) }()
+	go func() { defer pumps.Done(); pumpPipeTail(terr, "tun", s.ring, tail) }()
+	pumpDone := make(chan struct{})
+	go func() { pumps.Wait(); close(pumpDone) }()
+	flushTail := func() string {
+		select {
+		case <-pumpDone:
+		case <-time.After(400 * time.Millisecond):
+		}
+		return tail.best()
+	}
 	sess.tunConf = confFile // session-owned; the teardown removes the file
 	s.logf("TUN: sing-box поверх %s, адрес сервера %s идёт напрямую", socksAddr, strings.Join(ips, ", "))
 
@@ -1179,7 +1213,10 @@ func (s *Service) startTun(sess *session, ctx context.Context, socksAddr string,
 	for time.Now().Before(tunDeadline) {
 		select {
 		case err := <-waitCh:
-			return nil, fmt.Errorf("tun завершился до готовности: %v", err)
+			if line := flushTail(); line != "" {
+				return nil, fmt.Errorf("TUN (sing-box) завершился до готовности: %v — %s", err, line)
+			}
+			return nil, fmt.Errorf("TUN (sing-box) завершился до готовности: %v", err)
 		default:
 		}
 		if _, err := net.InterfaceByName(tunInterfaceName); err == nil {
@@ -1188,6 +1225,15 @@ func (s *Service) startTun(sess *session, ctx context.Context, socksAddr string,
 		time.Sleep(300 * time.Millisecond)
 	}
 	_ = tcmd.Process.Kill()
+	// Reap the killed helper: a zombie still holding the wintun session
+	// would make the next attempt fail with "adapter already exists".
+	select {
+	case <-waitCh:
+	case <-time.After(time.Second):
+	}
+	if line := flushTail(); line != "" {
+		return nil, fmt.Errorf("TUN-адаптер %s не появился за 15с: %s", tunInterfaceName, line)
+	}
 	return nil, errors.New("TUN-адаптер " + tunInterfaceName + " не появился за 15с (см. логи)")
 }
 
@@ -1224,6 +1270,26 @@ func (s *Service) failSession(sess *session, err error) {
 	// teardownSession removes the generated config and (for non-user
 	// failures) hands the profile to the auto-reconnect loop. The Error
 	// text set above survives into the disconnected state.
+	s.teardownSession(sess, err)
+}
+
+// failSessionFatal is failSession for errors the user has to fix. It marks
+// the stop as intentional (userStop) so teardownSession neither overwrites
+// the message with the auto-reconnect text nor schedules another attempt,
+// and the exact reason stays in the UI error box.
+func (s *Service) failSessionFatal(sess *session, err error) {
+	if sess.cmd.Process != nil {
+		_ = sess.cmd.Process.Kill()
+	}
+	sess.cancel()
+	s.mu.Lock()
+	s.userStop = true
+	s.reconnGen++
+	s.st.Reconnecting = false
+	s.st.Attempt = 0
+	s.st.Error = err.Error()
+	s.mu.Unlock()
+	s.logf("ошибка подключения: %v", err)
 	s.teardownSession(sess, err)
 }
 

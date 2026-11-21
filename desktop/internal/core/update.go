@@ -305,7 +305,9 @@ func zipExtract(zipPath, dir string, suffixes ...string) ([]string, error) {
 			rc.Close()
 			return out, err
 		}
-		n, err := io.Copy(f, rc)
+		// Same cap as tarExtract: a zip bomb must not fill the disk
+		// between the header check and EOF.
+		n, err := io.Copy(f, io.LimitReader(rc, downloadMax+1))
 		rc.Close()
 		f.Close()
 		if err != nil {

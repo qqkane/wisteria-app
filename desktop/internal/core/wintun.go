@@ -35,18 +35,39 @@ const (
 // sing-box binary — its own directory first, then the app dirs — or ""
 // when none exists. hasWintunDLL (the startTun gate) is the boolean form.
 func WintunPath(singbox string, dirs Dirs) string {
-	var scan []string
-	if singbox != "" {
-		scan = append(scan, filepath.Dir(singbox))
-	}
-	scan = append(scan, dirs.Runtime, dirs.Data)
-	for _, d := range scan {
+	for _, d := range wintunLookupDirs(singbox, dirs) {
 		p := filepath.Join(d, "wintun.dll")
 		if st, err := os.Stat(p); err == nil && !st.IsDir() {
 			return p
 		}
 	}
 	return ""
+}
+
+// wintunLookupDirs is the single source of the search/install order:
+// next to the resolved sing-box binary, the app's own bin/, the runtime
+// dir, then the data dir. Installation and the startTun gate used to
+// disagree (the installer skipped the runtime dir, the gate skipped bin/),
+// so a DLL could be reported installed and still not be found.
+func wintunLookupDirs(singbox string, dirs Dirs) []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(d string) {
+		if d == "" {
+			return
+		}
+		if d = filepath.Clean(d); !seen[d] {
+			seen[d] = true
+			out = append(out, d)
+		}
+	}
+	if sb := cleanCorePath(singbox); sb != "" {
+		add(filepath.Dir(sb))
+	}
+	add(BinDir())
+	add(dirs.Runtime)
+	add(dirs.Data)
+	return out
 }
 
 // WintunInstalled reports whether TUN's DLL requirement is satisfied.
@@ -122,27 +143,12 @@ func WintunApply(singbox string, dirs Dirs) (string, error) {
 	return "", fmt.Errorf("wintun.dll: %v", lastErr)
 }
 
-// wintunDestDirs lists the install candidates in hasWintunDLL's lookup
-// order, de-duplicated: the resolved sing-box binary's directory first,
-// then the app's own bin/ copy, then the data dir.
+// wintunDestDirs lists the install candidates in WintunPath's lookup
+// order, de-duplicated. It is the same list by construction: a DLL that
+// installs into a directory the gate does not scan is indistinguishable
+// from a missing DLL.
 func wintunDestDirs(singbox string, dirs Dirs) []string {
-	var out []string
-	seen := map[string]bool{}
-	add := func(d string) {
-		if d == "" {
-			return
-		}
-		if d = filepath.Clean(d); !seen[d] {
-			seen[d] = true
-			out = append(out, d)
-		}
-	}
-	if p := firstNonEmpty(singbox, FindCore("sing-box")); p != "" {
-		add(filepath.Dir(p))
-	}
-	add(BinDir())
-	add(dirs.Data)
-	return out
+	return wintunLookupDirs(singbox, dirs)
 }
 
 // httpDownload fetches a plain https URL to dest with the same size cap

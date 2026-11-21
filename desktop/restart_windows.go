@@ -6,6 +6,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"syscall"
 	"unsafe"
 
@@ -28,11 +29,20 @@ func (a *App) RestartAsAdmin() error {
 	if err != nil {
 		return err
 	}
+	// lpDirectory: the elevated instance must start in the app directory —
+	// it is where bin/ and the portable layout live, and an inherited
+	// working directory (e.g. System32 for an elevated launch) made core
+	// resolution and relative paths behave differently from a normal start.
+	dirPtr, err := syscall.UTF16PtrFromString(filepath.Dir(exe))
+	if err != nil {
+		return err
+	}
 	ret, _, callErr := shell32.NewProc("ShellExecuteW").Call(
 		0,
 		uintptr(unsafe.Pointer(verb)),
 		uintptr(unsafe.Pointer(exePtr)),
-		0, 0,
+		0,
+		uintptr(unsafe.Pointer(dirPtr)),
 		1, // SW_SHOWNORMAL
 	)
 	if ret <= 32 {

@@ -879,7 +879,11 @@ func (a *App) WintunInstall() (string, error) {
 	if a.svc.RunningProfile() != "" {
 		return "", errors.New("подключение активно — сначала отключитесь")
 	}
-	dir, err := core.WintunApply(a.svc.Settings().SingBoxCore, a.dirs)
+	// The same resolved sing-box path DetectCores and UpdateCore use: an
+	// empty setting must not send the DLL to a directory the TUN gate will
+	// never scan.
+	sb := firstDefined(a.svc.Settings().SingBoxCore, core.FindCore("sing-box"))
+	dir, err := core.WintunApply(sb, a.dirs)
 	if err == nil {
 		a.logf("wintun.dll установлен в %s", dir)
 	}
