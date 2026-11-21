@@ -364,8 +364,16 @@ type Service struct {
 	wstStatus  string     // wisteria --status file path ("" when not a wisteria session)
 	wstEvents  []WEvent   // classified connect-loop feed for the diagnostics page
 	wstHealth  CoreHealth // latest health slice (log spam consumed, not logged)
-	sbModern   bool       // cached sing-box >= 1.11 probe
-	sbProbed   bool
+	// sing-box capability cache. Keyed by the binary's path, size and
+	// mtime, so a fresh download or a path change in Settings re-probes
+	// instead of reusing the previous binary's flags. sbMu is separate
+	// from mu: the probe runs a child process and must not block Status().
+	sbMu       sync.Mutex
+	sbCaps     SingBoxCaps
+	sbCapsKey  string
+	sbCapsSize int64
+	sbCapsMod  int64
+	sbCapsOK   bool
 	userStop   bool          // the user asked to disconnect: suppress auto-reconnect
 	reconnNext time.Duration // backoff delay for the next auto-reconnect attempt
 	// reconnGen invalidates reconnect loops from a superseded session: a
@@ -713,6 +721,10 @@ func (s *Service) prepareCore(p Profile) (core string, args []string, confFile s
 	if core == "" {
 		return "", nil, "", fmt.Errorf("sing-box не найден — скачайте его кнопкой в Настройки → Ядра или положите в bin/ рядом с приложением")
 	}
+	// The generated config must match the engine actually on disk: the
+	// "block" outbound and the legacy DNS schema are gone in current
+	// releases, and a mismatch kills the core before it binds its port.
+	caps := s.singBoxCaps(core)
 	conf, err := SingBoxConfig(p, SingBoxOptions{
 		MixedPort:     s.settings.LocalPort,
 		Listen:        s.settings.ListenHost(),
@@ -723,6 +735,8 @@ func (s *Service) prepareCore(p Profile) (core string, args []string, confFile s
 		DirectCIDRs:   directC,
 		BlockDomains:  blockD,
 		BlockCIDRs:    blockC,
+		ModernActions: caps.ModernActions,
+		NewDNSFormat:  caps.NewDNSFormat,
 	})
 	if err != nil {
 		return "", nil, "", err
@@ -1041,6 +1055,48 @@ func (s *Service) reconnectLoop(p Profile, delay time.Duration, gen uint64) {
 	}
 }
 
+// singBoxCaps returns the capability flags of bin, re-probing only when
+// the file behind the path changed. The probe runs the binary, so the cache
+// is keyed by size and mtime as well: downloading an update into the same
+// path (UpdateCore) must invalidate it, and so must pointing the setting at
+// another build.
+func (s *Service) singBoxCaps(bin string) SingBoxCaps {
+	var size, mod int64
+	if st, err := os.Stat(bin); err == nil {
+		size, mod = st.Size(), st.ModTime().UnixNano()
+	}
+	s.sbMu.Lock()
+	if s.sbCapsOK && s.sbCapsKey == bin && s.sbCapsSize == size && s.sbCapsMod == mod {
+		caps := s.sbCaps
+		s.sbMu.Unlock()
+		return caps
+	}
+	s.sbMu.Unlock()
+	caps := probeSingBoxCaps(bin)
+	s.sbMu.Lock()
+	s.sbCaps, s.sbCapsKey, s.sbCapsSize, s.sbCapsMod, s.sbCapsOK = caps, bin, size, mod, true
+	s.sbMu.Unlock()
+	return caps
+}
+
+// resolveExecPath turns the core binary path into the one the OS process
+// table reports: absolute, symlinks followed. TUN's process_path rule
+// matches on that string, and a relative or symlinked path would never
+// match.
+func resolveExecPath(p string) string {
+	if p == "" {
+		return ""
+	}
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		abs = p
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = resolved
+	}
+	return abs
+}
+
 // startTun launches the sing-box TUN helper on top of the main core's SOCKS
 // inbound and waits for the adapter to appear. Called from supervise with the
 // session not yet marked connected; on failure the caller tears the
@@ -1073,22 +1129,23 @@ func (s *Service) startTun(sess *session, ctx context.Context, socksAddr string,
 	if err != nil {
 		return nil, fmt.Errorf("TUN: не удалось определить адрес сервера %s: %v", sess.profile.Host, err)
 	}
-	s.mu.Lock()
-	if !s.sbProbed {
-		s.sbModern = singBoxModernDNS(singbox)
-		s.sbProbed = true
-	}
-	modern := s.sbModern
-	s.mu.Unlock()
+	// Capability flags of THIS binary (cached by path+size+mtime): after a
+	// core download or a path change the freshly installed engine gets a
+	// config it can actually parse.
+	caps := s.singBoxCaps(singbox)
+	newDNS := caps.NewDNSFormat
 	conf, err := TunConfig(TunOptions{
-		SocksAddr:   socksAddr,
-		ServerIPs:   ips,
-		BypassLAN:   set.BypassLAN,
-		RemoteDNS:   set.RemoteDNS,
-		ModernDNS:   modern,
-		LogLevel:    set.LogLevel,
-		Stack:       set.TunStack,
-		StrictRoute: set.TunStrictRoute,
+		SocksAddr:       socksAddr,
+		ServerIPs:       ips,
+		CoreProcessPath: resolveExecPath(sess.cmd.Path),
+		UpstreamTCPOnly: sess.profile.Type == TWisteria,
+		BypassLAN:       set.BypassLAN,
+		RemoteDNS:       set.RemoteDNS,
+		ModernDNS:       caps.ModernActions,
+		NewDNSFormat:    &newDNS,
+		LogLevel:        set.LogLevel,
+		Stack:           set.TunStack,
+		StrictRoute:     set.TunStrictRoute,
 	})
 	if err != nil {
 		return nil, err

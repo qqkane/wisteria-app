@@ -128,11 +128,24 @@ func TestTunConfigModern(t *testing.T) {
 		t.Fatal("modern config must not carry the inbound sniff option")
 	}
 	rules := m["route"].(map[string]any)["rules"].([]any)
-	first := rules[0].(map[string]any)
-	if first["action"] != "hijack-dns" {
-		t.Fatalf("dns rule = %v", first)
+	// Modern sing-box sniffs through a route action: without it the
+	// "protocol": "dns" condition never matches (the inbound sniff option
+	// is gone in 1.11+).
+	if rules[0].(map[string]any)["action"] != "sniff" {
+		t.Fatalf("first rule = %v, want the sniff action", rules[0])
 	}
-	excl := rules[1].(map[string]any)
+	if rules[1].(map[string]any)["action"] != "hijack-dns" {
+		t.Fatalf("dns rule = %v", rules[1])
+	}
+	dns53 := rules[2].(map[string]any)
+	if dns53["action"] != "hijack-dns" || dns53["port"] != float64(53) {
+		t.Fatalf("port-53 fallback rule = %v", dns53)
+	}
+	loop := rules[3].(map[string]any)
+	if loop["outbound"] != "direct" {
+		t.Fatalf("loopback rule = %v", loop)
+	}
+	excl := rules[4].(map[string]any)
 	if excl["outbound"] != "direct" {
 		t.Fatalf("server rule = %v", excl)
 	}

@@ -23,6 +23,12 @@ type SingBoxOptions struct {
 	DirectCIDRs   []string // user list: IPs/CIDRs bypassing the tunnel
 	BlockDomains  []string // user list: blocked domains
 	BlockCIDRs    []string // blocked IPs/CIDRs
+	// ModernActions: sing-box >= 1.11 — block via {"action": "reject"}
+	// because the "block" outbound was removed in 1.13.
+	ModernActions bool
+	// NewDNSFormat: sing-box >= 1.12 — typed DNS servers plus the
+	// route.default_domain_resolver the newer engine requires.
+	NewDNSFormat bool
 }
 
 func SingBoxConfig(p Profile, o SingBoxOptions) ([]byte, error) {
@@ -53,17 +59,28 @@ func SingBoxConfig(p Profile, o SingBoxOptions) ([]byte, error) {
 		rules = append(rules, map[string]any{"ip_cidr": o.DirectCIDRs, "outbound": "direct"})
 	}
 	hasBlock := len(o.BlockDomains) > 0 || len(o.BlockCIDRs) > 0
+	// blockRule carries the two spellings of "drop this": the removed
+	// block outbound (<= 1.12) and the reject action (1.11+, mandatory
+	// once the outbound itself is gone in 1.13).
+	blockRule := func(match map[string]any) map[string]any {
+		if o.ModernActions {
+			match["action"] = "reject"
+		} else {
+			match["outbound"] = "block"
+		}
+		return match
+	}
 	if len(o.BlockDomains) > 0 {
-		rules = append(rules, map[string]any{"domain_suffix": o.BlockDomains, "outbound": "block"})
+		rules = append(rules, blockRule(map[string]any{"domain_suffix": o.BlockDomains}))
 	}
 	if len(o.BlockCIDRs) > 0 {
-		rules = append(rules, map[string]any{"ip_cidr": o.BlockCIDRs, "outbound": "block"})
+		rules = append(rules, blockRule(map[string]any{"ip_cidr": o.BlockCIDRs}))
 	}
 	if len(rules) > 0 {
 		route["rules"] = rules
 	}
 	outbounds := []any{out, map[string]any{"type": "direct", "tag": "direct"}}
-	if hasBlock {
+	if hasBlock && !o.ModernActions {
 		outbounds = append(outbounds, map[string]any{"type": "block", "tag": "block"})
 	}
 	cfg := map[string]any{
@@ -77,7 +94,21 @@ func SingBoxConfig(p Profile, o SingBoxOptions) ([]byte, error) {
 		"outbounds": outbounds,
 		"route":     route,
 	}
-	if o.RemoteDNS != "" {
+	if o.NewDNSFormat {
+		// 1.12+ typed servers. The "local" server is not optional: the
+		// engine refuses to start without route.default_domain_resolver,
+		// and a domain-based proxy server needs a resolver to dial at all.
+		servers := []any{}
+		if o.RemoteDNS != "" {
+			remote, _ := buildSingBoxDNSServer("remote", o.RemoteDNS, "", true)
+			servers = append(servers, remote)
+			route["default_domain_resolver"] = "remote"
+		} else {
+			route["default_domain_resolver"] = "local"
+		}
+		servers = append(servers, map[string]any{"type": "local", "tag": "local"})
+		cfg["dns"] = map[string]any{"servers": servers}
+	} else if o.RemoteDNS != "" {
 		// Resolve the outbound SERVER's own domain through the chosen DNS.
 		cfg["dns"] = map[string]any{
 			"servers": []any{map[string]any{"tag": "remote", "address": o.RemoteDNS}},
