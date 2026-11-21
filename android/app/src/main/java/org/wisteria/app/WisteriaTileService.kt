@@ -81,7 +81,14 @@ class WisteriaTileService : TileService() {
         tile.state = if (running) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
         tile.label = getString(R.string.app_name)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            tile.subtitle = getString(if (running) R.string.status_connected else R.string.status_idle)
+            // The active profile in the subtitle: «Защищено» alone never told
+            // which account/mirror the shade would disconnect.
+            val name = EngineHub.profileName.trim()
+            tile.subtitle = when {
+                running && name.isNotEmpty() -> name
+                running -> getString(R.string.status_connected)
+                else -> getString(R.string.status_idle)
+            }
         }
         tile.updateTile()
     }

@@ -10,6 +10,7 @@ import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
@@ -22,6 +23,7 @@ import org.wisteria.mobile.Mobile
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.min
 
 /**
@@ -147,10 +149,12 @@ class WisteriaVpnService : VpnService() {
      *  "connected" so a later drop can queue again. */
     private val reconnectQueued = java.util.concurrent.atomic.AtomicBoolean(false)
 
-    /** True while teardown() runs: its engine stop must not be read as an
-     *  engine-originated death. */
-    @Volatile
-    private var tearingDown = false
+    /** Depth of nested/overlapping teardown() calls. A plain boolean was
+     *  cleared by whichever pass finished first, so a Disconnect racing
+     *  onDestroy() or an internal reconnect re-armed the "the engine died
+     *  on its own" path and queued a spurious scheduleReconnect(). */
+    private val tearingDownDepth = AtomicInteger(0)
+    private val isTearingDown: Boolean get() = tearingDownDepth.get() > 0
 
     /** True while no session is desired: user stop, revoke, startup. The
      *  watchdog and the reconnect queue must stay quiet while it is set. */
@@ -264,7 +268,7 @@ class WisteriaVpnService : VpnService() {
                 // tunnel (wisteria runLoop device-dead, box core stop) is the
                 // fast path of the watchdog: react immediately, do not idle 2s.
                 // Events fired from our own teardown() are not a drop.
-                if (mapped == "disconnected" && !userStopped && !tearingDown) scheduleReconnect()
+                if (mapped == "disconnected" && !userStopped && !isTearingDown) scheduleReconnect()
             } catch (t: Throwable) {
                 android.util.Log.w("WisteriaVpn", "onState", t)
             }
@@ -292,7 +296,7 @@ class WisteriaVpnService : VpnService() {
                 // holds it for the field snapshot, never while it stops the
                 // engine, so the two cannot deadlock.
                 synchronized(stateLock) {
-                    if (tearingDown || userStopped) return -1
+                    if (isTearingDown || userStopped) return -1
                     val builder = Builder()
                         .setSession(EngineHub.profileName.ifEmpty { "Wisteria" })
                         .setMtu(opts.optInt("mtu", TUN_MTU))
@@ -327,7 +331,7 @@ class WisteriaVpnService : VpnService() {
                     // Re-check under the same lock: a Disconnect that landed
                     // during establish() must not leave the just-created fd
                     // owned by a service that is already tearing down.
-                    if (tearingDown || userStopped) {
+                    if (isTearingDown || userStopped) {
                         runCatching { pfd.close() }
                         return -1
                     }
@@ -437,17 +441,44 @@ class WisteriaVpnService : VpnService() {
     }
 
     private fun connect(profileIdParam: String, myCancelEpoch: Long, fgsRequired: Boolean = true) {
-        val myEpoch = synchronized(stateLock) {
-            // `starting` closes the gap before the engine flags are set
-            // (startBox sets engineIsBox only after the config build,
-            // startWisteria — tun only after establish()): two rapid
-            // CONNECTs could otherwise start the engine twice.
-            if (tun != null || engineIsBox || starting) null else {
-                starting = true
-                teardownEpoch
+        val store = AndroidStore(this)
+        // Resolve the target BEFORE the duplicate check: "Connect" is also
+        // the switch-while-connected call (the frontend does SetActive +
+        // Connect on a profile tap), so a live session must be told apart
+        // from a real duplicate by *which* profile it runs. An empty request
+        // while a session is up means "the one that is running" — never tear
+        // a live tunnel down just because the active pointer is empty.
+        val targetId = profileIdParam.ifEmpty {
+            store.activeId().ifEmpty { EngineHub.profileId }
+        }
+
+        var switchFrom: String? = null
+        var myEpoch: Long = synchronized(stateLock) {
+            when {
+                // `starting` closes the gap before the engine flags are set
+                // (startBox sets engineIsBox only after the config build,
+                // startWisteria — tun only after establish()): two rapid
+                // CONNECTs could otherwise start the engine twice.
+                starting -> -1L
+                tun != null || engineIsBox -> {
+                    if (targetId.isNotEmpty() && targetId == EngineHub.profileId) {
+                        -1L // same profile is already up: duplicate CONNECT
+                    } else {
+                        // Different profile: momentary switch. Claim the start
+                        // slot now so a second tap cannot slip in, then tear
+                        // the old session down outside stateLock.
+                        switchFrom = EngineHub.profileId
+                        starting = true
+                        teardownEpoch
+                    }
+                }
+                else -> {
+                    starting = true
+                    teardownEpoch
+                }
             }
         }
-        if (myEpoch == null) {
+        if (myEpoch < 0L) {
             // Duplicate CONNECT (double-tap, STICKY redelivery): the start
             // itself is a no-op, but every startForegroundService() call
             // must still be answered with startForeground() within the
@@ -471,20 +502,30 @@ class WisteriaVpnService : VpnService() {
             // crashes the app ~10 s later — stop cleanly and tell the UI.
             synchronized(stateLock) { starting = false }
             EngineHub.appLog("подключение: приложение в фоне — откройте его и повторите")
-            EngineHub.pushEvent("state", statusJson("disconnected", "приложение в фоне — откройте его для подключения"))
-            userStopped = true
-            stopSelf()
+            abortSession(null, "приложение в фоне — откройте его для подключения")
             return
         }
         try {
-            val store = AndroidStore(this)
-            val id = profileIdParam.ifEmpty { store.activeId() }
+            if (switchFrom != null) {
+                // A Disconnect may have landed while we were claiming the
+                // start slot — it wins over a switch that only just began.
+                if (cancelEpoch != myCancelEpoch) return
+                EngineHub.appLog("переключение профиля — перезапуск сессии")
+                // keepForeground: the switch is an internal restart, the
+                // following startForeground() must not be a background FGS
+                // start (Android 12+).
+                teardown(pushState = true, keepForeground = true)
+                // teardown() bumps teardownEpoch; the engine start below must
+                // compare against the post-teardown generation, or its own
+                // teardown reads as "a Disconnect raced me".
+                myEpoch = synchronized(stateLock) { teardownEpoch }
+            }
+
+            val id = targetId
             val profile = store.profile(id)
                 ?: run {
                     EngineHub.appLog("подключение: профиль не найден")
-                    EngineHub.pushEvent("state", statusJson("disconnected", "профиль не найден"))
-                    userStopped = true
-                    stopSelf()
+                    abortSession("", "профиль не найден")
                     return
                 }
 
@@ -517,13 +558,36 @@ class WisteriaVpnService : VpnService() {
             }
         } catch (e: Throwable) {
             // establish()/store failures must not wedge `starting` (see the
-            // finally above) nor vanish silently: surface the real cause.
+            // finally below) nor vanish silently: surface the real cause and
+            // — critically — take the "Connecting…" notification down and
+            // stop the service, so the watchdog has nothing to loop on.
             android.util.Log.d("WisteriaVpn", "connect failed", e)
             EngineHub.appLog("подключение не удалось: ${trimErr(e.message)}")
-            EngineHub.pushEvent("state", statusJson("disconnected", trimErr(e.message)))
+            abortSession("", trimErr(e.message) ?: e.javaClass.simpleName)
         } finally {
             synchronized(stateLock) { starting = false }
         }
+    }
+
+    /**
+     * Terminal failure of a start attempt: no session is desired any more,
+     * so stop the watchdog, drop the foreground notification (otherwise a
+     * stuck "Connecting…" outlives the attempt) and stop the service. Every
+     * early exit from connect()/startWisteria()/startBox() funnels through
+     * here — a return that skipped even one of these left the notification
+     * up and the reconnect watchdog armed.
+     */
+    private fun abortSession(type: String?, message: String) {
+        userStopped = true
+        sessionStartEpoch = 0
+        stopWatchdog()
+        EngineHub.pushEvent("state", statusJson("disconnected", message, type))
+        WisteriaTileService.refresh(this)
+        try {
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        } catch (_: Throwable) {
+        }
+        stopSelf()
     }
 
     /** True when a teardown happened since the caller captured its epoch:
@@ -538,18 +602,6 @@ class WisteriaVpnService : VpnService() {
     }
 
     private fun startWisteria(profile: JSONObject, myEpoch: Long) {
-        val builder = Builder()
-            .addAddress(TUN_ADDRESS, TUN_PREFIX)
-            .addRoute("0.0.0.0", 0)
-            // The wisteria engine relays IPv4 only. Without a v6 route the
-            // OS sends IPv6 straight out the physical interface — the
-            // tunnel would leak every dual-stack connection. Route ::/0
-            // into the TUN (no v6 address) so v6 dies inside it instead.
-            .addRoute("::", 0)
-            .addDnsServer(tunDns())
-            .setMtu(TUN_MTU)
-            .setSession(profile.optString("name").ifEmpty { "Wisteria" })
-        applySplitApps(builder)
         // "Do not proxy Russian sites" — the Android counterpart of the
         // desktop routing.mode=bypass_ru. VpnService cannot match domains,
         // so the RU CIDR list is subtracted from the 0.0.0.0/0 route and the
@@ -559,38 +611,19 @@ class WisteriaVpnService : VpnService() {
         val settings = AndroidStore(this).settings()
         val bypassRU = !settings.optBoolean("no_bypass_ru", false)
         val customCidrs = settings.optString("wisteria_direct_cidrs")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val started = System.currentTimeMillis()
-            var ruAdded = 0
-            if (bypassRU) {
-                for (prefix in RuRoutes.ipv4(this)) {
-                    try {
-                        builder.excludeRoute(prefix)
-                        ruAdded++
-                    } catch (e: Exception) {
-                        android.util.Log.w("WisteriaVpn", "excludeRoute $prefix", e)
-                    }
-                }
-            }
-            var customAdded = 0
-            for (prefix in RuRoutes.parseList(customCidrs)) {
-                try {
-                    builder.excludeRoute(prefix)
-                    customAdded++
-                } catch (e: Exception) {
-                    android.util.Log.w("WisteriaVpn", "excludeRoute $prefix", e)
-                }
-            }
-            val parts = ArrayList<String>(2)
-            if (bypassRU) parts.add("$ruAdded RU-подсетей")
-            if (customAdded > 0) parts.add("$customAdded своих")
-            if (parts.isNotEmpty()) {
-                EngineHub.appLog(
-                    "маршрутизация: ${parts.joinToString(" + ")} идут напрямую " +
-                        "(${System.currentTimeMillis() - started} мс)"
-                )
-            }
-        } else if (bypassRU || customCidrs.isNotBlank()) {
+        val canExclude = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+
+        // The exclusion list is built once; establishGuarded() may need a
+        // second Builder without it (see there).
+        val exclusions: List<android.net.IpPrefix> = if (canExclude) {
+            val out = ArrayList<android.net.IpPrefix>(9000)
+            if (bypassRU) out.addAll(RuRoutes.ipv4(this))
+            out.addAll(RuRoutes.parseList(customCidrs))
+            out
+        } else {
+            emptyList()
+        }
+        if (!canExclude && (bypassRU || customCidrs.isNotBlank())) {
             // Say it out loud instead of silently ignoring the checkbox:
             // excludeRoute appeared in Android 13, and a user who ticks the
             // box on Android 12 must not wonder why their bank still sees
@@ -600,12 +633,44 @@ class WisteriaVpnService : VpnService() {
                     "(на этом устройстве весь трафик идёт в туннель)"
             )
         }
-        val fd = builder.establish()
+
+        fun buildBuilder(useExclusions: Boolean): Builder {
+            val b = Builder()
+                .addAddress(TUN_ADDRESS, TUN_PREFIX)
+                .addRoute("0.0.0.0", 0)
+                // The wisteria engine relays IPv4 only. Without a v6 route the
+                // OS sends IPv6 straight out the physical interface — the
+                // tunnel would leak every dual-stack connection. Route ::/0
+                // into the TUN (no v6 address) so v6 dies inside it instead.
+                .addRoute("::", 0)
+                .addDnsServer(tunDns())
+                .setMtu(TUN_MTU)
+                .setSession(profile.optString("name").ifEmpty { "Wisteria" })
+            applySplitApps(b)
+            if (useExclusions) {
+                for (prefix in exclusions) {
+                    try {
+                        b.excludeRoute(prefix)
+                    } catch (e: Exception) {
+                        android.util.Log.w("WisteriaVpn", "excludeRoute $prefix", e)
+                    }
+                }
+            }
+            return b
+        }
+
+        val started = System.currentTimeMillis()
+        val fd = establishGuarded(::buildBuilder)
         if (fd == null) {
             EngineHub.appLog("VpnService.establish() вернул null — согласие на VPN отозвано?")
-            EngineHub.pushEvent("state", statusJson("disconnected", "VpnService: согласие на VPN не выдано"))
-            stopSelf()
+            abortSession("wisteria", "VpnService: согласие на VPN не выдано")
             return
+        }
+        if (exclusions.isNotEmpty()) {
+            EngineHub.appLog(
+                "маршрутизация: ${exclusions.size} подсетей идут напрямую " +
+                    "(${System.currentTimeMillis() - started} мс)"
+            )
         }
         tun = fd
         EngineHub.resetDiag() // chips must describe this session, not the previous one
@@ -647,11 +712,45 @@ class WisteriaVpnService : VpnService() {
             // Show the failure instead of silently swallowing it: the VPN
             // screen renders status.error in the red box (v0.4.2's
             // "connecting forever" looked exactly like a swallowed error).
+            // teardown() first: the tun is already assigned here.
             teardown(pushState = false)
-            userStopped = true // a failed manual connect is not a dropped session
-            stopSelf()
-            EngineHub.pushEvent("state", statusJson("disconnected", trimErr(e.message)))
+            abortSession("wisteria", trimErr(e.message) ?: e.javaClass.simpleName)
         }
+    }
+
+    /** True for the "IPC payload too big" family thrown by establish() when
+     *  the Builder carries thousands of excluded routes: TransactionTooLarge
+     *  on the parcel itself, or the framework's own route-count refusal. */
+    private fun isBinderOverflow(t: Throwable): Boolean {
+        var cur: Throwable? = t
+        while (cur != null) {
+            if (cur is android.os.TransactionTooLargeException) return true
+            val m = (cur.message ?: "").lowercase()
+            if (m.contains("transactiontoolarge") || m.contains("too many routes") ||
+                m.contains("too many addresses") || m.contains("too large")
+            ) return true
+            cur = cur.cause
+        }
+        return false
+    }
+
+    /**
+     * establish() with a degradation path. Excluding ~8.7k RU CIDRs writes a
+     * large parcel to the system VPN service; on some devices/ROMs that
+     * overflow the binder transaction and the whole VPN fails to come up.
+     * A failed exclusion list is a routing nicety, not the tunnel: retry
+     * once with a plain Builder and say what was lost in the log.
+     */
+    private fun establishGuarded(build: (Boolean) -> Builder): ParcelFileDescriptor? = try {
+        build(true).establish()
+    } catch (t: Throwable) {
+        if (!isBinderOverflow(t)) throw t
+        EngineHub.appLog(
+            "маршрутизация: список исключений слишком велик для системы " +
+                "(${t.javaClass.simpleName}) — поднимаю туннель без обхода подсетей"
+        )
+        android.util.Log.w("WisteriaVpn", "establish with exclusions failed, retrying plain", t)
+        build(false).establish()
     }
 
     /** sing-box path: vless / vmess / trojan / ss / hysteria2 / tuic. */
@@ -668,8 +767,7 @@ class WisteriaVpnService : VpnService() {
             )
         } catch (e: Exception) {
             EngineHub.appLog("профиль повреждён: ${e.message}")
-            EngineHub.pushEvent("state", statusJson("disconnected", "профиль повреждён: ${trimErr(e.message)}"))
-            stopSelf()
+            abortSession(profile.optString("type"), "профиль повреждён: ${trimErr(e.message)}")
             return
         }
         engineIsBox = true
@@ -693,9 +791,7 @@ class WisteriaVpnService : VpnService() {
             EngineHub.coreLog("sing-box: ${e.message}")
             // See startWisteria: surface the failure on the VPN screen.
             teardown(pushState = false)
-            userStopped = true // a failed manual connect is not a dropped session
-            stopSelf()
-            EngineHub.pushEvent("state", statusJson("disconnected", trimErr(e.message)))
+            abortSession(EngineHub.profileType, trimErr(e.message) ?: e.javaClass.simpleName)
         }
     }
 
@@ -710,6 +806,37 @@ class WisteriaVpnService : VpnService() {
     }
 
     /**
+     * The physical network carrying traffic. ConnectivityManager's
+     * activeNetwork is the VPN itself once we are up, and
+     * registerDefaultNetworkCallback() then replays *our own TUN* as the
+     * "default" — the box core was told to bind its outbound sockets to the
+     * tun interface and the wisteria monitor read its own interface as a
+     * network switch. Both are non-VPN-only now.
+     */
+    @Suppress("DEPRECATION") // allNetworks: still the only way to enumerate physical networks
+    private fun physicalNetwork(cm: ConnectivityManager): Network? {
+        var fallback: Network? = null
+        try {
+            for (n in cm.allNetworks) {
+                val caps = cm.getNetworkCapabilities(n) ?: continue
+                if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) continue
+                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) continue
+                if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) return n
+                if (fallback == null) fallback = n
+            }
+        } catch (_: Throwable) {
+        }
+        return fallback
+    }
+
+    /** A callback registration that only ever sees physical networks. */
+    private fun nonVpnNetworkRequest(): NetworkRequest =
+        NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+            .build()
+
+    /**
      * Android blocks netlink interface dumps, so the box's default
      * interface monitor is fed from ConnectivityManager: initial state
      * right after the start, then on every network change.
@@ -718,9 +845,11 @@ class WisteriaVpnService : VpnService() {
         val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
         fun reportDefault() {
-            val active = cm.activeNetwork
-            val lp = active?.let { cm.getLinkProperties(it) }
-            val name = lp?.interfaceName
+            val active = physicalNetwork(cm) ?: run {
+                Mobile.boxUpdateDefaultInterface("", -1, false, false)
+                return
+            }
+            val name = cm.getLinkProperties(active)?.interfaceName
             if (name.isNullOrEmpty()) {
                 Mobile.boxUpdateDefaultInterface("", -1, false, false)
                 return
@@ -752,10 +881,12 @@ class WisteriaVpnService : VpnService() {
         }
         boxNetCallback = cb
         try {
-            cm.registerDefaultNetworkCallback(cb)
-            // registerDefaultNetworkCallback() may deliver onAvailable on a
-            // binder thread later; seed the core with the current network
-            // right away so the first dial does not race the callback.
+            // NOT registerDefaultNetworkCallback(): it follows the VPN once
+            // the tun is up and reported "tun0" as the physical interface.
+            cm.registerNetworkCallback(nonVpnNetworkRequest(), cb)
+            // The callback may deliver onAvailable on a binder thread later;
+            // seed the core with the current network right away so the first
+            // dial does not race the callback.
             reportDefault()
         } catch (e: Exception) {
             EngineHub.coreLog("network monitor: ${e.message}")
@@ -784,11 +915,10 @@ class WisteriaVpnService : VpnService() {
     private fun registerWisteriaNetworkMonitor() {
         unregisterWisteriaNetworkMonitor()
         val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        // registerDefaultNetworkCallback() replays onAvailable for the
-        // already-active network immediately; remember it so that replay is
-        // not mistaken for a switch.
+        // Registration replays onAvailable for the already-present networks;
+        // remember the physical one so the replay is not read as a switch.
         lastActiveNetHandle = try {
-            cm.activeNetwork?.networkHandle
+            physicalNetwork(cm)?.networkHandle
         } catch (_: Throwable) {
             null
         }
@@ -802,20 +932,23 @@ class WisteriaVpnService : VpnService() {
             override fun onLost(network: Network) = onMaybeSwitched()
 
             private fun onMaybeSwitched() {
+                // Only physical networks reach this callback (the request
+                // carries NOT_VPN), so bringing our own tun up/down cannot
+                // be mistaken for a Wi-Fi ⇄ LTE switch.
                 val currentHandle = try {
-                    cm.activeNetwork?.networkHandle
+                    physicalNetwork(cm)?.networkHandle
                 } catch (_: Throwable) {
                     null
                 } ?: return
                 if (currentHandle == lastActiveNetHandle) return
                 lastActiveNetHandle = currentHandle
-                if (userStopped || tearingDown) return
+                if (userStopped || isTearingDown) return
                 synchronized(netSwitchLock) {
                     netSwitchFuture?.cancel(false)
                     netSwitchFuture = try {
                         watchdogExec.schedule({
                             executor.execute {
-                                if (userStopped || tearingDown) return@execute
+                                if (userStopped || isTearingDown) return@execute
                                 val epoch = cancelEpoch
                                 EngineHub.appLog("сеть изменилась — переподключение")
                                 reconnectStep = 0
@@ -832,7 +965,10 @@ class WisteriaVpnService : VpnService() {
         }
         wisteriaNetCallback = cb
         try {
-            cm.registerDefaultNetworkCallback(cb)
+            // Physical networks only — see nonVpnNetworkRequest(). The old
+            // registerDefaultNetworkCallback() followed the tun itself and
+            // fired "сеть изменилась" right after every connect.
+            cm.registerNetworkCallback(nonVpnNetworkRequest(), cb)
         } catch (e: Exception) {
             EngineHub.coreLog("network monitor: ${e.message}")
         }
@@ -856,16 +992,26 @@ class WisteriaVpnService : VpnService() {
 
     private fun teardown(pushState: Boolean = true, keepForeground: Boolean = false) {
         stopWatchdog()
-        tearingDown = true
+        // Depth counter, not a boolean: overlapping passes (a user
+        // Disconnect + onDestroy, or an internal reconnect) each add one and
+        // remove one; only the outermost exit clears the flag, so a shorter
+        // pass can never re-arm the "engine died on its own" path under a
+        // longer one.
+        tearingDownDepth.incrementAndGet()
         try {
-            // Snapshot and clear the session fields under stateLock, but stop
-            // the engine while holding engineLock instead: Mobile.stop()/
-            // boxStop() can block while the engine is still inside callback
-            // .onOpenTun(), which needs stateLock — so the stop must happen
-            // after that lock is released. engineLock keeps a Connect that
-            // raced this teardown from starting the next engine until this
-            // one is really down.
-            val (curBoxTun, curTun) = synchronized(engineLock) {
+            // Everything happens under engineLock, including the metadata /
+            // monitor / notification cleanup. This is what makes a finishing
+            // old Disconnect thread harmless: a Connect that starts a new
+            // session holds the same lock for its whole start, so the old
+            // teardown physically cannot wipe the fresh profileId,
+            // network monitor or foreground notification of the new session.
+            //
+            // The engine stop is inside the lock for the same reason, but the
+            // field snapshot uses its own short stateLock critical section:
+            // Mobile.stop()/boxStop() can block while the engine is inside
+            // callback.onOpenTun(), which itself takes stateLock — holding it
+            // across the stop would deadlock.
+            synchronized(engineLock) {
                 val (wasBox, boxFd, tunFd) = synchronized(stateLock) {
                     teardownEpoch++
                     val snap = Triple(engineIsBox, boxTun, tun)
@@ -890,40 +1036,41 @@ class WisteriaVpnService : VpnService() {
                     } catch (_: Throwable) {
                     }
                 }
-                boxFd to tunFd
-            }
-            // After engineLock: a racing start may have registered its own
-            // monitor while this teardown waited for the lock.
-            unregisterWisteriaNetworkMonitor()
-            try {
-                curTun?.close()
-            } catch (_: Throwable) {
-            }
-            EngineHub.profileId = ""
-            EngineHub.profileName = ""
-            EngineHub.profileType = ""
-            sessionStartEpoch = 0 // the pushed "disconnected" must not carry a stale started_at
-            if (pushState) EngineHub.pushEvent("state", statusJson("disconnected"))
-            WisteriaTileService.refresh(this)
-            // Internal restarts (reconnect, network switch) keep the
-            // foreground notification: dropping it here made the following
-            // startForeground() a background FGS start on Android 12+.
-            if (!keepForeground) {
-                ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+                unregisterWisteriaNetworkMonitor()
+                try {
+                    tunFd?.close()
+                } catch (_: Throwable) {
+                }
+                EngineHub.profileId = ""
+                EngineHub.profileName = ""
+                EngineHub.profileType = ""
+                sessionStartEpoch = 0 // the pushed "disconnected" must not carry a stale started_at
+                if (pushState) EngineHub.pushEvent("state", statusJson("disconnected"))
+                WisteriaTileService.refresh(this)
+                // Internal restarts (reconnect, network switch, profile
+                // switch) keep the foreground notification: dropping it here
+                // made the following startForeground() a background FGS start
+                // on Android 12+.
+                if (!keepForeground) {
+                    try {
+                        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+                    } catch (_: Throwable) {
+                    }
+                }
             }
         } finally {
             // Only after the whole pass: the engine Stop() above fires
             // onState("disconnected") synchronously — that is our teardown,
             // not a drop, and must not queue a reconnect.
-            tearingDown = false
+            tearingDownDepth.decrementAndGet()
         }
     }
 
     /** The desktop Status shape the frontend renders. */
-    private fun statusJson(state: String, error: String? = null): JSONObject =
+    private fun statusJson(state: String, error: String? = null, type: String? = null): JSONObject =
         WisteriaBridge.staticStatusJson(
             state,
-            if (state == "disconnected") "" else EngineHub.profileType,
+            type ?: if (state == "disconnected") "" else EngineHub.profileType,
             error,
             sessionStartEpoch,
         )
@@ -1031,17 +1178,34 @@ class WisteriaVpnService : VpnService() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         // The notification must carry its own Disconnect: opening the app to
-        // stop the tunnel was the only way before.
-        val disconnectIntent = PendingIntent.getService(
-            this, 1,
-            Intent(this, WisteriaVpnService::class.java).setAction(ACTION_DISCONNECT),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val text = when (state) {
+        // stop the tunnel was the only way before. On API 26+ this service is
+        // already a foreground service running from onStartCommand's
+        // tryStartForeground(), and a plain getService() PendingIntent on an
+        // FGS-targeted intent is refused by the background-start rules —
+        // getForegroundService() matches how onStartCommand answers the
+        // obligation, so the action keeps working from the shade.
+        val disconnectIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            PendingIntent.getForegroundService(
+                this, 1,
+                Intent(this, WisteriaVpnService::class.java).setAction(ACTION_DISCONNECT),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        } else {
+            PendingIntent.getService(
+                this, 1,
+                Intent(this, WisteriaVpnService::class.java).setAction(ACTION_DISCONNECT),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        }
+        val word = when (state) {
             "connected" -> getString(R.string.status_connected)
             "connecting" -> getString(R.string.status_connecting)
             else -> getString(R.string.status_idle)
         }
+        // Name the profile while a session is up: two Wisteria accounts in
+        // the shade were indistinguishable from the outside.
+        val name = EngineHub.profileName.trim()
+        val text = if (name.isNotEmpty() && state != "disconnected") "$word · $name" else word
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notif)
             .setContentTitle("Wisteria")

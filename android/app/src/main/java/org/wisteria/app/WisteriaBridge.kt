@@ -23,10 +23,20 @@ import java.util.Base64
  * core.WisteriaDiag). Thrown exceptions become {"__error": msg} and
  * surface as frontend toasts, like Wails rejections.
  */
-class WisteriaBridge(private val activity: MainActivity) {
+class WisteriaBridge(activity: MainActivity) {
 
-    private val context: Context get() = activity.applicationContext
+    /** The activity is held WEAKLY: connect/ping/subscription work runs on
+     *  long-lived background threads, and a strong reference there outlived
+     *  the destroyed activity on every rotation. appContext survives it. */
+    private val activityRef = java.lang.ref.WeakReference(activity)
+    private val appContext: Context = activity.applicationContext
+
+    private val context: Context get() = appContext
     private val store by lazy { AndroidStore(context) }
+
+    /** The live activity, or null once it is gone. */
+    private fun liveActivity(): MainActivity? =
+        activityRef.get()?.takeIf { !it.isFinishing && !it.isDestroyed }
 
     // The profile waiting for the system VPN consent dialog lives in
     // VpnConsentHolder (process-wide, survives activity recreation).
@@ -120,7 +130,7 @@ class WisteriaBridge(private val activity: MainActivity) {
             val old = store.settings()
             val next = args.getJSONObject(0)
             store.saveSettings(next)
-            activity.applyThemeFromSettings()
+            liveActivity()?.applyThemeFromSettings()
             maybeReconnect(old, next)
             null
         }
@@ -137,7 +147,7 @@ class WisteriaBridge(private val activity: MainActivity) {
             .put("xray_found", false).put("xray_path", "")
         "CheckAppUpdate" -> checkAppUpdate()
         "ApplyAppUpdate" -> { openReleasePage(args.optString(0)); null }
-        "RestartApp" -> { activity.restartApp(); null }
+        "RestartApp" -> { liveActivity()?.restartApp(); null }
         "CheckCoreUpdate" -> JSONObject().put("current", "-").put("latest", "-").put("has_update", false)
         "UpdateCore" -> throw err("Ядра встроены в приложение (sing-box) — обновление не требуется")
 
@@ -188,10 +198,15 @@ class WisteriaBridge(private val activity: MainActivity) {
     private fun connect(id: String) {
         store.profile(id) ?: throw err("профиль не найден")
         store.setActive(id)
-        val consent = VpnService.prepare(activity)
+        // VpnService.prepare(context) is the non-null-safe overload: it does
+        // not need the activity, and the consent dialog itself is launched on
+        // the UI thread by the activity when it is still alive.
+        val consent = VpnService.prepare(context)
         if (consent != null) {
             VpnConsentHolder.pendingId = id
-            activity.requestVpnConsent(id)
+            val act = liveActivity()
+            if (act != null) act.requestVpnConsent(id)
+            else VpnConsentHolder.pendingId = null
             return
         }
         startConnectService(id)
@@ -208,7 +223,15 @@ class WisteriaBridge(private val activity: MainActivity) {
             // the failure instead of sitting on the optimistic connecting
             // screen forever.
             EngineHub.appLog("запуск VPN-сервиса: ${t.message}")
-            EngineHub.pushEvent("state", WisteriaBridge.staticStatusJson("disconnected", "откройте приложение и повторите подключение"))
+            // staticStatusJson(state, type, error): the message belongs in
+            // `error`, not in `type` — the old call put it in `type` and left
+            // the VPN screen's red box empty.
+            EngineHub.pushEvent(
+                "state",
+                WisteriaBridge.staticStatusJson(
+                    "disconnected", "", error = "откройте приложение и повторите подключение",
+                ),
+            )
         }
     }
 
@@ -578,7 +601,12 @@ class WisteriaBridge(private val activity: MainActivity) {
         if (text.isEmpty()) return
         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
         val clip = ClipData.newPlainText("Wisteria logs", text)
-        activity.runOnUiThread { cm.setPrimaryClip(clip) }
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            try {
+                cm.setPrimaryClip(clip)
+            } catch (_: Throwable) {
+            }
+        }
     }
 
     // ---- external IP / diag ----
@@ -857,9 +885,11 @@ class WisteriaBridge(private val activity: MainActivity) {
         }
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         try {
-            activity.startActivity(intent)
-        } catch (_: Throwable) {
+            // context is the application context, which always works with
+            // NEW_TASK even after the activity is gone.
             context.startActivity(intent)
+        } catch (_: Throwable) {
+            liveActivity()?.startActivity(intent)
         }
     }
 

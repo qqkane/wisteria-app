@@ -43,6 +43,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var web: WebView
     private lateinit var bridge: WisteriaBridge
 
+    /** The FrameLayout that pads the system bars. Kept so a theme change can
+     *  repaint the strips behind them (API 35 ignores window.statusBarColor
+     *  under enforced edge-to-edge, so the view background IS the chrome). */
+    private var rootView: android.widget.FrameLayout? = null
+
     /** This activity's own event emitter — onDestroy removes exactly it,
      *  never the whole registry: restartApp() creates the new activity
      *  BEFORE the old one is destroyed, and a blanket clear() wiped the
@@ -73,13 +78,31 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** The strips left visible by the inset padding (status bar above the
-     *  glass header, nav bar below it) must blend with them, not fight them:
-     *  the accent lives in the UI itself, so both bars stay near-black.
-     *  Called on theme changes too — the web chrome re-themes via CSS. */
+     *  glass header, nav bar below it) must blend with them, not fight them.
+     *  A light theme (arctic) needs light strips with DARK system icons —
+     *  the old hardcoded near-black bars with light icons put white status
+     *  icons on a white page. Called on theme changes too, since the web
+     *  chrome re-themes via CSS. */
     fun applyThemeFromSettings() {
+        val light = try {
+            AndroidStore(this).settings().optString("theme") == "arctic"
+        } catch (_: Throwable) {
+            false
+        }
+        val bg = if (light) "#e8f0f8" else "#050505"
         try {
-            window.statusBarColor = Color.parseColor("#050505")
-            window.navigationBarColor = Color.parseColor("#050505")
+            val color = Color.parseColor(bg)
+            window.statusBarColor = color
+            window.navigationBarColor = color
+            rootView?.setBackgroundColor(color)
+            web.setBackgroundColor(color)
+        } catch (_: Throwable) {
+        }
+        try {
+            WindowCompat.getInsetsController(window, window.decorView).apply {
+                isAppearanceLightStatusBars = light
+                isAppearanceLightNavigationBars = light
+            }
         } catch (_: Throwable) {
         }
     }
@@ -88,6 +111,10 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         web = WebView(this)
         web.setBackgroundColor(Color.parseColor("#050505"))
+        // No blue glow/edge shimmer on scroll: the SPA scrolls its own
+        // container, so the overscroll effect only ever appeared as an
+        // artifact over the glass panels.
+        web.overScrollMode = android.view.View.OVER_SCROLL_NEVER
         web.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true // the frontend keeps group-collapse state in localStorage
@@ -136,6 +163,7 @@ class MainActivity : AppCompatActivity() {
         // where adjustResize no longer resizes the window.
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val root = android.widget.FrameLayout(this)
+        rootView = root
         // API 35 ignores window.statusBarColor under enforced edge-to-edge,
         // so the padded strips show the view background of the frame — keep
         // it the app near-black, and the system icons light on top of it.
