@@ -118,3 +118,39 @@ func TestWintunDestDirsOrder(t *testing.T) {
 		seen[d] = true
 	}
 }
+
+
+// TestWintunDestDirsRuntimeAndQuotedPath: the installer must scan the same
+// directories WintunPath reads (the runtime dir used to be skipped), and a
+// quoted "Copy as path" value must be cleaned before taking its dir.
+func TestWintunDestDirsRuntimeAndQuotedPath(t *testing.T) {
+	sb := t.TempDir()
+	runtimeDir := t.TempDir()
+	dirs := Dirs{Runtime: runtimeDir, Data: t.TempDir()}
+	quoted := `"` + filepath.Join(sb, "sing-box.exe") + `"`
+	got := wintunDestDirs(quoted, dirs)
+	if len(got) == 0 || got[0] != sb {
+		t.Fatalf("candidates = %v, want the sing-box dir %q first", got, sb)
+	}
+	hasRuntime := false
+	for _, d := range got {
+		if d == runtimeDir {
+			hasRuntime = true
+		}
+	}
+	if !hasRuntime {
+		t.Fatalf("candidates = %v, want the runtime dir %q", got, runtimeDir)
+	}
+}
+
+func TestWintunPathQuotedSingbox(t *testing.T) {
+	sb := t.TempDir()
+	dll := filepath.Join(sb, "wintun.dll")
+	if err := os.WriteFile(dll, []byte("dll"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	quoted := `"` + filepath.Join(sb, "sing-box.exe") + `"`
+	if got := WintunPath(quoted, Dirs{}); got != dll {
+		t.Fatalf("WintunPath(quoted) = %q, want %q", got, dll)
+	}
+}

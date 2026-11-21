@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -202,5 +203,60 @@ func TestZipExtractWisteriaLayout(t *testing.T) {
 	}
 	if len(staged) != 1 || filepath.Base(staged[0]) != bin {
 		t.Fatalf("staged = %v, want exactly %s", staged, bin)
+	}
+}
+
+
+// TestPickSingBoxAssetVariants: the release lists the legacy-windows-7 and
+// fips builds next to the normal one, and their names contain the plain
+// platform string. Picking either of them silently installed a core that
+// cannot talk to current servers.
+func TestPickSingBoxAssetVariants(t *testing.T) {
+	win := []ghAsset{
+		{Name: "sing-box-1.14.0-windows-amd64-legacy-windows-7.zip", URL: "legacy"},
+		{Name: "sing-box-1.14.0-windows-amd64-fips.zip", URL: "fips"},
+		{Name: "sing-box-1.14.0-windows-arm64.zip", URL: "arm"},
+		{Name: "sing-box-1.14.0-windows-amd64.zip", URL: "plain"},
+	}
+	a, err := pickSingBoxAsset("windows", win)
+	if err != nil || a.URL != "plain" {
+		t.Fatalf("windows asset = %v, %v (want plain)", a, err)
+	}
+	linux := []ghAsset{
+		{Name: "sing-box-1.14.0-linux-amd64-legacy.tar.gz", URL: "legacy"},
+		{Name: "sing-box-1.14.0-linux-amd64.tar.gz", URL: "plain"},
+		{Name: "sing-box-1.14.0-linux-arm64.tar.gz", URL: "arm"},
+	}
+	a, err = pickSingBoxAsset("linux", linux)
+	if err != nil || a.URL != "plain" {
+		t.Fatalf("linux asset = %v, %v (want plain)", a, err)
+	}
+	if _, err := pickSingBoxAsset("windows", []ghAsset{{Name: "SFA-1.14.0.apk"}}); err == nil {
+		t.Fatal("an android-only release must error")
+	}
+}
+
+// TestCorePathForNoDoubleSuffix: FindCore appends exeSuffix itself, so
+// passing it "sing-box.exe" made Windows look for sing-box.exe.exe and
+// report a perfectly installed core as missing.
+func TestCorePathForNoDoubleSuffix(t *testing.T) {
+	for _, name := range []string{"sing-box", "xray", "wisteria"} {
+		lookup := coreLookupName(name)
+		if lookup != coreBinary(name) {
+			t.Fatalf("coreLookupName(%q) = %q", name, lookup)
+		}
+		if exeSuffix != "" && strings.HasSuffix(lookup, exeSuffix) {
+			t.Fatalf("FindCore would receive the suffixed name %q and look for %q", lookup, lookup+exeSuffix)
+		}
+	}
+	// An explicit path is returned verbatim: no suffix handling at all.
+	explicit := filepath.Join(t.TempDir(), "sing-box"+exeSuffix)
+	if got := corePathFor("sing-box", explicit); got != explicit {
+		t.Fatalf("explicit path = %q, want %q", got, explicit)
+	}
+	// Whatever BinDir/FindCore resolve, the result must never end with the
+	// suffix repeated.
+	if got := corePathFor("sing-box", ""); exeSuffix != "" && strings.HasSuffix(got, exeSuffix+exeSuffix) {
+		t.Fatalf("corePathFor returned a doubled suffix: %q", got)
 	}
 }

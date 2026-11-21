@@ -449,3 +449,87 @@ func TestLogRing(t *testing.T) {
 		t.Fatalf("since-filter: %v", inc)
 	}
 }
+
+// TestSingBoxModern112Plus pins the 1.12+/1.13+ config generation: the
+// block outbound is gone (replaced by action=reject), the DNS servers are
+// typed, and route.default_domain_resolver is always present so a fresh
+// sing-box.exe starts on a domain-based proxy server.
+func TestSingBoxModern112Plus(t *testing.T) {
+	p := Profile{ID: "sb1", Type: TVMess, Host: "srv.example", Port: 443,
+		Fields: map[string]string{"uuid": "u-1"}}
+	conf, err := SingBoxConfig(p, SingBoxOptions{
+		MixedPort:     2080,
+		BlockDomains:  []string{"ads.example"},
+		BlockCIDRs:    []string{"10.0.0.0/8"},
+		ModernActions: true,
+		NewDNSFormat:  true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(conf, &m); err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range m["outbounds"].([]any) {
+		if o.(map[string]any)["type"] == "block" {
+			t.Fatalf("the block outbound was removed in 1.13: %v", o)
+		}
+	}
+	rules := m["route"].(map[string]any)["rules"].([]any)
+	rejected := 0
+	for _, r := range rules {
+		rm := r.(map[string]any)
+		if rm["action"] == "reject" {
+			rejected++
+			if _, has := rm["outbound"]; has {
+				t.Fatalf("reject rule must not carry an outbound: %v", rm)
+			}
+		}
+	}
+	if rejected != 2 {
+		t.Fatalf("reject rules = %d, want 2: %v", rejected, rules)
+	}
+	dns := m["dns"].(map[string]any)
+	servers := dns["servers"].([]any)
+	hasLocal := false
+	for _, s := range servers {
+		sm := s.(map[string]any)
+		if _, has := sm["address"]; has {
+			t.Fatalf("legacy DNS address in a 1.12+ config: %v", sm)
+		}
+		if sm["type"] == "local" && sm["tag"] == "local" {
+			hasLocal = true
+		}
+	}
+	if !hasLocal {
+		t.Fatalf("dns.servers = %v, want a local server even without RemoteDNS", servers)
+	}
+	if got := m["route"].(map[string]any)["default_domain_resolver"]; got != "local" {
+		t.Fatalf("default_domain_resolver = %v, want local", got)
+	}
+
+	// With a custom resolver the same section must be typed and point the
+	// proxy server's own resolution at it.
+	conf, err = SingBoxConfig(p, SingBoxOptions{
+		MixedPort: 2080, RemoteDNS: "tls://dns.quad9.net",
+		ModernActions: true, NewDNSFormat: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(conf, &m); err != nil {
+		t.Fatal(err)
+	}
+	servers = m["dns"].(map[string]any)["servers"].([]any)
+	remote := servers[0].(map[string]any)
+	if remote["tag"] != "remote" || remote["type"] != "tls" || remote["server"] != "dns.quad9.net" {
+		t.Fatalf("remote DNS server = %v", remote)
+	}
+	if remote["domain_resolver"] != "local" {
+		t.Fatalf("a hostname resolver needs domain_resolver=local: %v", remote)
+	}
+	if got := m["route"].(map[string]any)["default_domain_resolver"]; got != "remote" {
+		t.Fatalf("default_domain_resolver = %v, want remote", got)
+	}
+}

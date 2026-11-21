@@ -19,6 +19,8 @@ package core
 // FAKECORE_PIDFILE appends one line per spawn — tests count core launches.
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -401,5 +403,62 @@ func TestAutoReconnectExponentialBackoffGrows(t *testing.T) {
 	// legitimate attempts need ~3s, so even a slow CI stays far below this.
 	if n := spawns(); n > 50 {
 		t.Fatalf("too many core spawns for 3 attempts (tight loop?): %d", n)
+	}
+}
+
+
+// TestFailSessionFatalDoesNotReconnect: a TUN prerequisite failure is not
+// a flaky server. The exact message must survive into the status, the state
+// must land on disconnected, and no reconnect loop may spawn another core
+// behind a message the user cannot act on.
+func TestFailSessionFatalDoesNotReconnect(t *testing.T) {
+	svc, _, spawns := fakeService(t, "bind_forever", "")
+	tmp := t.TempDir()
+	confFile := filepath.Join(tmp, "tun-fake1.json")
+	if err := os.WriteFile(confFile, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^$")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("dummy core: %v", err)
+	}
+	defer func() { _ = cmd.Wait() }() // reap after the fatal kill
+	_, cancel := context.WithCancel(context.Background())
+	sess := &session{
+		profile:   fakeProfile(),
+		cmd:       cmd,
+		cancel:    cancel,
+		done:      make(chan struct{}),
+		confFile:  confFile,
+		socksAddr: "127.0.0.1:1",
+	}
+	svc.mu.Lock()
+	svc.sess = sess
+	svc.st = Status{State: StateConnecting, ProfileID: "fake1"}
+	svc.mu.Unlock()
+
+	want := "TUN (sing-box) завершился до готовности: exit status 1 — FATAL cannot create adapter"
+	svc.failSessionFatal(sess, errors.New(want))
+
+	st := svc.Status()
+	if st.State != StateDisconnected {
+		t.Fatalf("state = %v, want disconnected", st.State)
+	}
+	if st.Reconnecting || st.Attempt != 0 {
+		t.Fatalf("status still reconnecting: %+v", st)
+	}
+	if st.Error != want {
+		t.Fatalf("error = %q, want the exact fatal message %q", st.Error, want)
+	}
+	select {
+	case <-sess.done:
+	default:
+		t.Fatal("teardown did not finish")
+	}
+	// Longer than backoffInit in fakeService: a reconnect loop would have
+	// spawned the fake core by now.
+	time.Sleep(900 * time.Millisecond)
+	if n := spawns(); n != 0 {
+		t.Fatalf("auto-reconnect spawned %d cores after a fatal TUN error", n)
 	}
 }

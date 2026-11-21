@@ -77,33 +77,12 @@ func probeVersion(bin string) string {
 // pickCoreAsset chooses the amd64 archive of a core release for the
 // running platform (sing-box ships tar.gz for linux, zips for windows).
 func pickCoreAsset(name string, assets []ghAsset) (ghAsset, error) {
+	if name == "sing-box" {
+		return pickSingBoxAsset(runtime.GOOS, assets)
+	}
 	for _, a := range assets {
 		l := strings.ToLower(a.Name)
 		switch name {
-		case "sing-box":
-			// Exact platform suffix first: the release also carries
-			// -legacy-windows-7 and -fips variants whose names contain the
-			// plain one as a substring.
-			want := "-linux-amd64.tar.gz"
-			if runtime.GOOS == "windows" {
-				want = "-windows-amd64.zip"
-			}
-			if strings.HasSuffix(l, want) {
-				return a, nil
-			}
-			// Fallback for an unexpected naming scheme, still excluding
-			// the build variants that must never be picked automatically.
-			if runtime.GOOS == "windows" {
-				if strings.HasSuffix(l, ".zip") && strings.Contains(l, "windows-amd64") &&
-					!strings.Contains(l, "android") && !strings.Contains(l, "legacy") && !strings.Contains(l, "fips") {
-					return a, nil
-				}
-			} else {
-				if strings.HasSuffix(l, ".tar.gz") && strings.Contains(l, "linux-amd64") &&
-					!strings.Contains(l, "android") && !strings.Contains(l, "fips") {
-					return a, nil
-				}
-			}
 		case "xray":
 			if !strings.HasSuffix(l, ".zip") {
 				continue
@@ -124,6 +103,39 @@ func pickCoreAsset(name string, assets []ghAsset) (ghAsset, error) {
 		}
 	}
 	return ghAsset{}, fmt.Errorf("в релизе нет архива для %s amd64", runtime.GOOS)
+}
+
+// pickSingBoxAsset chooses the amd64 archive for goos. The exact platform
+// suffix is checked first: the release also carries -legacy-windows-7 and
+// -fips variants whose names contain the plain one as a substring. Split
+// out of pickCoreAsset so the Windows choice is testable from any host.
+func pickSingBoxAsset(goos string, assets []ghAsset) (ghAsset, error) {
+	want := "-linux-amd64.tar.gz"
+	if goos == "windows" {
+		want = "-windows-amd64.zip"
+	}
+	for _, a := range assets {
+		if strings.HasSuffix(strings.ToLower(a.Name), want) {
+			return a, nil
+		}
+	}
+	// Fallback for an unexpected naming scheme, still excluding the build
+	// variants that must never be picked automatically.
+	for _, a := range assets {
+		l := strings.ToLower(a.Name)
+		if goos == "windows" {
+			if strings.HasSuffix(l, ".zip") && strings.Contains(l, "windows-amd64") &&
+				!strings.Contains(l, "android") && !strings.Contains(l, "legacy") && !strings.Contains(l, "fips") {
+				return a, nil
+			}
+		} else {
+			if strings.HasSuffix(l, ".tar.gz") && strings.Contains(l, "linux-amd64") &&
+				!strings.Contains(l, "android") && !strings.Contains(l, "fips") {
+				return a, nil
+			}
+		}
+	}
+	return ghAsset{}, fmt.Errorf("в релизе нет архива для %s amd64", goos)
 }
 
 // coreBinary maps a core name to the binary file it ships: the wisteria
@@ -179,6 +191,10 @@ func CoreUpdateCheck(name, explicitPath string) (UpdateInfo, error) {
 	return info, nil
 }
 
+// coreLookupName is the bare name corePathFor hands to FindCore. FindCore
+// appends exeSuffix itself, so this must never carry it.
+func coreLookupName(name string) string { return coreBinary(name) }
+
 // corePathFor resolves the binary whose version Check reports: the explicit
 // path if set, else the app's own bin/ copy, else whatever FindCore finds.
 func corePathFor(name, explicitPath string) string {
@@ -195,7 +211,7 @@ func corePathFor(name, explicitPath string) string {
 	// FindCore appends exeSuffix itself; passing "sing-box.exe" made it
 	// look for "sing-box.exe.exe" on Windows and report the installed core
 	// as absent (check → false "update available" loop).
-	return FindCore(coreBinary(name))
+	return FindCore(coreLookupName(name))
 }
 
 // CoreUpdateApply downloads the latest release and replaces the app's own
