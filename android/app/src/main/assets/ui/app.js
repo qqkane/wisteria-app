@@ -640,11 +640,9 @@ function renderGroup(key, title, metaHtml, items, emptyKey, actionsHtml) {
     </div>`;
 }
 
-function renderProfiles() {
-  // Profiles whose subscription no longer exists (e.g. a hand-edited
-  // store) fall back to the manual group instead of vanishing.
+function renderProfilesList() {
   const manual = S.profiles.filter((p) => !p.sub_id || !S.subs.some((x) => x.id === p.sub_id));
-  const visible = (list) => sortProfiles(list.filter(matchProfile));
+  const visible = (list) => list.filter(matchProfile);
   const groups = S.subs.map((s) => {
     const meta = s.error
       ? `<div class="sub-meta sub-err">${esc(s.error)}</div>`
@@ -655,6 +653,12 @@ function renderProfiles() {
     return renderGroup("sub:" + s.id, s.name, meta,
       visible(S.profiles.filter((p) => p.sub_id === s.id)), "subs.emptyGroup", actions);
   }).join("");
+  return groups + (S.subs.length
+    ? renderGroup("manual", t("profiles.manual"), "", visible(manual), "profiles.empty", "")
+    : profileGrid(visible(manual), "profiles.empty"));
+}
+
+function renderProfiles() {
   return `
     <div class="servers-header">
       <h2>${esc(t("profiles.title"))}</h2>
@@ -668,17 +672,9 @@ function renderProfiles() {
       <div class="pf-actions">
         <button class="ghost-btn" id="btn-ping-all" ${S.pfPingBusy ? "disabled" : ""}>${I.ping}<span>${esc(t("profiles.pingAll"))}</span></button>
         <button class="ghost-btn" id="btn-fastest">${I.zap}<span>${esc(t("profiles.fastest"))}</span></button>
-        <select id="pf-sort" class="pf-sort" title="${esc(t("profiles.sort"))}">
-          <option value="default" ${S.pfSort === "default" ? "selected" : ""}>${esc(t("profiles.sortDefault"))}</option>
-          <option value="name" ${S.pfSort === "name" ? "selected" : ""}>${esc(t("profiles.sortName"))}</option>
-          <option value="ping" ${S.pfSort === "ping" ? "selected" : ""}>${esc(t("profiles.sortPing"))}</option>
-        </select>
       </div>
     </div>
-    ${groups}
-    ${S.subs.length
-      ? renderGroup("manual", t("profiles.manual"), "", visible(manual), "profiles.empty", "")
-      : profileGrid(visible(manual), "profiles.empty")}`;
+    <div id="pf-list">${renderProfilesList()}</div>`;
 }
 
 function renderLogs() {
@@ -717,7 +713,7 @@ async function pullLogHealth() {
     }
   } catch (e) { /* bridge not ready */ }
 }
-setInterval(() => { if (S.tab === "logs") pullLogHealth(); }, 2000);
+setInterval(() => { if (!document.hidden && S.tab === "logs") pullLogHealth(); }, 2000);
 
 // ---------- diagnostics (wisteria) ----------
 // The wisteria core classifies its own connect loop: "cannot reach" = no
@@ -738,13 +734,14 @@ function diagEvText(e) {
 }
 
 function diagInner(d) {
-  if (!d.active) {
+  const ev = d.events || [];
+  if (!d.active && !ev.length) {
     return `
       <div class="diag-banner warn"><div class="diag-banner-ic">${I.lock}</div><div><b>${esc(t("diag.inactive"))}</b><p>${esc(t("diag.inactiveHint"))}</p></div></div>
       <button class="ghost-btn" id="btn-diag-logs">${esc(t("diag.openLogs"))}</button>`;
   }
   const [cls, key] = diagBanner(d);
-  const ev = d.events || [], srv = d.servers || [];
+  const srv = d.servers || [];
   const attempts = ev.filter((e) => e.kind === "retry").length;
   const rtts = srv.map((s) => s.rtt_ms).filter((r) => r > 0);
   const best = rtts.length ? Math.min(...rtts) : 0;
@@ -807,7 +804,7 @@ async function pullWDiag() {
   } catch (e) { /* diagnostics is best-effort */ }
   finally { wdiagBusy = false; }
 }
-setInterval(() => { if (S.tab === "diag") pullWDiag(); }, 2000);
+setInterval(() => { if (!document.hidden && S.tab === "diag") pullWDiag(); }, 2000);
 
 function renderSettings() {
   const tabs = [
@@ -1079,11 +1076,11 @@ async function importFromClipboard() {
     const parts = [];
     if (r.subscriptions) parts.push(t("toast.clipSubs").replace("{n}", r.subscriptions));
     if (r.added && r.added.length) parts.push(t("toast.clipProfiles").replace("{n}", r.added.length));
-    showToast(parts.length ? parts.join(" · ") : t("toast.clipNone"));
     if (r.errors && r.errors.length) {
       const fe = r.errors[0];
-      showToast((fe.line ? fe.line + ": " : "") + fe.error);
+      parts.push("✕ " + (fe.line ? fe.line + ": " : "") + fe.error);
     }
+    showToast(parts.length ? parts.join(" · ") : t("toast.clipNone"));
   } catch (e) { showToast((e && e.message) || e); }
 }
 
@@ -1128,6 +1125,13 @@ function openQrModal(id) {
 }
 
 let editId = "";
+function syncEditTlsRows() {
+  const tls = !!$("e-transport") && $("e-transport").value === "tls";
+  const sniGroup = $("e-sni") && $("e-sni").closest(".input-group");
+  const insecWrap = $("e-insecure") && $("e-insecure").closest("label");
+  if (sniGroup) sniGroup.classList.toggle("hidden", !tls);
+  if (insecWrap) insecWrap.classList.toggle("hidden", !tls);
+}
 function openEditModal(id) {
   const p = S.profiles.find((x) => x.id === id);
   if (!p) return;
@@ -1138,6 +1142,7 @@ function openEditModal(id) {
   $("e-transport").value = p.transport === "tls" ? "tls" : "tcp";
   $("e-sni").value = p.tls_sni || "";
   $("e-insecure").checked = !!p.tls_insecure;
+  syncEditTlsRows();
   $("modal-edit").classList.add("show");
 }
 
@@ -1254,6 +1259,66 @@ function syncSegments() {
   });
 }
 
+function wireProfileList(scope) {
+  scope.querySelectorAll(".server-list-item").forEach((row) => {
+    row.addEventListener("click", async (ev) => {
+      if (ev.target.closest(".sli-act")) return;
+      if (S.busy) { showToast(t("toast.busy")); return; }
+      S.selected = row.dataset.id;
+      await api().SetActive(row.dataset.id);
+      const wasConnected = S.state.state === "connected";
+      renderContent();
+      if (wasConnected) {
+        S.busy = true;
+        markConnecting(row.dataset.id);
+        try { await withTimeout(api().Connect(row.dataset.id), 45000, t("toast.stuck")); }
+        catch (e) {
+          showToast((e && e.message) || e);
+          try { renderState(await api().GetState()); } catch (_) {}
+        }
+        finally { S.busy = false; }
+      }
+    });
+    row.addEventListener("dblclick", (ev) => {
+      if (ev.target.closest(".sli-act")) return;
+      switchTab("vpn");
+    });
+  });
+  scope.querySelectorAll(".sli-act.pingb").forEach((b) => b.addEventListener("click", async (ev) => {
+    ev.stopPropagation();
+    await api().PingProfile(b.dataset.id);
+    await loadProfiles();
+  }));
+  scope.querySelectorAll(".sli-act.del").forEach((b) => b.addEventListener("click", async (ev) => {
+    ev.stopPropagation();
+    if (b.closest(".sub-head")) {
+      if (!(await askConfirm(t("subs.confirmDelete")))) return;
+      try { await api().DeleteSubscription(b.dataset.id); await loadSubs(); await loadProfiles(); }
+      catch (e) { showToast((e && e.message) || e); }
+      return;
+    }
+    if (!(await askConfirm(t("confirm.delete")))) return;
+    try { await api().DeleteProfile(b.dataset.id); await loadProfiles(); }
+    catch (e) { showToast((e && e.message) || e); }
+  }));
+  scope.querySelectorAll(".sli-act.shareb").forEach((b) => b.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    openQrModal(b.dataset.id);
+  }));
+  scope.querySelectorAll(".sli-act.editb").forEach((b) => b.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    openEditModal(b.dataset.id);
+  }));
+  scope.querySelectorAll(".sub-head").forEach((h) => h.addEventListener("click", (ev) => {
+    if (ev.target.closest(".sli-act")) return;
+    toggleCollapsed(h.dataset.key);
+  }));
+  scope.querySelectorAll(".sub-refresh").forEach((b) => b.addEventListener("click", async (ev) => {
+    ev.stopPropagation();
+    await refreshSub(b.dataset.id);
+  }));
+}
+
 function wireContent() {
   const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
   if (isAndroid) { segmentify("s-loglevel"); segmentify("s-tunstack"); segmentify("s-splitmode"); segmentify("s-wist-preset"); }
@@ -1285,66 +1350,15 @@ function wireContent() {
   on("card-profile", "click", () => switchTab("profiles"));
 
   on("btn-add", "click", openModal);
-  document.querySelectorAll(".server-list-item").forEach((row) => {
-    row.addEventListener("click", async (ev) => {
-      if (ev.target.closest(".sli-act")) return;
-      if (S.busy) { showToast(t("toast.busy")); return; }
-      S.selected = row.dataset.id;
-      await api().SetActive(row.dataset.id);
-      // Momentary switching: clicking a server while connected moves the
-      // tunnel to it (the backend stops the old session first). The busy
-      // flag keeps a second click / double-click from starting a parallel
-      // session while the switch is still running.
-      const wasConnected = S.state.state === "connected";
-      renderContent();
-      if (wasConnected) {
-        S.busy = true;
-        markConnecting(row.dataset.id);
-        try { await withTimeout(api().Connect(row.dataset.id), 45000, t("toast.stuck")); }
-        catch (e) {
-          showToast((e && e.message) || e);
-          try { renderState(await api().GetState()); } catch (_) { /* keep local view */ }
-        }
-        finally { S.busy = false; }
-      }
-    });
-    row.addEventListener("dblclick", async (ev) => {
-      if (ev.target.closest(".sli-act")) return;
-      S.selected = row.dataset.id;
-      await api().SetActive(row.dataset.id);
-      switchTab("vpn"); // the click handler above already connects
-    });
-  });
-  document.querySelectorAll(".sli-act.pingb").forEach((b) => b.addEventListener("click", async () => {
-    await api().PingProfile(b.dataset.id);
-    await loadProfiles();
-  }));
-  document.querySelectorAll(".sli-act.del").forEach((b) => b.addEventListener("click", async (ev) => {
-    ev.stopPropagation();
-    if (!(await askConfirm(t("confirm.delete")))) return;
-    try { await api().DeleteProfile(b.dataset.id); await loadProfiles(); }
-    catch (e) { showToast((e && e.message) || e); }
-  }));
-  document.querySelectorAll(".sli-act.shareb").forEach((b) => b.addEventListener("click", (ev) => {
-    ev.stopPropagation();
-    openQrModal(b.dataset.id);
-  }));
-  document.querySelectorAll(".sli-act.editb").forEach((b) => b.addEventListener("click", (ev) => {
-    ev.stopPropagation();
-    openEditModal(b.dataset.id);
-  }));
+  wireProfileList($("pf-list") || document);
 
-  // ---- profiles toolbar ----
+  // In-place search: only re-render #pf-list so the input stays mounted
+  // and Android IME composition / scroll position are never disturbed.
   on("pf-search", "input", (ev) => {
     S.pfFilter = ev.target.value;
-    // Re-render on every keystroke would steal the caret: filter in place by
-    // re-rendering the groups only, then restore focus/selection.
-    const pos = ev.target.selectionStart;
-    renderContent();
-    const again = $("pf-search");
-    if (again) { again.focus(); try { again.setSelectionRange(pos, pos); } catch (e) {} }
+    const box = $("pf-list");
+    if (box) { box.innerHTML = renderProfilesList(); wireProfileList(box); }
   });
-  on("pf-sort", "change", (ev) => { S.pfSort = ev.target.value; renderContent(); });
   on("btn-ping-all", "click", runPingAll);
   on("btn-fastest", "click", pickFastest);
 
@@ -1357,29 +1371,9 @@ function wireContent() {
   on("btn-onboard-add", "click", openModal);
   on("btn-retry", "click", () => { const b = $("btn-toggle"); if (b) b.click(); });
   on("card-ip", "click", () => { if (S.state.state === "connected") checkExtIP(); });
-  // Collapse/expand profile groups; state persists in localStorage.
-  document.querySelectorAll(".sub-head").forEach((h) => h.addEventListener("click", (ev) => {
-    if (ev.target.closest(".sli-act")) return;
-    toggleCollapsed(h.dataset.key);
-  }));
-  document.querySelectorAll(".sub-refresh").forEach((b) => b.addEventListener("click", async (ev) => {
-    ev.stopPropagation();
-    await refreshSub(b.dataset.id);
-  }));
-  document.querySelectorAll(".sub-head .sli-act.del").forEach((b) => b.addEventListener("click", async (ev) => {
-    ev.stopPropagation();
-    if (!(await askConfirm(t("subs.confirmDelete")))) return;
-    try {
-      await api().DeleteSubscription(b.dataset.id);
-      await loadSubs();
-      await loadProfiles();
-    } catch (e) { showToast((e && e.message) || e); }
-  }));
-
-  on("btn-clear-logs", "click", () => {
-    // Keep S.lastLogSeq: resetting it would make the next pull refetch the
-    // whole ring and re-add the history that was just cleared.
+  on("btn-clear-logs", "click", async () => {
     $("log-view").textContent = "";
+    try { if (api().ClearLogs) await api().ClearLogs(); } catch (e) {}
   });
   // Copy is for support: the log alone says nothing about the build or the
   // state, so prepend a small header with both.
@@ -1761,7 +1755,7 @@ function uptimeHTML(iso) {
     m + "<span class='stat-unit'>m </span>" + ss + "<span class='stat-unit'>s</span>";
 }
 setInterval(() => {
-  if (S.tab !== "vpn" || S.state.state !== "connected") return;
+  if (document.hidden || S.tab !== "vpn" || S.state.state !== "connected") return;
   const el = $("stat-uptime");
   if (!el) return;
   const html = uptimeHTML(S.state.started_at);
@@ -1775,7 +1769,7 @@ setInterval(() => {
 // repaint whenever the state differs. Only the state string is compared so
 // a failure's error box is not wiped by a matching state.
 setInterval(async () => {
-  if (S.busy) return; // the optimistic connecting state is in flight
+  if (document.hidden || S.busy) return; // paused while backgrounded or connecting
   try {
     const st = await api().GetState();
     // Right after Connect the Android VPN service may not have started the
@@ -1994,6 +1988,13 @@ document.querySelectorAll("#modal-share, #modal-edit").forEach((ov) => {
 $("qr-close").addEventListener("click", closeShareModal);
 $("edit-close").addEventListener("click", closeEditModal);
 $("btn-edit-save").addEventListener("click", saveEditedProfile);
+if ($("e-transport")) $("e-transport").addEventListener("change", syncEditTlsRows);
+document.addEventListener("keydown", (ev) => {
+  if (ev.key !== "Escape") return;
+  if ($("modal-add") && $("modal-add").classList.contains("show")) closeModal();
+  else if ($("modal-share") && $("modal-share").classList.contains("show")) closeShareModal();
+  else if ($("modal-edit") && $("modal-edit").classList.contains("show")) closeEditModal();
+});
 $("btn-qr-copy").addEventListener("click", async () => {
   try { await api().CopyToClipboard(S.pendingShare); showToast(t("toast.copied")); }
   catch (e) { showToast((e && e.message) || e); }
@@ -2158,7 +2159,7 @@ async function maybeAutoConnect() {
 // visible and a session is up: on a phone a 1 s timer is real battery.
 let trafficBusy = false;
 setInterval(async () => {
-  if (S.tab !== "vpn" || S.state.state !== "connected" || trafficBusy) return;
+  if (document.hidden || S.tab !== "vpn" || S.state.state !== "connected" || trafficBusy) return;
   trafficBusy = true;
   try {
     const r = await api().GetTrafficStats();
@@ -2316,8 +2317,22 @@ whenReady(async () => {
     S.profiles = (await api().ListProfiles()) || [];
     S.subs = (await api().ListSubscriptions()) || S.subs;
     S.subBusy = {};
-    if (S.tab === "profiles" || S.tab === "vpn") renderContent();
-    else renderSidebarFooter();
+    if (S.tab === "profiles") {
+      renderContent();
+    } else if (S.tab === "vpn") {
+      const id = S.state.profile_id || S.selected;
+      const p = S.profiles.find((x) => x.id === id);
+      const nameEl = document.querySelector("#card-profile .srv-name");
+      if (nameEl && p) nameEl.innerHTML = esc(p.name) + tlsBadge(p);
+      const pingEl = document.querySelector("#card-profile .srv-ping");
+      if (pingEl && p) {
+        const lat = p.latency_ms ? (p.latency_ms < 0 ? "n/a" : p.latency_ms + " ms") : "";
+        pingEl.textContent = p.host + ":" + p.port + (lat ? " · " + lat : "") + mirrorsLabel(p);
+      }
+      renderSidebarFooter();
+    } else {
+      renderSidebarFooter();
+    }
   });
   await loadSettings();
   await loadProfiles();

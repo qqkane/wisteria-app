@@ -171,6 +171,45 @@ func (s *Store) Add(p Profile) (Profile, error) {
 	return p, s.saveLocked()
 }
 
+// UpdateProfile edits basic fields of a profile (primarily wisteria profiles).
+func (s *Store) UpdateProfile(id, name, host string, port int, transport, tlsSNI string, tlsInsecure bool) (Profile, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.Profiles {
+		if s.Profiles[i].ID == id {
+			cand := s.Profiles[i]
+			if name = strings.TrimSpace(name); name != "" {
+				cand.Name = name
+			}
+			if host = strings.TrimSpace(host); host != "" {
+				cand.Host = host
+			}
+			if port > 0 && port <= 65535 {
+				cand.Port = port
+			}
+			if cand.Type == TWisteria {
+				cand.Transport = transport
+				if transport == "tls" {
+					cand.TLSSNI = tlsSNI
+					cand.TLSInsecure = tlsInsecure
+				} else {
+					cand.TLSSNI = ""
+					cand.TLSInsecure = false
+				}
+				if err := cand.normalizeTLS(); err != nil {
+					return Profile{}, err
+				}
+			}
+			s.Profiles[i] = cand
+			if err := s.saveLocked(); err != nil {
+				return Profile{}, err
+			}
+			return cand, nil
+		}
+	}
+	return Profile{}, ErrNotFound
+}
+
 func (s *Store) Rename(id, name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

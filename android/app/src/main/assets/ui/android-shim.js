@@ -426,7 +426,7 @@
   // the last resort.
   setTimeout(() => {
     const cw = document.getElementById("content-wrapper");
-    if (!cw || cw.children.length > 0 || document.querySelector(".modal-overlay")) return;
+    if (!cw || cw.children.length > 0 || document.querySelector(".modal-overlay.show")) return;
     Promise.all([
       call("GetState").catch(() => null),
       call("ListProfiles").catch(() => null),

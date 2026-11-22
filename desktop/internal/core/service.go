@@ -24,6 +24,7 @@ package core
 
 import (
 	"bufio"
+	"encoding/json"
 	"context"
 	"errors"
 	"fmt"
@@ -394,7 +395,7 @@ func NewService(dirs Dirs, ring *LogRing, notify func()) *Service {
 	if notify == nil {
 		notify = func() {}
 	}
-	return &Service{
+	svc := &Service{
 		dirs:             dirs,
 		ring:             ring,
 		notify:           notify,
@@ -405,6 +406,8 @@ func NewService(dirs Dirs, ring *LogRing, notify func()) *Service {
 		backoffInit:      time.Second,
 		backoffMax:       30 * time.Second,
 	}
+	svc.loadDiagHistory()
+	return svc
 }
 
 func (s *Service) LoadSettings() Settings {
@@ -615,9 +618,8 @@ func (s *Service) start(p Profile, isReconnect bool, attempt int) (err error) {
 	}
 	s.sess = sess
 	if !isReconnect {
-		// A fresh manual connect is a fresh diagnostics timeline; an
-		// auto-reconnect keeps the history of the incident it recovers from.
-		s.wstEvents = nil
+		// Keep diagnostics history across connects for 24 hours; prune older entries.
+		s.pruneDiagLocked()
 	}
 	s.wstHealth = CoreHealth{}
 	s.st = Status{
@@ -1403,12 +1405,16 @@ func (s *Service) noteWisteriaLine(line string) bool {
 		return false
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	const wstEventCap = 300
+	s.pruneDiagLocked()
+	const wstEventCap = 500
 	if len(s.wstEvents) >= wstEventCap {
-		s.wstEvents = s.wstEvents[1:]
+		s.wstEvents = s.wstEvents[len(s.wstEvents)-wstEventCap+1:]
 	}
 	s.wstEvents = append(s.wstEvents, ev)
+	snapshot := make([]WEvent, len(s.wstEvents))
+	copy(snapshot, s.wstEvents)
+	s.mu.Unlock()
+	s.saveDiagHistory(snapshot)
 	return false
 }
 
@@ -1422,8 +1428,71 @@ func (s *Service) CoreHealth() CoreHealth {
 
 // WisteriaDiag is the diagnostics page payload: the session state, the
 // core's probe rows (--status file) and the classified event feed.
+func (s *Service) pruneDiagLocked() {
+	cutoff := time.Now().Add(-LogRetention)
+	keep := s.wstEvents[:0]
+	for _, e := range s.wstEvents {
+		if !e.At.Before(cutoff) {
+			keep = append(keep, e)
+		}
+	}
+	s.wstEvents = keep
+}
+
+func (s *Service) diagHistoryPath() string {
+	if s.dirs.Data == "" {
+		return ""
+	}
+	return filepath.Join(s.dirs.Data, "diag.json")
+}
+
+func (s *Service) loadDiagHistory() {
+	p := s.diagHistoryPath()
+	if p == "" {
+		return
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return
+	}
+	var events []WEvent
+	if err := json.Unmarshal(data, &events); err != nil {
+		return
+	}
+	s.mu.Lock()
+	s.wstEvents = events
+	s.pruneDiagLocked()
+	s.mu.Unlock()
+}
+
+func (s *Service) saveDiagHistory(events []WEvent) {
+	p := s.diagHistoryPath()
+	if p == "" {
+		return
+	}
+	data, err := json.Marshal(events)
+	if err != nil {
+		return
+	}
+	tmp := p + ".tmp"
+	if os.WriteFile(tmp, data, 0o600) == nil {
+		_ = os.Rename(tmp, p)
+	}
+}
+
+// ClearDiag wipes the 24h diagnostics history from memory and disk.
+func (s *Service) ClearDiag() {
+	s.mu.Lock()
+	s.wstEvents = nil
+	s.mu.Unlock()
+	if p := s.diagHistoryPath(); p != "" {
+		_ = os.Remove(p)
+	}
+}
+
 func (s *Service) WisteriaDiag() WisteriaDiag {
 	s.mu.Lock()
+	s.pruneDiagLocked()
 	st := s.st
 	active := s.st.State != StateDisconnected && s.st.Type == string(TWisteria)
 	path := s.wstStatus

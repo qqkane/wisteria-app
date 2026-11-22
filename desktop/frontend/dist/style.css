@@ -7,7 +7,7 @@
   --accent: #f06888; --accent-rgb: 240, 104, 136;
 }
 * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color: transparent; }
-body { font-family: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif; background: #050505; color: var(--fg); height: 100vh; overflow: hidden; user-select: none; }
+body { font-family: 'Manrope', 'Segoe UI', system-ui, sans-serif; background: #14101f; color: var(--fg); height: 100vh; overflow: hidden; user-select: none; }
 #app { display: flex; height: 100vh; width: 100%; position: relative; overflow: hidden; transition: color .4s, background .4s; }
 .bgfx { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; }
 
@@ -51,7 +51,7 @@ body { font-family: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif; backgrou
 .theme-arctic .sli-act:hover { background: rgba(42,100,180,0.1); color: #16283b; }
 .theme-arctic .submit-btn, .theme-arctic .add-btn, .theme-arctic .connect-btn.connected { color: #fff; }
 .theme-arctic .import-errors .err { color: #c03535; }
-.theme-arctic .error-box { background: rgba(42,100,180,0.08); }
+.theme-arctic .error-box { background: rgba(192,53,53,0.09); border-color: rgba(192,53,53,0.34); }
 
 /* native <select> popups: Chromium takes the popup colors from the option
    elements and the control's color-scheme — with a translucent select
@@ -137,7 +137,7 @@ select option, select optgroup { background-color: var(--surface); color: var(--
 .stat-label svg { width: 11px; height: 11px; }
 .stat-value { font-size: 20px; font-weight: 700; font-family: 'JetBrains Mono', monospace; color: var(--accent); }
 .stat-unit { font-size: 10px; font-weight: 400; color: var(--muted); }
-.error-box { margin-top: 16px; max-width: 500px; padding: 12px 16px; border-radius: 14px; background: rgba(var(--accent-rgb), .08); border: 1px solid rgba(var(--accent-rgb), .3); color: var(--fg); font-size: 13px; white-space: pre-wrap; user-select: text; }
+.error-box { margin-top: 16px; max-width: 500px; padding: 12px 16px; border-radius: 14px; background: rgba(240, 82, 82, .11); border: 1px solid rgba(240, 82, 82, .38); color: var(--fg); font-size: 13px; white-space: pre-wrap; user-select: text; }
 
 /* profiles screen */
 .servers-header { display: flex; justify-content: space-between; align-items: center; margin: 20px 0 24px; width: 100%; }
@@ -425,3 +425,21 @@ textarea:focus-visible, [tabindex]:focus-visible {
 /* "Open logs" inside the error box: the error names the symptom, the log
    tab holds the line that explains it. */
 .err-logs-btn { display: inline-block; margin-top: 10px; padding: 6px 14px; font-size: 12px; }
+
+/* ---------- profiles toolbar, QR & edit modals (UX parity) ---------- */
+.pf-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; width: 100%; margin: 0 0 16px; }
+.pf-search { flex: 1 1 220px; display: flex; align-items: center; gap: 9px; padding: 0 12px; background: var(--card); backdrop-filter: blur(20px); border: 1px solid var(--border); border-radius: 12px; }
+.pf-search:focus-within { border-color: rgba(var(--accent-rgb), .5); }
+.pf-search svg { width: 15px; height: 15px; color: var(--muted); flex-shrink: 0; }
+.pf-search input { flex: 1; min-width: 0; padding: 10px 0; border: none; outline: none; background: none; color: var(--fg); font-family: inherit; font-size: 13.5px; }
+.pf-toolbar .ghost-btn { display: inline-flex; align-items: center; gap: 7px; padding: 9px 13px; font-size: 12.5px; }
+.pf-toolbar .ghost-btn svg { width: 14px; height: 14px; }
+.pf-sort { width: auto; min-width: 134px; padding: 9px 11px; font-family: inherit; font-size: 12.5px; background: var(--card); }
+.share-box { max-width: 360px; }
+.qr-wrap { display: flex; justify-content: center; margin: 4px 0 10px; background: #fff; border-radius: 14px; padding: 12px; }
+.qr-wrap svg { width: 100%; max-width: 240px; height: auto; display: block; }
+.qr-hint { text-align: center; font-size: 12px; color: var(--muted); margin-bottom: 14px; }
+.share-actions { display: flex; gap: 10px; }
+.share-actions .ghost-btn { flex: 1; }
+.edit-box { max-width: 440px; }
+.sli-lat, .srv-ping { font-variant-numeric: tabular-nums; }

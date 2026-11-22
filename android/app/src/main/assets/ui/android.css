@@ -87,10 +87,6 @@ html.platform-android .app-content { overflow-x: hidden; }
   .set-grid > * { min-width: 0; }
   .set-grid div[style*="display:flex"] { flex-wrap: wrap; }
   .upd-banner { flex-wrap: wrap; }
-  /* very narrow phones: stack label above control instead of squeezing */
-  @media (max-width: 380px) {
-    .set-grid { grid-template-columns: minmax(0, 1fr); }
-  }
 
 
 
@@ -355,3 +351,8 @@ html.platform-android .qr-hint { text-align: center; font-size: 12px; color: var
 html.platform-android .share-actions { display: flex; gap: 10px; }
 html.platform-android .share-actions .ghost-btn { flex: 1; }
 html.platform-android .edit-box { max-width: 420px; }
+
+/* very narrow phones: stack label above control instead of squeezing */
+@media (max-width: 380px) {
+  .set-grid { grid-template-columns: minmax(0, 1fr); }
+}

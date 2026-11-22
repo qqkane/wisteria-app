@@ -31,6 +31,10 @@ const I = {
   refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>',
   clipboard: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>',
   activity: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
+  share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>',
+  edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
+  search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
+  zap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
 };
 
 const THEMES = [
@@ -155,6 +159,16 @@ const I18N = {
     "toast.busy": "Идёт подключение — секунду",
     "toast.clipSubs": "подписок: {n}", "toast.clipProfiles": "профилей: {n}", "toast.clipNone": "Ничего нового в буфере",
     "toast.stuck": "Подключение зависло — попробуйте ещё раз",
+    "profiles.search": "Поиск по имени или адресу…",
+    "profiles.sortDefault": "Как добавлены", "profiles.sortName": "По имени", "profiles.sortPing": "По пингу",
+    "profiles.pingAll": "Пинговать все", "profiles.fastest": "Самый быстрый",
+    "profiles.share": "Поделиться", "profiles.edit": "Изменить",
+    "profiles.noRaw": "У профиля нет исходной ссылки",
+    "profiles.fastestNone": "Нет профилей с известным пингом — сначала пропингуйте",
+    "profiles.fastestDone": "Выбран «{name}» · {ms} ms",
+    "edit.title": "Изменить профиль", "edit.save": "Сохранить",
+    "qr.title": "Поделиться профилем", "qr.hint": "Отсканируйте камерой телефона", "qr.copy": "Копировать ссылку",
+    "toast.copied": "Скопировано",
   },
   en: {
     "brand": "Wisteria",
@@ -262,6 +276,16 @@ const I18N = {
     "toast.busy": "Connection in progress — one moment",
     "toast.clipSubs": "subscriptions: {n}", "toast.clipProfiles": "profiles: {n}", "toast.clipNone": "Nothing new in the clipboard",
     "toast.stuck": "Connection is stuck — please try again",
+    "profiles.search": "Search by name or address…",
+    "profiles.sortDefault": "As added", "profiles.sortName": "By name", "profiles.sortPing": "By ping",
+    "profiles.pingAll": "Ping all", "profiles.fastest": "Fastest",
+    "profiles.share": "Share", "profiles.edit": "Edit",
+    "profiles.noRaw": "This profile has no original link",
+    "profiles.fastestNone": "No profile has a known ping — ping them first",
+    "profiles.fastestDone": "Selected «{name}» · {ms} ms",
+    "edit.title": "Edit profile", "edit.save": "Save",
+    "qr.title": "Share profile", "qr.hint": "Scan with your phone camera", "qr.copy": "Copy link",
+    "toast.copied": "Copied",
   },
 };
 let lang = "ru";
@@ -283,7 +307,8 @@ const EXTRA = {
 
 // ---------- state ----------
 const S = {
-  tab: "vpn", setTab: "look", theme: "sunset", customTheme: null, uiScale: 100, profiles: [], selected: "", lastLogSeq: 0,
+  tab: "vpn", setTab: "look", theme: "lilac", customTheme: null, uiScale: 100, profiles: [], selected: "", lastLogSeq: 0,
+  pfFilter: "", pfSort: "default", pfPingBusy: false, pendingShare: "",
   state: { state: "disconnected" }, uptimeTimer: null,
   subs: [], subBusy: {}, busy: false, // busy = a Connect is in flight
   version: "", upd: null, updBusy: false, updReady: false, coreUpd: {},
@@ -511,6 +536,24 @@ function toggleCollapsed(key) {
   renderContent();
 }
 
+function matchProfile(p) {
+  const f = S.pfFilter.trim().toLowerCase();
+  if (!f) return true;
+  return String(p.name || "").toLowerCase().includes(f) ||
+    (String(p.host || "") + ":" + (p.port || "")).toLowerCase().includes(f);
+}
+
+function sortProfiles(list) {
+  const arr = list.slice();
+  if (S.pfSort === "name") {
+    arr.sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), lang));
+  } else if (S.pfSort === "ping") {
+    const rank = (p) => { const l = Number(p.latency_ms) || 0; return l > 0 ? l : l < 0 ? 1e9 : 2e9; };
+    arr.sort((a, b) => rank(a) - rank(b));
+  }
+  return arr;
+}
+
 function profileCard(p) {
   const active = p.id === S.selected;
   const lat = p.latency_ms
@@ -524,6 +567,8 @@ function profileCard(p) {
         <div class="sli-addr">${esc(p.host)}:${p.port}</div>
         ${lat}
       </div>
+      ${p.raw ? `<button class="sli-act shareb" title="${esc(t("profiles.share"))}" data-id="${p.id}">${I.share}</button>` : ""}
+      ${p.type === "wisteria" ? `<button class="sli-act editb" title="${esc(t("profiles.edit"))}" data-id="${p.id}">${I.edit}</button>` : ""}
       <button class="sli-act pingb" title="ping" data-id="${p.id}">${I.ping}</button>
       <button class="sli-act del" title="delete" data-id="${p.id}">${I.trash}</button>
       <span class="sli-check" style="${active ? "" : "display:none"}">${I.check}</span>
@@ -553,10 +598,9 @@ function renderGroup(key, title, metaHtml, items, emptyKey, actionsHtml) {
     </div>`;
 }
 
-function renderProfiles() {
-  // Profiles whose subscription no longer exists (e.g. a hand-edited
-  // store) fall back to the manual group instead of vanishing.
+function renderProfilesList() {
   const manual = S.profiles.filter((p) => !p.sub_id || !S.subs.some((x) => x.id === p.sub_id));
+  const visible = (list) => sortProfiles(list.filter(matchProfile));
   const groups = S.subs.map((s) => {
     const meta = s.error
       ? `<div class="sub-meta sub-err">${esc(s.error)}</div>`
@@ -565,8 +609,14 @@ function renderProfiles() {
       <button class="sli-act sub-refresh ${S.subBusy[s.id] ? "spin" : ""}" title="${esc(t("subs.refresh"))}" data-id="${s.id}">${I.refresh}</button>
       <button class="sli-act del" title="delete" data-id="${s.id}">${I.trash}</button>`;
     return renderGroup("sub:" + s.id, s.name, meta,
-      S.profiles.filter((p) => p.sub_id === s.id), "subs.emptyGroup", actions);
+      visible(S.profiles.filter((p) => p.sub_id === s.id)), "subs.emptyGroup", actions);
   }).join("");
+  return groups + (S.subs.length
+    ? renderGroup("manual", t("profiles.manual"), "", visible(manual), "profiles.empty", "")
+    : profileGrid(visible(manual), "profiles.empty"));
+}
+
+function renderProfiles() {
   return `
     <div class="servers-header">
       <h2>${esc(t("profiles.title"))}</h2>
@@ -575,10 +625,17 @@ function renderProfiles() {
         <button class="add-btn" id="btn-add" title="${esc(t("add.title"))}">${I.plus}</button>
       </div>
     </div>
-    ${groups}
-    ${S.subs.length
-      ? renderGroup("manual", t("profiles.manual"), "", manual, "profiles.empty", "")
-      : profileGrid(manual, "profiles.empty")}`;
+    <div class="pf-toolbar">
+      <div class="pf-search">${I.search}<input id="pf-search" type="search" value="${esc(S.pfFilter)}" placeholder="${esc(t("profiles.search"))}"/></div>
+      <button class="ghost-btn" id="btn-ping-all" ${S.pfPingBusy ? "disabled" : ""}>${I.ping}<span>${esc(t("profiles.pingAll"))}</span></button>
+      <button class="ghost-btn" id="btn-fastest">${I.zap}<span>${esc(t("profiles.fastest"))}</span></button>
+      <select id="pf-sort" class="pf-sort">
+        <option value="default" ${S.pfSort === "default" ? "selected" : ""}>${esc(t("profiles.sortDefault"))}</option>
+        <option value="name" ${S.pfSort === "name" ? "selected" : ""}>${esc(t("profiles.sortName"))}</option>
+        <option value="ping" ${S.pfSort === "ping" ? "selected" : ""}>${esc(t("profiles.sortPing"))}</option>
+      </select>
+    </div>
+    <div id="pf-list">${renderProfilesList()}</div>`;
 }
 
 function renderLogs() {
@@ -616,7 +673,7 @@ async function pullLogHealth() {
     }
   } catch (e) { /* bridge not ready / method absent on old builds */ }
 }
-setInterval(() => { if (S.tab === "logs") pullLogHealth(); }, 2000);
+setInterval(() => { if (!document.hidden && S.tab === "logs") pullLogHealth(); }, 2000);
 
 // ---------- diagnostics (wisteria) ----------
 // The wisteria core classifies its own connect loop: "cannot reach" = no
@@ -637,13 +694,14 @@ function diagEvText(e) {
 }
 
 function diagInner(d) {
-  if (!d.active) {
+  const ev = d.events || [];
+  if (!d.active && !ev.length) {
     return `
       <div class="diag-banner warn"><div class="diag-banner-ic">${I.lock}</div><div><b>${esc(t("diag.inactive"))}</b><p>${esc(t("diag.inactiveHint"))}</p></div></div>
       <button class="ghost-btn" id="btn-diag-logs">${esc(t("diag.openLogs"))}</button>`;
   }
   const [cls, key] = diagBanner(d);
-  const ev = d.events || [], srv = d.servers || [];
+  const srv = d.servers || [];
   const attempts = ev.filter((e) => e.kind === "retry").length;
   const rtts = srv.map((s) => s.rtt_ms).filter((r) => r > 0);
   const best = rtts.length ? Math.min(...rtts) : 0;
@@ -704,7 +762,7 @@ async function pullWDiag() {
   } catch (e) { /* diagnostics is best-effort */ }
   finally { wdiagBusy = false; }
 }
-setInterval(() => { if (S.tab === "diag") pullWDiag(); }, 2000);
+setInterval(() => { if (!document.hidden && S.tab === "diag") pullWDiag(); }, 2000);
 
 function renderSettings() {
   const tabs = [
@@ -976,6 +1034,156 @@ function relabelCoreButtons(info) {
 }
 
 // ---------- per-render event wiring ----------
+function wireProfileList(scope) {
+  scope.querySelectorAll(".server-list-item").forEach((row) => {
+    row.addEventListener("click", async (ev) => {
+      if (ev.target.closest(".sli-act")) return;
+      if (S.busy) { showToast(t("toast.busy")); return; }
+      S.selected = row.dataset.id;
+      await api().SetActive(row.dataset.id);
+      const wasConnected = S.state.state === "connected";
+      renderContent();
+      if (wasConnected) {
+        S.busy = true;
+        markConnecting(row.dataset.id);
+        try { await withTimeout(api().Connect(row.dataset.id), 45000, t("toast.stuck")); }
+        catch (e) {
+          showToast((e && e.message) || e);
+          try { renderState(await api().GetState()); } catch (_) {}
+        }
+        finally { S.busy = false; }
+      }
+    });
+    row.addEventListener("dblclick", (ev) => {
+      if (ev.target.closest(".sli-act")) return;
+      switchTab("vpn");
+    });
+  });
+  scope.querySelectorAll(".sli-act.shareb").forEach((b) => b.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    openQrModal(b.dataset.id);
+  }));
+  scope.querySelectorAll(".sli-act.editb").forEach((b) => b.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    openEditModal(b.dataset.id);
+  }));
+  scope.querySelectorAll(".sli-act.pingb").forEach((b) => b.addEventListener("click", async (ev) => {
+    ev.stopPropagation();
+    await api().PingProfile(b.dataset.id);
+    await loadProfiles();
+  }));
+  scope.querySelectorAll(".sli-act.del").forEach((b) => b.addEventListener("click", async (ev) => {
+    ev.stopPropagation();
+    if (b.closest(".sub-head")) {
+      if (!(await askConfirm(t("subs.confirmDelete")))) return;
+      try { await api().DeleteSubscription(b.dataset.id); await loadSubs(); await loadProfiles(); }
+      catch (e) { showToast((e && e.message) || e); }
+      return;
+    }
+    if (!(await askConfirm(t("confirm.delete")))) return;
+    try { await api().DeleteProfile(b.dataset.id); await loadProfiles(); }
+    catch (e) { showToast((e && e.message) || e); }
+  }));
+  scope.querySelectorAll(".sub-head").forEach((h) => h.addEventListener("click", (ev) => {
+    if (ev.target.closest(".sli-act")) return;
+    toggleCollapsed(h.dataset.key);
+  }));
+  scope.querySelectorAll(".sub-refresh").forEach((b) => b.addEventListener("click", async (ev) => {
+    ev.stopPropagation();
+    await refreshSub(b.dataset.id);
+  }));
+}
+
+function closeShareModal() { const m = $("modal-share"); if (m) m.classList.remove("show"); }
+function closeEditModal() { const m = $("modal-edit"); if (m) m.classList.remove("show"); }
+
+function openQrModal(id) {
+  const p = S.profiles.find((x) => x.id === id);
+  if (!p) return;
+  if (!p.raw) { showToast(t("profiles.noRaw")); return; }
+  try {
+    const r = window.WisteriaQR.qrSvg(p.raw, { quiet: 4 });
+    $("qr-wrap").innerHTML = r.svg;
+    S.pendingShare = p.raw;
+    $("modal-share").classList.add("show");
+  } catch (e) { showToast((e && e.message) || String(e)); }
+}
+
+let editId = "";
+function syncEditTlsRows() {
+  const tls = !!$("e-transport") && $("e-transport").value === "tls";
+  const sg = $("e-sni-group"), iw = $("e-insec-wrap");
+  if (sg) sg.classList.toggle("hidden", !tls);
+  if (iw) iw.classList.toggle("hidden", !tls);
+}
+function openEditModal(id) {
+  const p = S.profiles.find((x) => x.id === id);
+  if (!p) return;
+  editId = id;
+  $("e-name").value = p.name || "";
+  $("e-host").value = p.host || "";
+  $("e-port").value = p.port || "";
+  $("e-transport").value = p.transport === "tls" ? "tls" : "tcp";
+  $("e-sni").value = p.tls_sni || "";
+  $("e-insecure").checked = !!p.tls_insecure;
+  syncEditTlsRows();
+  $("modal-edit").classList.add("show");
+}
+async function saveEditedProfile() {
+  const payload = {
+    id: editId,
+    name: $("e-name").value.trim(),
+    host: $("e-host").value.trim(),
+    port: parseInt($("e-port").value, 10) || 0,
+    transport: $("e-transport").value,
+    tls_sni: $("e-sni").value.trim(),
+    tls_insecure: $("e-insecure").checked,
+  };
+  try {
+    await api().EditProfile(payload);
+    closeEditModal();
+    showToast(t("toast.saved"));
+    await loadProfiles();
+  } catch (e) { showToast((e && e.message) || e); }
+}
+
+async function runPingAll() {
+  if (S.pfPingBusy) return;
+  S.pfPingBusy = true;
+  renderContent();
+  try {
+    await api().PingAllProfiles();
+    showToast(t("profiles.pingAll") + " ✓");
+  } catch (e) { showToast((e && e.message) || e); }
+  finally {
+    S.pfPingBusy = false;
+    await loadProfiles();
+  }
+}
+
+async function pickFastest() {
+  const candidates = S.profiles.filter(matchProfile).filter((p) => Number(p.latency_ms) > 0);
+  if (!candidates.length) { showToast(t("profiles.fastestNone")); return; }
+  candidates.sort((a, b) => Number(a.latency_ms) - Number(b.latency_ms));
+  const best = candidates[0];
+  const wasConnected = S.state.state === "connected";
+  try {
+    S.selected = best.id;
+    await api().SetActive(best.id);
+    if (wasConnected) {
+      S.busy = true;
+      markConnecting(best.id);
+      await withTimeout(api().Connect(best.id), 45000, t("toast.stuck"));
+      S.busy = false;
+    }
+    showToast(t("profiles.fastestDone").replace("{name}", best.name).replace("{ms}", String(best.latency_ms)));
+    await loadProfiles();
+  } catch (e) {
+    S.busy = false;
+    showToast((e && e.message) || e);
+  }
+}
+
 function wireContent() {
   const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
 
@@ -1014,51 +1222,21 @@ function wireContent() {
   on("card-profile", "click", () => switchTab("profiles"));
 
   on("btn-add", "click", openModal);
-  document.querySelectorAll(".server-list-item").forEach((row) => {
-    row.addEventListener("click", async (ev) => {
-      if (ev.target.closest(".sli-act")) return;
-      if (S.busy) { showToast(t("toast.busy")); return; }
-      S.selected = row.dataset.id;
-      await api().SetActive(row.dataset.id);
-      // Momentary switching: clicking a server while connected moves the
-      // tunnel to it (the backend stops the old session first). The busy
-      // flag keeps a second click / double-click from starting a parallel
-      // session while the switch is still running.
-      const wasConnected = S.state.state === "connected";
-      renderContent();
-      if (wasConnected) {
-        S.busy = true;
-        markConnecting(row.dataset.id);
-        try { await withTimeout(api().Connect(row.dataset.id), 45000, t("toast.stuck")); }
-        catch (e) {
-          showToast((e && e.message) || e);
-          try { renderState(await api().GetState()); } catch (_) { /* keep local view */ }
-        }
-        finally { S.busy = false; }
-      }
-    });
-    row.addEventListener("dblclick", async (ev) => {
-      if (ev.target.closest(".sli-act")) return;
-      S.selected = row.dataset.id;
-      await api().SetActive(row.dataset.id);
-      switchTab("vpn"); // the click handler above already connects
-    });
-  });
-  document.querySelectorAll(".sli-act.pingb").forEach((b) => b.addEventListener("click", async () => {
-    await api().PingProfile(b.dataset.id);
-    await loadProfiles();
-  }));
-  document.querySelectorAll(".sli-act.del").forEach((b) => b.addEventListener("click", async (ev) => {
-    ev.stopPropagation();
-    if (!(await askConfirm(t("confirm.delete")))) return;
-    try { await api().DeleteProfile(b.dataset.id); await loadProfiles(); }
-    catch (e) { showToast((e && e.message) || e); }
-  }));
+  wireProfileList($("pf-list") || document);
 
-  // subscriptions are added from the clipboard ("From clipboard");
-  // AddSubscription remains as an API for future import paths.
-  // One-button import: the clipboard may hold subscription URLs, share
-  // links or both — the backend routes every line.
+  on("pf-search", "input", (ev) => {
+    S.pfFilter = ev.target.value;
+    const box = $("pf-list");
+    if (box) { box.innerHTML = renderProfilesList(); wireProfileList(box); }
+  });
+  on("pf-sort", "change", (ev) => {
+    S.pfSort = ev.target.value;
+    const box = $("pf-list");
+    if (box) { box.innerHTML = renderProfilesList(); wireProfileList(box); }
+  });
+  on("btn-ping-all", "click", runPingAll);
+  on("btn-fastest", "click", pickFastest);
+
   on("btn-clip", "click", async () => {
     try {
       const r = await api().ImportFromClipboard();
@@ -1067,36 +1245,17 @@ function wireContent() {
       const parts = [];
       if (r.subscriptions) parts.push(t("toast.clipSubs").replace("{n}", r.subscriptions));
       if (r.added && r.added.length) parts.push(t("toast.clipProfiles").replace("{n}", r.added.length));
-      showToast(parts.length ? parts.join(" · ") : t("toast.clipNone"));
       if (r.errors && r.errors.length) {
         const fe = r.errors[0];
-        showToast((fe.line ? fe.line + ": " : "") + fe.error);
+        parts.push("✕ " + (fe.line ? fe.line + ": " : "") + fe.error);
       }
+      showToast(parts.length ? parts.join(" · ") : t("toast.clipNone"));
     } catch (e) { showToast((e && e.message) || e); }
   });
-  // Collapse/expand profile groups; state persists in localStorage.
-  document.querySelectorAll(".sub-head").forEach((h) => h.addEventListener("click", (ev) => {
-    if (ev.target.closest(".sli-act")) return;
-    toggleCollapsed(h.dataset.key);
-  }));
-  document.querySelectorAll(".sub-refresh").forEach((b) => b.addEventListener("click", async (ev) => {
-    ev.stopPropagation();
-    await refreshSub(b.dataset.id);
-  }));
-  document.querySelectorAll(".sub-head .sli-act.del").forEach((b) => b.addEventListener("click", async (ev) => {
-    ev.stopPropagation();
-    if (!(await askConfirm(t("subs.confirmDelete")))) return;
-    try {
-      await api().DeleteSubscription(b.dataset.id);
-      await loadSubs();
-      await loadProfiles();
-    } catch (e) { showToast((e && e.message) || e); }
-  }));
 
-  on("btn-clear-logs", "click", () => {
-    // Keep S.lastLogSeq: resetting it would make the next pull refetch the
-    // whole ring and re-add the history that was just cleared.
+  on("btn-clear-logs", "click", async () => {
     $("log-view").textContent = "";
+    try { if (api().ClearLogs) await api().ClearLogs(); } catch (e) {}
   });
   // Copy is for support: the log alone says nothing about the build or the
   // state, so prepend a small header with both.
@@ -1193,7 +1352,9 @@ function wireContent() {
       if (info) relabelCoreButtons(info);
     }).catch(() => { /* detection is cosmetic here */ });
   }
-  document.querySelectorAll(".set-tab").forEach((b) => b.addEventListener("click", () => {
+  document.querySelectorAll(".set-tab").forEach((b) => b.addEventListener("click", async () => {
+    if (b.dataset.settab === S.setTab) return;
+    try { await saveSettings(true); } catch (e) {}
     S.setTab = b.dataset.settab;
     renderContent();
   }));
@@ -1440,17 +1601,24 @@ function revealConnected() {
 
 // Live previews (look tab scale + custom palette) and the VPN-tab TUN switch.
 // Delegated at module scope so they survive re-renders without duplicating.
+function isDesktopSettingsControl(el) {
+  if (!el || !el.id || !/^s-/.test(el.id) || el.id === "s-lang" || el.id === "s-scale") return false;
+  const wrap = $("content-wrapper");
+  return !!wrap && wrap.contains(el);
+}
 document.addEventListener("input", (ev) => {
   const id = ev.target.id;
   if (id === "s-scale") {
+    // Do NOT mutate app.style.zoom mid-drag: changing zoom on an ancestor
+    // shifts pointer coordinates relative to the range track and breaks dragging.
     S.uiScale = parseInt(ev.target.value, 10) || 100;
     const lv = $("s-scale-val"); if (lv) lv.textContent = S.uiScale + "%";
-    applyScale();
-    scheduleLookSave();
   } else if (id && id.indexOf("ct-") === 0) {
     S.customTheme = Object.assign({}, DEFAULT_CUSTOM, S.customTheme || {});
     S.customTheme[id.slice(3)] = ev.target.value;
     applyTheme();
+    scheduleLookSave();
+  } else if (isDesktopSettingsControl(ev.target)) {
     scheduleLookSave();
   }
 });
@@ -1463,6 +1631,17 @@ function scheduleLookSave() {
   lookSaveTimer = setTimeout(() => { saveSettings(true); }, 700);
 }
 document.addEventListener("change", async (ev) => {
+  if (ev.target.id === "s-scale") {
+    S.uiScale = parseInt(ev.target.value, 10) || 100;
+    const lv = $("s-scale-val"); if (lv) lv.textContent = S.uiScale + "%";
+    applyScale();
+    scheduleLookSave();
+    return;
+  }
+  if (isDesktopSettingsControl(ev.target)) {
+    scheduleLookSave();
+    return;
+  }
   if (ev.target.id === "vpn-preset") {
     const pid = S.state.profile_id || S.selected;
     if (!pid) return;
@@ -1581,7 +1760,7 @@ function uptimeHTML(iso) {
     m + "<span class='stat-unit'>m </span>" + ss + "<span class='stat-unit'>s</span>";
 }
 setInterval(() => {
-  if (S.tab !== "vpn" || S.state.state !== "connected") return;
+  if (document.hidden || S.tab !== "vpn" || S.state.state !== "connected") return;
   const el = $("stat-uptime");
   if (!el) return;
   const html = uptimeHTML(S.state.started_at);
@@ -1658,6 +1837,23 @@ document.querySelectorAll(".modal-tab").forEach((tb) => tb.addEventListener("cli
 }));
 document.querySelector(".modal-overlay").addEventListener("click", (ev) => {
   if (ev.target.classList.contains("modal-overlay")) closeModal();
+});
+document.querySelectorAll("#modal-share, #modal-edit").forEach((ov) => {
+  ov.addEventListener("click", (ev) => { if (ev.target === ov) { closeShareModal(); closeEditModal(); } });
+});
+if ($("qr-close")) $("qr-close").addEventListener("click", closeShareModal);
+if ($("edit-close")) $("edit-close").addEventListener("click", closeEditModal);
+if ($("e-transport")) $("e-transport").addEventListener("change", syncEditTlsRows);
+if ($("btn-edit-save")) $("btn-edit-save").addEventListener("click", saveEditedProfile);
+if ($("btn-qr-copy")) $("btn-qr-copy").addEventListener("click", async () => {
+  try { await api().CopyToClipboard(S.pendingShare); showToast(t("toast.copied")); }
+  catch (e) { showToast((e && e.message) || e); }
+});
+document.addEventListener("keydown", (ev) => {
+  if (ev.key !== "Escape") return;
+  if ($("modal-add") && $("modal-add").classList.contains("show")) closeModal();
+  else if ($("modal-share") && $("modal-share").classList.contains("show")) closeShareModal();
+  else if ($("modal-edit") && $("modal-edit").classList.contains("show")) closeEditModal();
 });
 
 // manual form extra fields

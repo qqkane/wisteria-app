@@ -4,6 +4,7 @@ package main
 // Thin on purpose — the logic lives in desktop/internal/core.
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -26,6 +27,7 @@ type App struct {
 	svc      *core.Service
 	store    *core.Store
 	ring     *core.LogRing
+	fl       *fileLogger
 	dirs     core.Dirs
 	pingStop chan struct{}
 	pingMu   sync.Mutex
@@ -76,8 +78,10 @@ func (a *App) startup(ctx context.Context) {
 		runtime.LogErrorf(ctx, "data dirs: %v", err)
 	}
 	a.dirs = d
-	a.ring = core.NewLogRing(2000)
+	a.ring = core.NewLogRing(4000)
+	hydrateRingFromFile(a.ring, filepath.Join(d.Data, "app.log"))
 	fl := newFileLogger(d.Data)
+	a.fl = fl
 	// The frontend pulls lines from the ring when it sees the "log" event,
 	// so notify it at most ~3 times a second instead of once per core log
 	// line: sing-box at DEBUG level under a system proxy produces hundreds
@@ -326,6 +330,66 @@ func (fl *fileLogger) write(l core.LogLine) {
 	fl.written += int64(n)
 }
 
+func (fl *fileLogger) truncate() {
+	if fl == nil {
+		return
+	}
+	fl.mu.Lock()
+	defer fl.mu.Unlock()
+	if fl.f != nil {
+		_ = fl.f.Close()
+		fl.f = nil
+	}
+	fl.written = 0
+	_ = os.Remove(fl.path)
+	if f, err := os.OpenFile(fl.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600); err == nil {
+		fl.f = f
+	}
+}
+
+// hydrateRingFromFile loads the last 24 hours of logs from app.log into the
+// in-memory ring and rewrites app.log without expired entries.
+func hydrateRingFromFile(ring *core.LogRing, path string) {
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-core.LogRetention)
+	var kept []string
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 512*1024)
+	for sc.Scan() {
+		line := sc.Text()
+		if len(line) < 22 {
+			continue
+		}
+		at, err := time.ParseInLocation("2006-01-02 15:04:05", line[:19], time.Local)
+		if err != nil || at.Before(cutoff) {
+			continue
+		}
+		rest := line[20:]
+		tag := "app"
+		text := rest
+		if strings.HasPrefix(rest, "[") {
+			if end := strings.Index(rest, "] "); end > 1 {
+				tag = rest[1:end]
+				text = rest[end+2:]
+			}
+		}
+		ring.AddAt(tag, text, at)
+		kept = append(kept, line)
+	}
+	_ = f.Close()
+	if len(kept) == 0 {
+		_ = os.Remove(path)
+		return
+	}
+	tmp := path + ".tmp"
+	if os.WriteFile(tmp, []byte(strings.Join(kept, "\n")+"\n"), 0o600) == nil {
+		_ = os.Rename(tmp, path)
+	}
+}
+
 // ---- state / logs ----
 
 func (a *App) GetState() core.Status {
@@ -349,6 +413,19 @@ func (a *App) GetLogs(since int64) []core.LogLine {
 		return nil
 	}
 	return a.ring.Snapshot(since)
+}
+
+// ClearLogs clears the in-memory ring, app.log and 24h diagnostics feed.
+func (a *App) ClearLogs() {
+	if a.ring != nil {
+		a.ring.Clear()
+	}
+	if a.fl != nil {
+		a.fl.truncate()
+	}
+	if a.svc != nil {
+		a.svc.ClearDiag()
+	}
 }
 
 // GetCoreHealth feeds the live health line above the logs: the latest
@@ -510,6 +587,56 @@ func (a *App) PingProfile(id string) (int64, error) {
 	ms, err := core.PingEndpoint(p.Host, p.Port, 3*time.Second)
 	a.store.SetLatency(id, ms)
 	return ms, err
+}
+
+// EditProfilePayload carries the editable fields from the Edit Profile modal.
+type EditProfilePayload struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Host        string `json:"host"`
+	Port        int    `json:"port"`
+	Transport   string `json:"transport"`
+	TLSSNI      string `json:"tls_sni"`
+	TLSInsecure bool   `json:"tls_insecure"`
+}
+
+func (a *App) EditProfile(req EditProfilePayload) (core.Profile, error) {
+	p, err := a.store.UpdateProfile(req.ID, req.Name, req.Host, req.Port, req.Transport, req.TLSSNI, req.TLSInsecure)
+	if err != nil {
+		return core.Profile{}, err
+	}
+	if a.svc != nil && a.svc.RunningProfile() == req.ID {
+		a.reconnectRunning(req.ID)
+	}
+	return p, nil
+}
+
+// PingAllProfiles TCP-pings every stored profile concurrently (bounded to 8
+// workers) and writes the batch to profiles.json in a single save.
+func (a *App) PingAllProfiles() map[string]int64 {
+	profiles := a.store.List()
+	lat := make(map[string]int64, len(profiles))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 8)
+	for _, p := range profiles {
+		sem <- struct{}{}
+		wg.Add(1)
+		go func(id, host string, port int) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			ms, _ := core.PingEndpoint(host, port, 3*time.Second)
+			mu.Lock()
+			lat[id] = ms
+			mu.Unlock()
+		}(p.ID, p.Host, p.Port)
+	}
+	wg.Wait()
+	a.store.SetLatencies(lat)
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "profiles")
+	}
+	return lat
 }
 
 // ---- subscriptions ----

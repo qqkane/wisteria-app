@@ -90,12 +90,21 @@ class MainActivity : AppCompatActivity() {
      *  icons on a white page. Called on theme changes too, since the web
      *  chrome re-themes via CSS. */
     fun applyThemeFromSettings() {
-        val light = try {
-            AndroidStore(this).settings().optString("theme") == "arctic"
+        val themeId = try {
+            AndroidStore(this).settings().optString("theme", "lilac")
         } catch (_: Throwable) {
-            false
+            "lilac"
         }
-        val bg = if (light) "#e8f0f8" else "#050505"
+        val light = themeId == "arctic"
+        val bg = when (themeId) {
+            "arctic" -> "#e8f0f8"
+            "neon-dark" -> "#0d0d12"
+            "warm-sand" -> "#1a1610"
+            "sunset" -> "#1a0a14"
+            "matrix" -> "#000000"
+            "mono" -> "#0e0e0e"
+            else -> "#14101f"
+        }
         try {
             val color = Color.parseColor(bg)
             window.statusBarColor = color
@@ -115,8 +124,9 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        EngineHub.init(applicationContext)
         web = WebView(this)
-        web.setBackgroundColor(Color.parseColor("#050505"))
+        web.setBackgroundColor(Color.parseColor("#14101f"))
         // No blue glow/edge shimmer on scroll: the SPA scrolls its own
         // container, so the overscroll effect only ever appeared as an
         // artifact over the glass panels.
@@ -173,7 +183,7 @@ class MainActivity : AppCompatActivity() {
         // API 35 ignores window.statusBarColor under enforced edge-to-edge,
         // so the padded strips show the view background of the frame — keep
         // it the app near-black, and the system icons light on top of it.
-        root.setBackgroundColor(Color.parseColor("#050505"))
+        root.setBackgroundColor(Color.parseColor("#14101f"))
         WindowCompat.getInsetsController(window, window.decorView).apply {
             isAppearanceLightStatusBars = false
             isAppearanceLightNavigationBars = false

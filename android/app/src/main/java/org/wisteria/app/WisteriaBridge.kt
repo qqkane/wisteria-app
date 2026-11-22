@@ -48,6 +48,11 @@ class WisteriaBridge(activity: MainActivity) {
          *  screen shows can never disagree with the APK again (the constant
          *  here stayed "0.4.2" while the app shipped 0.4.6). */
         val VERSION: String = BuildConfig.VERSION_NAME
+
+        /** Shared across Activity recreations so threads never leak on restartApp()/rotation. */
+        private val asyncPool = java.util.concurrent.Executors.newFixedThreadPool(4) {
+            Thread(it, "wisteria-bridge").apply { isDaemon = true }
+        }
         private const val MAX_SUB_BYTES = 4 shl 20
 
         /** Package-list cache lifetime. A minute keeps the Routing tab
@@ -128,13 +133,6 @@ class WisteriaBridge(activity: MainActivity) {
             // promise still settles instead of hanging the UI forever.
             try { task.run() } catch (_: Throwable) {}
         }
-    }
-
-    /** Bounded: four in-flight bindings is more than the SPA ever issues at
-     *  once, and an unbounded pool would let a misbehaving page spawn
-     *  hundreds of package-manager scans. */
-    private val asyncPool = java.util.concurrent.Executors.newFixedThreadPool(4) {
-        Thread(it, "wisteria-bridge").apply { isDaemon = true }
     }
 
     private fun err(msg: String): IllegalStateException = IllegalStateException(msg)
