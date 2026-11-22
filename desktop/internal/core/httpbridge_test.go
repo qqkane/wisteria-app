@@ -235,3 +235,26 @@ func TestParseManualWisteriaFieldsRoundTrip(t *testing.T) {
 		t.Fatal("empty config")
 	}
 }
+
+func TestHTTPBridgeRememberAfterStop(t *testing.T) {
+	socksLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer socksLn.Close()
+	br, err := StartHTTPBridge("127.0.0.1:0", socksLn.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	br.Stop()
+
+	c1, c2 := net.Pipe()
+	defer c2.Close()
+	if br.remember(c1) {
+		t.Fatal("remember() must return false after Stop()")
+	}
+	// c1 must have been closed by remember().
+	if _, err := c1.Write([]byte("x")); err == nil {
+		t.Fatal("expected rejected conn to be closed")
+	}
+}

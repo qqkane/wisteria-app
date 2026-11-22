@@ -21,11 +21,13 @@ class WisteriaTileService : TileService() {
 
     override fun onStartListening() {
         super.onStartListening()
+        EngineHub.init(applicationContext)
         updateTile()
     }
 
     override fun onClick() {
         super.onClick()
+        EngineHub.init(applicationContext)
         if (engineRunning()) {
             try {
                 startVpn(Intent(this, WisteriaVpnService::class.java).setAction(WisteriaVpnService.ACTION_DISCONNECT))

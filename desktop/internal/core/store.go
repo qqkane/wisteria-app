@@ -26,12 +26,13 @@ var ErrNotFound = errors.New("profile not found")
 // profile list. Profiles imported from a subscription carry SourceID, so a
 // delete of the subscription removes exactly its own profiles.
 type Subscription struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	URL       string    `json:"url"`
-	Count     int       `json:"count"` // profiles of the last successful refresh
-	UpdatedAt time.Time `json:"updated_at"`
-	Error     string    `json:"error,omitempty"` // last refresh error ("" = ok)
+	ID        string       `json:"id"`
+	Name      string       `json:"name"`
+	URL       string       `json:"url"`
+	Count     int          `json:"count"` // profiles of the last successful refresh
+	UpdatedAt time.Time    `json:"updated_at"`
+	Error     string       `json:"error,omitempty"`    // last refresh error ("" = ok)
+	Userinfo  *SubUserinfo `json:"userinfo,omitempty"` // parsed from Subscription-Userinfo header
 }
 
 type Store struct {

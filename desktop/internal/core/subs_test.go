@@ -3,6 +3,8 @@ package core
 import (
 	"encoding/base64"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -246,5 +248,45 @@ func TestSubscriptionsPersistAcrossReopen(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("sub profiles lost their source id after reopen")
+	}
+}
+
+func TestFetchSubscriptionRejectsBadScheme(t *testing.T) {
+	for _, bad := range []string{"file:///etc/passwd", "ftp://example.com/sub", "gopher://127.0.0.1/"} {
+		if _, err := FetchSubscription(bad, 2*time.Second); err == nil {
+			t.Fatalf("expected error for scheme %q", bad)
+		}
+	}
+}
+
+func TestFetchSubscriptionRejectsBadRedirectScheme(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "file:///etc/passwd", http.StatusFound)
+	}))
+	defer srv.Close()
+	if _, err := FetchSubscription(srv.URL, 2*time.Second); err == nil {
+		t.Fatal("expected redirect to file:// to be rejected")
+	}
+}
+
+func TestFetchSubscriptionHeadersUserinfoAndTitle(t *testing.T) {
+	titleB64 := base64.StdEncoding.EncodeToString([]byte("Wisteria Fleet"))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Subscription-Userinfo", "upload=100; download=250; total=1000; expire=1800000000")
+		w.Header().Set("Profile-Title", "base64:"+titleB64)
+		_, _ = w.Write([]byte(subVLESS + "\n"))
+	}))
+	defer srv.Close()
+
+	res, err := FetchSubscription(srv.URL, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Title != "Wisteria Fleet" {
+		t.Fatalf("title = %q, want Wisteria Fleet", res.Title)
+	}
+	if res.Userinfo == nil || res.Userinfo.Upload != 100 || res.Userinfo.Download != 250 ||
+		res.Userinfo.Total != 1000 || res.Userinfo.Expire != 1800000000 {
+		t.Fatalf("userinfo = %+v", res.Userinfo)
 	}
 }

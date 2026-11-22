@@ -348,6 +348,7 @@ class WisteriaVpnService : VpnService() {
 
     override fun onCreate() {
         super.onCreate()
+        EngineHub.init(applicationContext)
         createChannel()
     }
 

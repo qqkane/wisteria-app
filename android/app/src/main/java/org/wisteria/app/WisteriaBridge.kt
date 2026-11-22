@@ -53,6 +53,12 @@ class WisteriaBridge(activity: MainActivity) {
         private val asyncPool = java.util.concurrent.Executors.newFixedThreadPool(4) {
             Thread(it, "wisteria-bridge").apply { isDaemon = true }
         }
+
+        /** Bounded pool for background network I/O (pings, subscription fetches, ext-IP checks),
+         *  kept separate from asyncPool so slow probes never starve fast UI bindings. */
+        private val ioPool = java.util.concurrent.Executors.newFixedThreadPool(4) {
+            Thread(it, "wisteria-io").apply { isDaemon = true }
+        }
         private const val MAX_SUB_BYTES = 4 shl 20
 
         /** Package-list cache lifetime. A minute keeps the Routing tab
@@ -373,7 +379,7 @@ class WisteriaBridge(activity: MainActivity) {
         val p = store.profile(id) ?: throw err("профиль не найден")
         // The dial itself takes seconds; on the bridge thread it would
         // freeze the whole UI (same class as the subscription fetch).
-        Thread {
+        ioPool.execute {
             val lat = try {
                 if (p.optString("type") == "wisteria") {
                     Mobile.ping(endpointOf(p))
@@ -387,7 +393,7 @@ class WisteriaBridge(activity: MainActivity) {
             // revert edits made while the ping was in flight (preset change).
             store.updateProfileLatency(id, lat)
             pushProfiles()
-        }.start()
+        }
     }
 
     private fun addLinks(text: String): JSONObject {
@@ -542,7 +548,7 @@ class WisteriaBridge(activity: MainActivity) {
      *  so the whole UI — including the Cancel button — freezes meanwhile.
      *  Runs in its own thread and reports through the "profiles" event. */
     private fun fetchSubAsync(sub: JSONObject) {
-        Thread {
+        ioPool.execute {
             try {
                 fetchIntoSub(sub)
             } catch (t: Throwable) {
@@ -558,7 +564,7 @@ class WisteriaBridge(activity: MainActivity) {
                 EngineHub.appLog("подписка «${sub.optString("name")}»: $msg")
             }
             pushProfiles()
-        }.start()
+        }
     }
 
     /** Fetches the subscription body, parses every link (wisteria and
@@ -739,7 +745,7 @@ class WisteriaBridge(activity: MainActivity) {
 
     private fun requestExtIP() {
         if (!extIpChecking.compareAndSet(false, true)) return
-        Thread {
+        ioPool.execute {
             try {
                 // Mirrors in turn: a single slow or throttled checker (ipify
                 // in particular) used to leave the IP card empty forever.
@@ -765,7 +771,7 @@ class WisteriaBridge(activity: MainActivity) {
             } finally {
                 extIpChecking.set(false)
             }
-        }.start()
+        }
     }
 
     private fun externalIP(): String {

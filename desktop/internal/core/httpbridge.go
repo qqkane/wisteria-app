@@ -92,10 +92,18 @@ func (b *HTTPBridge) Stop() {
 	}
 }
 
-func (b *HTTPBridge) remember(c net.Conn) {
+func (b *HTTPBridge) remember(c net.Conn) bool {
 	b.mu.Lock()
+	select {
+	case <-b.closed:
+		b.mu.Unlock()
+		_ = c.Close()
+		return false
+	default:
+	}
 	b.conns[c] = struct{}{}
 	b.mu.Unlock()
+	return true
 }
 
 func (b *HTTPBridge) forget(c net.Conn) {
@@ -119,8 +127,10 @@ func (b *HTTPBridge) serve() {
 		b.wg.Add(1)
 		go func() {
 			defer b.wg.Done()
+			if !b.remember(conn) {
+				return
+			}
 			defer b.forget(conn)
-			b.remember(conn)
 			b.handle(conn)
 		}()
 	}

@@ -13,6 +13,7 @@ class BootReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
+        EngineHub.init(context.applicationContext)
         val store = AndroidStore(context)
         if (!store.autostart()) return
         // "Auto-connect on start" (settings.auto_connect) is the user's

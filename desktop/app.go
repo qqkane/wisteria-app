@@ -680,6 +680,12 @@ func (a *App) RefreshSubscription(id string) (core.Subscription, error) {
 	sub.Count = len(fetch.Profiles)
 	sub.UpdatedAt = time.Now()
 	sub.Error = ""
+	if fetch.Userinfo != nil {
+		sub.Userinfo = fetch.Userinfo
+	}
+	if fetch.Title != "" {
+		sub.Name = fetch.Title
+	}
 	_ = a.store.UpdateSubscription(sub)
 	a.logf("подписка %s обновлена: %d серверов (пропущено строк: %d)", sub.Name, sub.Count, fetch.Skipped)
 	return sub, nil
