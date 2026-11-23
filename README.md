@@ -16,3 +16,6 @@ vless/trojan/hysteria2/tuic) через ядро sing-box. Подробност�
 Windows zip, Linux tar.gz + AppImage, Android APK (десктопные ассеты — с .sha256).
 Встроенный автообновлятор приложения читает `releases/latest` отсюда и выбирает
 ассет своей платформы.
+
+Начиная с v2.0.0 бандлы и APK собираются с ядром **wisteria v2.0.0**
+(тег ядра запинен в `.github/workflows/release.yml` и `android.yml`).
