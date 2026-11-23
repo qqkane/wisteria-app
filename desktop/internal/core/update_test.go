@@ -276,6 +276,26 @@ func TestReleaseClientBypassesEnvProxy(t *testing.T) {
 	}
 }
 
+// Regression: on an AppImage the writable core dir does not exist before
+// the first download; copying the verified binary there must create it
+// instead of failing with "no such file or directory".
+func TestCopyFileCreatesParentDir(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "core")
+	if err := os.WriteFile(src, []byte("binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(t.TempDir(), "wisteria-desktop", "bin", "sing-box"+PendingSuffix)
+	if err := copyFile(src, dst, 0o755); err != nil {
+		t.Fatalf("copy into a fresh bin dir: %v", err)
+	}
+	if b, err := os.ReadFile(dst); err != nil || string(b) != "binary" {
+		t.Fatalf("copied file = %q (%v)", b, err)
+	}
+	if st, err := os.Stat(dst); err != nil || st.Mode().Perm() != 0o755 {
+		t.Fatalf("mode = %v (%v), want 0755", st.Mode(), err)
+	}
+}
+
 func TestApplyPendingCores(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "sing-box"+exeSuffix)

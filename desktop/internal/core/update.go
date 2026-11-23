@@ -453,6 +453,14 @@ const PendingSuffix = ".new"
 var ErrCorePending = errors.New("ядро занято запущенным процессом")
 
 func copyFile(src, dst string, mode os.FileMode) error {
+	// The destination directory may not exist yet: on an AppImage the
+	// writable core dir is <user config>/wisteria-desktop/bin, which is
+	// created lazily on the first download. Without this the verified core
+	// download died with "open .../bin/sing-box.new: no such file or
+	// directory" after the network part had already succeeded.
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
 	in, err := os.Open(src)
 	if err != nil {
 		return err
