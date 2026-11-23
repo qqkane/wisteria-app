@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -95,6 +96,9 @@ func TestFetchSubscriptionWithDeviceHeaders(t *testing.T) {
 }
 
 func TestLinuxShortcutsAndAutostart(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux XDG autostart and desktop shortcuts")
+	}
 	tmp := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, "config"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(tmp, "share"))
