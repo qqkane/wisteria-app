@@ -390,15 +390,7 @@ class WisteriaBridge(activity: MainActivity) {
         // The dial itself takes seconds; on the bridge thread it would
         // freeze the whole UI (same class as the subscription fetch).
         ioPool.execute {
-            val lat = try {
-                if (p.optString("type") == "wisteria") {
-                    Mobile.ping(endpointOf(p))
-                } else {
-                    tcpPing(p.optString("host"), p.optInt("port", 443))
-                }
-            } catch (e: Exception) {
-                -1L
-            }
+            val lat = pingOne(p)
             // Store the latency by itself: a whole-profile replace used to
             // revert edits made while the ping was in flight (preset change).
             store.updateProfileLatency(id, lat)
@@ -990,7 +982,12 @@ class WisteriaBridge(activity: MainActivity) {
     // ---- ping all / edit / share ----
 
     private fun pingOne(p: JSONObject): Long = try {
-        if (p.optString("type") == "wisteria") {
+        // Hysteria2/TUIC are QUIC/UDP: no TCP port to probe, so a failed
+        // connect here would mark a healthy node as dead.
+        val type = p.optString("type")
+        if (type == "hysteria2" || type == "tuic") {
+            0L
+        } else if (type == "wisteria") {
             Mobile.ping(endpointOf(p))
         } else {
             tcpPing(p.optString("host"), p.optInt("port", 443))

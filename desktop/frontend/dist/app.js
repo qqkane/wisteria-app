@@ -164,6 +164,8 @@ const I18N = {
     "profiles.sortDefault": "Как добавлены", "profiles.sortName": "По имени", "profiles.sortPing": "По пингу",
     "profiles.pingAll": "Пинговать все", "profiles.fastest": "Самый быстрый",
     "profiles.share": "Поделиться", "profiles.edit": "Изменить",
+    "profiles.udpPing": "udp · без TCP-пинга",
+    "profiles.udpPingNote": "Hysteria2/TUIC работают по UDP — TCP-пинг к ним неприменим и ничего не говорит о подключении",
     "profiles.noRaw": "У профиля нет исходной ссылки",
     "profiles.fastestNone": "Нет профилей с известным пингом — сначала пропингуйте",
     "profiles.fastestDone": "Выбран «{name}» · {ms} ms",
@@ -299,6 +301,8 @@ const I18N = {
     "profiles.sortDefault": "As added", "profiles.sortName": "By name", "profiles.sortPing": "By ping",
     "profiles.pingAll": "Ping all", "profiles.fastest": "Fastest",
     "profiles.share": "Share", "profiles.edit": "Edit",
+    "profiles.udpPing": "udp · no TCP ping",
+    "profiles.udpPingNote": "Hysteria2/TUIC run over UDP — a TCP ping does not apply and says nothing about the tunnel",
     "profiles.noRaw": "This profile has no original link",
     "profiles.fastestNone": "No profile has a known ping — ping them first",
     "profiles.fastestDone": "Selected «{name}» · {ms} ms",
@@ -359,6 +363,9 @@ const S = {
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const typeIcon = (tp) => ({ wisteria: I.lock }[tp] || I.globe);
+// Hysteria2/TUIC are QUIC/UDP: a TCP connect probe always fails there, so
+// the list must not render a working server as "ping n/a" (red/dead).
+const udpProto = (p) => !!p && (p.type === "hysteria2" || p.type === "tuic");
 
 // TLS badge for wisteria profiles on a real-TLS transport (wave 4). The
 // tooltip names the SNI override when one is set, otherwise the default
@@ -609,7 +616,7 @@ function sortProfiles(list) {
   if (S.pfSort === "name") {
     arr.sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), lang));
   } else if (S.pfSort === "ping") {
-    const rank = (p) => { const l = Number(p.latency_ms) || 0; return l > 0 ? l : l < 0 ? 1e9 : 2e9; };
+    const rank = (p) => { if (udpProto(p)) return 2e9; const l = Number(p.latency_ms) || 0; return l > 0 ? l : l < 0 ? 1e9 : 2e9; };
     arr.sort((a, b) => rank(a) - rank(b));
   }
   return arr;
@@ -617,9 +624,12 @@ function sortProfiles(list) {
 
 function profileCard(p) {
   const active = p.id === S.selected;
-  const lat = p.latency_ms
-    ? `<div class="sli-lat ${p.latency_ms > 0 ? "good" : ""}">${p.latency_ms < 0 ? "ping n/a" : "ping " + p.latency_ms + " ms"}</div>`
-    : "";
+  const udp = udpProto(p);
+  const lat = udp
+    ? `<div class="sli-lat" title="${esc(t("profiles.udpPingNote"))}">${esc(t("profiles.udpPing"))}</div>`
+    : p.latency_ms
+      ? `<div class="sli-lat ${p.latency_ms > 0 ? "good" : ""}">${p.latency_ms < 0 ? "ping n/a" : "ping " + p.latency_ms + " ms"}</div>`
+      : "";
   return `
     <div class="server-list-item ${active ? "active-server" : ""}" data-id="${p.id}">
       <div class="sli-icon">${typeIcon(p.type)}</div>
@@ -630,7 +640,7 @@ function profileCard(p) {
       </div>
       ${p.raw ? `<button class="sli-act shareb" title="${esc(t("profiles.share"))}" data-id="${p.id}">${I.share}</button>` : ""}
       ${p.type === "wisteria" ? `<button class="sli-act editb" title="${esc(t("profiles.edit"))}" data-id="${p.id}">${I.edit}</button>` : ""}
-      <button class="sli-act pingb" title="ping" data-id="${p.id}">${I.ping}</button>
+      <button class="sli-act pingb" title="ping" data-id="${p.id}" style="${udp ? "display:none" : ""}">${I.ping}</button>
       <button class="sli-act del" title="delete" data-id="${p.id}">${I.trash}</button>
       <span class="sli-check" style="${active ? "" : "display:none"}">${I.check}</span>
     </div>`;

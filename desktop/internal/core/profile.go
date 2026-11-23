@@ -39,6 +39,15 @@ func Supported(t ProfileType) bool {
 // (everything except the native wisteria core).
 func SingBox(t ProfileType) bool { return t != TWisteria && Supported(t) }
 
+// UDPOnly reports whether the protocol runs over QUIC/UDP (Hysteria2, TUIC).
+// A TCP connect probe to the endpoint says nothing about reachability there:
+// the port is closed to TCP by design, so a "failed" TCP ping is expected
+// and must not be read as a dead server.
+func (t ProfileType) UDPOnly() bool { return t == THysteria2 || t == TTuic }
+
+// UDPOnly is the Profile-level form of ProfileType.UDPOnly.
+func (p Profile) UDPOnly() bool { return p.Type.UDPOnly() }
+
 // Profile is one connection entry. Fields holds the protocol-specific
 // parameters keyed by short names (see parse.go): password, uuid, method,
 // sni, security, transport, path, pub, obf_mu, ... The frontend edits the

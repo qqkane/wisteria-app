@@ -21,7 +21,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const appVersion = "2.0.3"
+const appVersion = "2.0.4"
 
 type App struct {
 	ctx      context.Context
@@ -217,6 +217,13 @@ func (a *App) startAutoPing() {
 			// keeps shutdown instant even with every slot busy.
 			sem := make(chan struct{}, 8)
 			for _, p := range profiles {
+				// Hysteria2/TUIC speak QUIC over UDP: there is no TCP port
+				// to probe, and a "failed" ping would show a healthy node
+				// as dead forever. Clear any stale result instead.
+				if p.UDPOnly() {
+					lat[p.ID] = 0
+					continue
+				}
 				select {
 				case <-stop:
 					return
@@ -602,6 +609,12 @@ func (a *App) PingProfile(id string) (int64, error) {
 	if err != nil {
 		return -1, err
 	}
+	// QUIC/UDP endpoints have no TCP port to connect to; a failed probe
+	// would paint a working Hysteria2/TUIC server as dead.
+	if p.UDPOnly() {
+		a.store.SetLatency(id, 0)
+		return 0, nil
+	}
 	ms, err := core.PingEndpoint(p.Host, p.Port, 3*time.Second)
 	a.store.SetLatency(id, ms)
 	return ms, err
@@ -638,6 +651,10 @@ func (a *App) PingAllProfiles() map[string]int64 {
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 8)
 	for _, p := range profiles {
+		if p.UDPOnly() {
+			lat[p.ID] = 0 // TCP probe is meaningless for QUIC/UDP
+			continue
+		}
 		sem <- struct{}{}
 		wg.Add(1)
 		go func(id, host string, port int) {

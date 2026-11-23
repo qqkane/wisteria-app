@@ -170,6 +170,8 @@ const I18N = {
     "profiles.sortDefault": "Как добавлены", "profiles.sortName": "По имени", "profiles.sortPing": "По пингу",
     "profiles.pingAll": "Пинговать все", "profiles.fastest": "Самый быстрый",
     "profiles.share": "Поделиться", "profiles.edit": "Изменить",
+    "profiles.udpPing": "udp · без TCP-пинга",
+    "profiles.udpPingNote": "Hysteria2/TUIC работают по UDP — TCP-пинг к ним неприменим и ничего не говорит о подключении",
     "profiles.noRaw": "У профиля нет исходной ссылки — он добавлен вручную или из подписки",
     "profiles.fastestNone": "Нет профилей с известным пингом — сначала пропингуйте",
     "profiles.fastestDone": "Включён «{name}» · {ms} ms",
@@ -319,6 +321,8 @@ const I18N = {
     "profiles.sortDefault": "As added", "profiles.sortName": "By name", "profiles.sortPing": "By ping",
     "profiles.pingAll": "Ping all", "profiles.fastest": "Fastest",
     "profiles.share": "Share", "profiles.edit": "Edit",
+    "profiles.udpPing": "udp · no TCP ping",
+    "profiles.udpPingNote": "Hysteria2/TUIC run over UDP — a TCP ping does not apply and says nothing about the tunnel",
     "profiles.noRaw": "This profile has no original link — it was added by hand or from a subscription",
     "profiles.fastestNone": "No profile has a known ping — ping them first",
     "profiles.fastestDone": "«{name}» is active · {ms} ms",
@@ -399,6 +403,9 @@ const $ = (id) => document.getElementById(id);
 const isAndroid = window.__PLATFORM === "android";
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const typeIcon = (tp) => ({ wisteria: I.lock }[tp] || I.globe);
+// Hysteria2/TUIC are QUIC/UDP: a TCP connect probe always fails there, so
+// the list must not render a working server as "ping n/a" (red/dead).
+const udpProto = (p) => !!p && (p.type === "hysteria2" || p.type === "tuic");
 // Bundle links carry mirror endpoints in p.servers; the card shows the
 // primary host:port, so name the rest — otherwise a 2-server link looks
 // like it lost the second server. Russian needs three plural forms
@@ -608,9 +615,12 @@ function toggleCollapsed(key) {
 
 function profileCard(p) {
   const active = p.id === S.selected;
-  const lat = p.latency_ms
-    ? `<div class="sli-lat ${p.latency_ms > 0 ? "good" : ""}">${p.latency_ms < 0 ? "ping n/a" : "ping " + p.latency_ms + " ms"}</div>`
-    : "";
+  const udp = udpProto(p);
+  const lat = udp
+    ? `<div class="sli-lat" title="${esc(t("profiles.udpPingNote"))}">${esc(t("profiles.udpPing"))}</div>`
+    : p.latency_ms
+      ? `<div class="sli-lat ${p.latency_ms > 0 ? "good" : ""}">${p.latency_ms < 0 ? "ping n/a" : "ping " + p.latency_ms + " ms"}</div>`
+      : "";
   return `
     <div class="server-list-item ${active ? "active-server" : ""}" data-id="${p.id}">
       <div class="sli-icon">${typeIcon(p.type)}</div>
@@ -621,7 +631,7 @@ function profileCard(p) {
       </div>
       ${p.raw ? `<button class="sli-act shareb" title="${esc(t("profiles.share"))}" data-id="${p.id}">${I.share}</button>` : ""}
       ${p.type === "wisteria" ? `<button class="sli-act editb" title="${esc(t("profiles.edit"))}" data-id="${p.id}">${I.edit}</button>` : ""}
-      <button class="sli-act pingb" title="ping" data-id="${p.id}">${I.ping}</button>
+      <button class="sli-act pingb" title="ping" data-id="${p.id}" style="${udp ? "display:none" : ""}">${I.ping}</button>
       <button class="sli-act del" title="delete" data-id="${p.id}">${I.trash}</button>
       <span class="sli-check" style="${active ? "" : "display:none"}">${I.check}</span>
     </div>`;
@@ -661,6 +671,7 @@ function sortProfiles(list) {
   } else if (S.pfSort === "ping") {
     // Known pings first (ascending), then unreachable (-1), then never pinged.
     const rank = (p) => {
+      if (udpProto(p)) return 2e9;
       const l = Number(p.latency_ms) || 0;
       return l > 0 ? l : l < 0 ? 1e9 : 2e9;
     };

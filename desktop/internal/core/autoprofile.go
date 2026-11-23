@@ -35,17 +35,22 @@ func rankAutoCandidates(profiles []Profile) []Profile {
 		}
 		items = append(items, indexed{p: p, idx: i})
 	}
-	tier := func(ms int64) int {
-		if ms > 0 {
+	tier := func(p Profile) int {
+		// QUIC/UDP endpoints have no TCP listener: a stored -1 from a TCP
+		// probe must not push Hysteria2/TUIC behind genuinely dead nodes.
+		if p.UDPOnly() {
+			return 1
+		}
+		if p.LatencyMs > 0 {
 			return 0
 		}
-		if ms == 0 {
+		if p.LatencyMs == 0 {
 			return 1
 		}
 		return 2
 	}
 	sort.SliceStable(items, func(i, j int) bool {
-		ti, tj := tier(items[i].p.LatencyMs), tier(items[j].p.LatencyMs)
+		ti, tj := tier(items[i].p), tier(items[j].p)
 		if ti != tj {
 			return ti < tj
 		}
@@ -89,6 +94,9 @@ func (s *Service) StartAuto() error {
 		var mu sync.Mutex
 		sem := make(chan struct{}, 8)
 		for i := range profiles {
+			if profiles[i].UDPOnly() {
+				continue // TCP probe is meaningless for QUIC/UDP
+			}
 			sem <- struct{}{}
 			wg.Add(1)
 			go func(idx int) {

@@ -31,6 +31,29 @@ func TestRankAutoCandidates(t *testing.T) {
 	}
 }
 
+func TestRankAutoCandidatesUDP(t *testing.T) {
+	// A stale TCP-probe failure (-1) on a QUIC/UDP profile must not rank it
+	// below genuinely dead TCP nodes.
+	profiles := []Profile{
+		{ID: "dead", Name: "Dead", Type: TVLESS, LatencyMs: -1},
+		{ID: "hy2", Name: "Hy2", Type: THysteria2, LatencyMs: -1},
+		{ID: "fast", Name: "Fast", Type: TVLESS, LatencyMs: 30},
+	}
+	ranked := rankAutoCandidates(profiles)
+	want := []string{"fast", "hy2", "dead"}
+	for i, id := range want {
+		if ranked[i].ID != id {
+			t.Errorf("ranked[%d] = %q, want %q", i, ranked[i].ID, id)
+		}
+	}
+	if !(Profile{Type: THysteria2}).UDPOnly() || !(Profile{Type: TTuic}).UDPOnly() {
+		t.Error("hysteria2/tuic must be UDPOnly")
+	}
+	if (Profile{Type: TVLESS}).UDPOnly() {
+		t.Error("vless must not be UDPOnly")
+	}
+}
+
 func TestPickNextAutoProfileRotation(t *testing.T) {
 	svc := NewService(Dirs{Data: t.TempDir(), Runtime: t.TempDir()}, NewLogRing(100), nil)
 	svc.SetProfileProvider(func() []Profile {
