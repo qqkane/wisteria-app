@@ -126,6 +126,9 @@ func (s *Store) List() []Profile {
 func (s *Store) Active() (Profile, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.ActiveID == AutoProfileID {
+		return Profile{ID: AutoProfileID, Name: "Автопрофиль"}, true
+	}
 	for _, p := range s.Profiles {
 		if p.ID == s.ActiveID {
 			return p, true
@@ -277,6 +280,10 @@ func (s *Store) Get(id string) (Profile, error) {
 func (s *Store) SetActive(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if id == AutoProfileID {
+		s.ActiveID = id
+		return s.saveLocked()
+	}
 	found := false
 	for _, p := range s.Profiles {
 		if p.ID == id {

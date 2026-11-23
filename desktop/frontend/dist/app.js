@@ -35,6 +35,7 @@ const I = {
   edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
   search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
   zap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
+  book: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>',
 };
 
 const THEMES = [
@@ -169,6 +170,24 @@ const I18N = {
     "edit.title": "Изменить профиль", "edit.save": "Сохранить",
     "qr.title": "Поделиться профилем", "qr.hint": "Отсканируйте камерой телефона", "qr.copy": "Копировать ссылку",
     "toast.copied": "Скопировано",
+    "auto.name": "Автопрофиль",
+    "auto.desc": "Автоматически выбирает лучший сервер и переключается при сбое",
+    "auto.activeSub": "Активен: {name}",
+    "upd.modalTitle": "Доступно обновление",
+    "upd.modalDesc": "Вышла новая версия Wisteria. Рекомендуем обновиться для получения исправлений и новых функций.",
+    "upd.later": "Позже",
+    "set.hwid": "ID устройства (HWID)",
+    "set.hwidNote": "аппаратный идентификатор для контроля лимита устройств в подписках",
+    "set.shortcuts": "Ярлыки в системе (Linux)",
+    "set.shortcutsNote": "добавить в меню приложений и на рабочий стол",
+    "set.shortcutsBtn": "Создать ярлыки",
+    "toast.shortcutsOk": "Ярлыки созданы",
+    "guide.btn": "Справочник и FAQ",
+    "guide.title": "Справочник и FAQ",
+    "guide.tabCores": "Ядра",
+    "guide.tabUpdates": "Обновления",
+    "guide.tabFeatures": "Возможности",
+    "guide.tabFaq": "FAQ",
   },
   en: {
     "brand": "Wisteria",
@@ -286,6 +305,24 @@ const I18N = {
     "edit.title": "Edit profile", "edit.save": "Save",
     "qr.title": "Share profile", "qr.hint": "Scan with your phone camera", "qr.copy": "Copy link",
     "toast.copied": "Copied",
+    "auto.name": "Auto-Profile",
+    "auto.desc": "Automatically picks the best server and fails over on drop",
+    "auto.activeSub": "Active: {name}",
+    "upd.modalTitle": "Update available",
+    "upd.modalDesc": "A new version of Wisteria is available. Update now to get the latest fixes and improvements.",
+    "upd.later": "Later",
+    "set.hwid": "Device ID (HWID)",
+    "set.hwidNote": "hardware identifier used for per-link device limits in subscriptions",
+    "set.shortcuts": "System shortcuts (Linux)",
+    "set.shortcutsNote": "install into application menu and desktop",
+    "set.shortcutsBtn": "Create shortcuts",
+    "toast.shortcutsOk": "Shortcuts created",
+    "guide.btn": "Guide & FAQ",
+    "guide.title": "Guide & FAQ",
+    "guide.tabCores": "Cores",
+    "guide.tabUpdates": "Updates",
+    "guide.tabFeatures": "Features",
+    "guide.tabFaq": "FAQ",
   },
 };
 let lang = "ru";
@@ -314,6 +351,10 @@ const S = {
   version: "", upd: null, updBusy: false, updReady: false, coreUpd: {},
   tunStatus: null, // last TunPreflight snapshot (VPN tab card)
   wdiag: null, // the Diagnostics page data (wisteria profiles only)
+  devInfo: null, // hardware device id (HWID)
+  coreInfo: null, // detected OS and cores
+  guideTab: "cores",
+  updModalShown: false,
 };
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -326,6 +367,15 @@ function tlsBadge(p) {
   if (!p || p.type !== "wisteria" || p.transport !== "tls") return "";
   const tip = p.tls_sni ? "SNI: " + p.tls_sni : t("tls.sniAuto");
   return ` <span class="tls-badge" title="${esc(tip)}">TLS</span>`;
+}
+
+function protoBadge(p) {
+  if (!p) return "";
+  if (p.id === "__auto__") return ' <span class="proto-badge pb-auto">AUTO</span>';
+  const raw = String(p.type || "").toLowerCase();
+  if (!raw) return "";
+  const label = raw === "hysteria2" ? "HY2" : raw.toUpperCase();
+  return ` <span class="proto-badge pb-${esc(raw)}">${esc(label)}</span>`;
 }
 
 function showToast(msg) {
@@ -393,13 +443,16 @@ function renderSidebarFooter() {
   // Before the first connect the backend status carries no profile_id —
   // fall back to the user's selected (active) profile so the choice made
   // on the profiles tab is visible immediately, not only after Connect.
+  const isAuto = S.selected === "__auto__" || !!st.auto_profile;
   const p = S.profiles.find((x) => x.id === (st.profile_id || S.selected));
   const dot = st.state === "connected" ? "on" : (st.state === "connecting" || st.reconnecting) ? "mid" : "";
   const statusText = st.state === "connected" ? t("vpn.connected") : st.reconnecting ? t("vpn.reconnecting") + (st.attempt ? " " + t("vpn.attempt").replace("{n}", st.attempt) : "") : st.state === "connecting" ? t("vpn.connecting") : t("vpn.unprotected");
+  const title = isAuto ? (p ? t("auto.name") + " · " + p.name : t("auto.name")) : (p ? p.name : (st.profile_name || "—"));
+  const sub = p ? p.host + ":" + p.port : (isAuto ? t("auto.desc") : (st.socks_addr || ""));
   $("sidebar-footer").innerHTML = `
     <div class="sf-status"><div class="sf-dot ${dot}"></div> ${esc(statusText)}</div>
-    <div class="sf-server">${esc(p ? p.name : (st.profile_name || "—"))}</div>
-    <div class="sf-ip">${esc(p ? p.host + ":" + p.port : (st.socks_addr || ""))}</div>`;
+    <div class="sf-server">${esc(title)}</div>
+    <div class="sf-ip">${esc(sub)}</div>`;
 }
 
 function renderVpn() {
@@ -409,6 +462,7 @@ function renderVpn() {
   const reconn = !!st.reconnecting;
   // Same as the sidebar footer: show the selected profile before the
   // backend status ever mentions one (i.e. before the first Connect).
+  const isAuto = S.selected === "__auto__" || !!st.auto_profile;
   const p = S.profiles.find((x) => x.id === (st.profile_id || S.selected)) || null;
   const label = conn ? t("vpn.protected") : reconn ? t("vpn.reconnecting") + (st.attempt ? " " + t("vpn.attempt").replace("{n}", st.attempt) : "") : connecting ? t("vpn.connecting") : t("vpn.unprotected");
   // Connecting and reconnecting are cancellable, so the button says
@@ -416,6 +470,13 @@ function renderVpn() {
   const btnText = conn ? t("vpn.connected") : (connecting || reconn) ? t("vpn.cancel") : t("vpn.disconnected");
   const lat = p && p.latency_ms ? (p.latency_ms < 0 ? "n/a" : p.latency_ms + " ms") : "";
   const tun = !!(S.cfg && S.cfg.tun_enabled);
+  const cardIcon = isAuto ? I.zap : typeIcon(p ? p.type : "");
+  const cardTitle = isAuto
+    ? esc(t("auto.name")) + protoBadge({ id: "__auto__" }) + (p ? protoBadge(p) : "")
+    : esc(p ? p.name : t("vpn.noProfile")) + protoBadge(p) + tlsBadge(p);
+  const cardSub = isAuto
+    ? (p ? t("auto.activeSub").replace("{name}", p.name) + " · " + p.host + ":" + p.port + (lat ? " · " + lat : "") : t("auto.desc"))
+    : (p ? p.host + ":" + p.port + (lat ? " · " + lat : "") : t("vpn.clickSelect"));
   return `
     <div class="vpn-screen">
       <div class="vpn-status ${conn ? "on" : connecting || reconn ? "mid" : ""}"><div class="label">${esc(label)}</div></div>
@@ -429,10 +490,10 @@ function renderVpn() {
         </button>
       </div>
       <div class="profile-card" id="card-profile">
-        <div class="icon-box">${typeIcon(p ? p.type : "")}</div>
+        <div class="icon-box">${cardIcon}</div>
         <div class="srv-info">
-          <div class="srv-name">${esc(p ? p.name : t("vpn.noProfile"))}${tlsBadge(p)}</div>
-          <div class="srv-ping">${esc(p ? p.host + ":" + p.port + (lat ? " · " + lat : "") : t("vpn.clickSelect"))}</div>
+          <div class="srv-name">${cardTitle}</div>
+          <div class="srv-ping">${esc(cardSub)}</div>
         </div>
         ${I.chev}
       </div>
@@ -563,7 +624,7 @@ function profileCard(p) {
     <div class="server-list-item ${active ? "active-server" : ""}" data-id="${p.id}">
       <div class="sli-icon">${typeIcon(p.type)}</div>
       <div class="sli-data">
-        <div class="sli-name">${esc(p.name)}${tlsBadge(p)}</div>
+        <div class="sli-name">${esc(p.name)}${protoBadge(p)}${tlsBadge(p)}</div>
         <div class="sli-addr">${esc(p.host)}:${p.port}</div>
         ${lat}
       </div>
@@ -598,6 +659,22 @@ function renderGroup(key, title, metaHtml, items, emptyKey, actionsHtml) {
     </div>`;
 }
 
+function renderAutoProfileCard() {
+  if (!S.profiles.length) return "";
+  const active = S.selected === "__auto__" || !!S.state.auto_profile;
+  const live = S.state.auto_profile ? S.profiles.find((x) => x.id === S.state.profile_id) : null;
+  const desc = live ? t("auto.activeSub").replace("{name}", live.name) : t("auto.desc");
+  return `
+    <div class="server-list-item auto-profile-card ${active ? "active-server" : ""}" data-id="__auto__">
+      <div class="sli-icon">${I.zap}</div>
+      <div class="sli-data">
+        <div class="sli-name">${esc(t("auto.name"))}${protoBadge({ id: "__auto__" })}</div>
+        <div class="sli-addr">${esc(desc)}</div>
+      </div>
+      <span class="sli-check" style="${active ? "" : "display:none"}">${I.check}</span>
+    </div>`;
+}
+
 function renderProfilesList() {
   const manual = S.profiles.filter((p) => !p.sub_id || !S.subs.some((x) => x.id === p.sub_id));
   const visible = (list) => sortProfiles(list.filter(matchProfile));
@@ -611,7 +688,7 @@ function renderProfilesList() {
     return renderGroup("sub:" + s.id, s.name, meta,
       visible(S.profiles.filter((p) => p.sub_id === s.id)), "subs.emptyGroup", actions);
   }).join("");
-  return groups + (S.subs.length
+  return renderAutoProfileCard() + groups + (S.subs.length
     ? renderGroup("manual", t("profiles.manual"), "", visible(manual), "profiles.empty", "")
     : profileGrid(visible(manual), "profiles.empty"));
 }
@@ -809,8 +886,19 @@ function renderSettings() {
         <input id="s-autoping" type="number" min="0" max="3600"/>
         <label>${esc(t("set.autoconnect"))}</label>
         <select id="s-autoconnect"><option value="">—</option></select>
+        <label>${esc(t("set.hwid"))}<span class="set-note">${esc(t("set.hwidNote"))}</span></label>
+        <div class="hwid-row">
+          <code class="hwid-code" id="s-hwid">${esc((S.devInfo && S.devInfo.id) || "…")}</code>
+          <button class="ghost-btn" id="btn-copy-hwid" type="button" title="${esc(t("tun.copy"))}">${esc(t("tun.copy"))}</button>
+        </div>
+        ${S.coreInfo && S.coreInfo.os === "linux" ? `
+        <label>${esc(t("set.shortcuts"))}<span class="set-note">${esc(t("set.shortcutsNote"))}</span></label>
+        <div><button class="ghost-btn" id="btn-shortcuts" type="button">${esc(t("set.shortcutsBtn"))}</button></div>` : ""}
       </div>
-      <div style="margin-top:10px;"><button class="ghost-btn" id="btn-checkip">${esc(t("set.checkIpNow"))}</button></div>
+      <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="ghost-btn" id="btn-checkip">${esc(t("set.checkIpNow"))}</button>
+        <button class="ghost-btn" id="btn-open-guide-2">${I.book} <span style="margin-left:6px;">${esc(t("guide.btn"))}</span></button>
+      </div>
     </div>`;
   } else if (S.setTab === "conn") {
     body = `
@@ -928,7 +1016,7 @@ function renderSettings() {
       </div>
     </div>`;
   }
-  return `<div class="settings-title">${esc(t("settings.title"))}</div>${bar}${body}
+  return `<div class="settings-head-row"><div class="settings-title">${esc(t("settings.title"))}</div><button class="ghost-btn" id="btn-open-guide">${I.book} <span style="margin-left:6px;">${esc(t("guide.btn"))}</span></button></div>${bar}${body}
     <div style="margin:6px 0 30px;">
       <button class="submit-btn save-btn" id="btn-save-settings">${esc(t("set.save"))}</button>
     </div>`;
@@ -937,9 +1025,13 @@ function renderSettings() {
 // Optimistically show "connecting to X" the moment a switch starts, so the
 // wait is visible; backend state events overwrite this as they arrive.
 function markConnecting(id) {
+  if (id === "__auto__") {
+    renderState({ ...S.state, state: "connecting", auto_profile: true, profile_name: t("auto.name"), error: "" });
+    return;
+  }
   const p = S.profiles.find((x) => x.id === id);
   if (!p) return;
-  renderState({ ...S.state, state: "connecting", profile_id: p.id, profile_name: p.name, error: "" });
+  renderState({ ...S.state, state: "connecting", auto_profile: false, profile_id: p.id, profile_name: p.name, error: "" });
 }
 
 // Reject after ms so a wedged backend call can never lock the busy guard
@@ -1352,6 +1444,20 @@ function wireContent() {
       if (info) relabelCoreButtons(info);
     }).catch(() => { /* detection is cosmetic here */ });
   }
+  on("btn-open-guide", "click", () => openGuideModal());
+  on("btn-open-guide-2", "click", () => openGuideModal());
+  on("btn-copy-hwid", "click", async () => {
+    const id = S.devInfo && S.devInfo.id;
+    if (!id) return;
+    try { await api().CopyToClipboard(id); showToast(t("toast.copied")); }
+    catch (e) { try { await navigator.clipboard.writeText(id); showToast(t("toast.copied")); } catch (_) {} }
+  });
+  on("btn-shortcuts", "click", async () => {
+    try {
+      await api().InstallShortcuts();
+      showToast(t("toast.shortcutsOk"));
+    } catch (e) { showToast((e && e.message) || e); }
+  });
   document.querySelectorAll(".set-tab").forEach((b) => b.addEventListener("click", async () => {
     if (b.dataset.settab === S.setTab) return;
     try { await saveSettings(true); } catch (e) {}
@@ -1422,9 +1528,24 @@ async function fillSettingsForm(s) {
   ["accent", "bg", "card", "fg", "muted"].forEach((k) => setv("ct-" + k, ct[k]));
   const sel = $("s-autoconnect");
   if (sel) {
-    sel.innerHTML = `<option value="">—</option>` + S.profiles.map((p) =>
-      `<option value="${p.id}">${esc(p.name)} (${esc(p.type)})</option>`).join("");
+    sel.innerHTML = `<option value="">—</option>` +
+      (S.profiles.length ? `<option value="__auto__">${esc(t("auto.name"))} (AUTO)</option>` : "") +
+      S.profiles.map((p) => `<option value="${p.id}">${esc(p.name)} (${esc(p.type)})</option>`).join("");
     sel.value = s.auto_connect || "";
+  }
+  if (!S.devInfo && api().GetDeviceInfo) {
+    api().GetDeviceInfo().then((d) => {
+      S.devInfo = d;
+      const el = $("s-hwid");
+      if (el && d && d.id) el.textContent = d.id;
+    }).catch(() => {});
+  }
+  if (!S.coreInfo && api().DetectCores) {
+    api().DetectCores().then((ci) => {
+      const had = !!S.coreInfo;
+      S.coreInfo = ci;
+      if (!had && S.tab === "settings" && S.setTab === "general") renderContent();
+    }).catch(() => {});
   }
 }
 
@@ -1484,12 +1605,11 @@ function hexToRgb(hex) {
 
 function applyScale() {
   const app = $("app");
+  if (!app) return;
   const z = (S.uiScale || 100) / 100;
-  // zoom scales layout too, so shrink the box by 1/z to keep it filling the
-  // window exactly at any scale.
-  app.style.zoom = z;
-  app.style.height = (100 / z) + "vh";
-  app.style.width = (100 / z) + "%";
+  app.style.zoom = "";
+  app.style.height = "";
+  app.style.width = "";
   app.style.setProperty("--ui-zoom", String(z));
 }
 
@@ -1854,7 +1974,146 @@ document.addEventListener("keydown", (ev) => {
   if ($("modal-add") && $("modal-add").classList.contains("show")) closeModal();
   else if ($("modal-share") && $("modal-share").classList.contains("show")) closeShareModal();
   else if ($("modal-edit") && $("modal-edit").classList.contains("show")) closeEditModal();
+  else if ($("modal-update") && $("modal-update").classList.contains("show")) closeUpdateModal();
+  else if ($("modal-guide") && $("modal-guide").classList.contains("show")) closeGuideModal();
 });
+
+// ---------- Update & Guide Modals ----------
+function openUpdateModal(info) {
+  const ov = $("modal-update");
+  if (!ov || !info) return;
+  const verEl = $("upd-modal-ver");
+  if (verEl) verEl.textContent = "v" + (info.current || S.version || "?") + " → v" + (info.latest || "?");
+  const goBtn = $("upd-modal-go");
+  if (goBtn) {
+    goBtn.disabled = !!S.updBusy;
+    goBtn.textContent = S.updReady ? t("set.updRestart") : (S.updBusy ? t("toast.coreDl") : t("set.updApply"));
+  }
+  ov.classList.add("show");
+}
+function closeUpdateModal() {
+  const ov = $("modal-update");
+  if (ov) ov.classList.remove("show");
+}
+
+const GUIDE_SECTIONS = [
+  ["cores", "guide.tabCores"],
+  ["updates", "guide.tabUpdates"],
+  ["features", "guide.tabFeatures"],
+  ["faq", "guide.tabFaq"],
+];
+
+function renderGuideBody(tab) {
+  if (lang === "en") {
+    if (tab === "cores") return `
+      <h4>1. What cores are used?</h4>
+      <ul>
+        <li><code>wisteria-client</code> — native anti-DPI protocol core (Noise + obfuscation + yamux).</li>
+        <li><code>sing-box</code> — universal proxy core for VLESS, VMess, Shadowsocks, Trojan, Hysteria2, TUIC, and system-wide TUN mode.</li>
+        <li><code>xray</code> — optional alternative engine for VLESS (REALITY/XTLS), VMess, Trojan, and Shadowsocks.</li>
+      </ul>
+      <h4>2. Automatic installation</h4>
+      <p>Open <b>Settings → Cores</b> and click <b>Download / Update</b> next to <code>sing-box</code>, <code>xray</code>, or <code>wisteria</code>. On Windows, downloading <code>sing-box</code> also installs <code>wintun.dll</code> automatically.</p>
+      <h4>3. TUN mode permissions</h4>
+      <ul>
+        <li><b>Windows:</b> run the app as Administrator (use the button in Settings → Connection).</li>
+        <li><b>Linux:</b> grant network capability once: <code>sudo setcap cap_net_admin=+ep /path/to/sing-box</code>.</li>
+      </ul>`;
+    if (tab === "updates") return `
+      <h4>App updates</h4>
+      <p>Wisteria checks GitHub Releases on startup and shows a popup when a newer version is published. Click <b>Download and install</b> — the binary is verified via SHA-256 and replaced atomically, then restarted.</p>
+      <h4>Core updates</h4>
+      <p>Go to <b>Settings → Cores</b> to check or update <code>sing-box</code> and <code>xray</code> directly from their official upstream releases without touching your profiles.</p>`;
+    if (tab === "features") return `
+      <h4>Auto-Profile (Failover)</h4>
+      <p>Select <b>Auto-Profile</b> at the top of the Profiles list. Wisteria picks the lowest-latency server and automatically switches to another working profile if the active tunnel drops.</p>
+      <h4>TUN & Bypass RU</h4>
+      <p>Enable <b>TUN mode</b> on the main screen to route all system traffic (including games and non-proxy apps). Russian domains/IPs bypass the tunnel by default unless disabled in Settings → Routing.</p>
+      <h4>Hardware Device ID (HWID)</h4>
+      <p>Each device sends a deterministic hardware fingerprint (<code>X-Device-ID</code>) when refreshing subscriptions so panels can enforce per-link device limits.</p>`;
+    return `
+      <h4>Why does a link fail to connect?</h4>
+      <p>Open <b>Diagnostics</b> (for Wisteria profiles) or <b>Logs</b>. Common causes: expired/revoked key, wrong clock on the device, or missing core binary in <b>Settings → Cores</b>.</p>
+      <h4>How do I share a profile?</h4>
+      <p>Click the share icon on any imported link profile to display its QR code or copy the raw share link.</p>`;
+  }
+  if (tab === "cores") return `
+    <h4>1. Какие ядра используются</h4>
+    <ul>
+      <li><code>wisteria-client</code> — нативное ядро протокола Wisteria (anti-DPI: Noise + обфускация + yamux).</li>
+      <li><code>sing-box</code> — ядро для VLESS, VMess, Shadowsocks, Trojan, Hysteria2, TUIC и системного режима TUN.</li>
+      <li><code>xray</code> — альтернативный движок для VLESS (REALITY/XTLS), VMess, Trojan и Shadowsocks.</li>
+    </ul>
+    <h4>2. Установка в один клик</h4>
+    <p>Перейдите в <b>Настройки → Ядра</b> и нажмите <b>Скачать / Обновить</b> рядом с нужным ядром. На Windows вместе с <code>sing-box</code> автоматически скачивается <code>wintun.dll</code>.</p>
+    <h4>3. Права для режима TUN</h4>
+    <ul>
+      <li><b>Windows:</b> запустите приложение от имени администратора (кнопка в Настройки → Подключение).</li>
+      <li><b>Linux:</b> выдайте права ядру одной командой: <code>sudo setcap cap_net_admin=+ep /путь/к/sing-box</code>.</li>
+    </ul>`;
+  if (tab === "updates") return `
+    <h4>Обновление приложения</h4>
+    <p>При запуске Wisteria проверяет свежие релизы и показывает всплывающее окно при наличии новой версии. Нажмите <b>Скачать и установить</b> — файл проверится по SHA-256, заменится автоматически и перезапустится.</p>
+    <h4>Обновление ядер</h4>
+    <p>В разделе <b>Настройки → Ядра</b> можно в любой момент обновить <code>sing-box</code> и <code>xray</code> из официальных релизов без потери профилей и настроек.</p>`;
+  if (tab === "features") return `
+    <h4>Автопрофиль (Автопереключение)</h4>
+    <p>Выберите карточку <b>Автопрофиль</b> вверху списка профилей. Клиент сам выберет сервер с минимальным пингом и при обрыве связи автоматически переключится на следующий рабочий профиль.</p>
+    <h4>Режим TUN и обход РФ</h4>
+    <p>Переключатель <b>Системный прокси / TUN</b> на главном экране переводит весь трафик системы в туннель. Российские сайты и подсети по умолчанию идут напрямую (настраивается в Настройки → Маршрутизация).</p>
+    <h4>Идентификатор устройства (HWID)</h4>
+    <p>При обновлении подписок приложение передаёт аппаратный отпечаток устройства (<code>X-Device-ID</code>), чтобы панель могла контролировать лимит устройств на одну ссылку.</p>`;
+  return `
+    <h4>Профиль не подключается — что проверить?</h4>
+    <p>Откройте вкладку <b>Диагностика</b> или <b>Логи</b>. Чаще всего причина в отозванном ключе, неточном системном времени или нескачанном ядре в <b>Настройки → Ядра</b>.</p>
+    <h4>Как перенести профиль на телефон?</h4>
+    <p>Нажмите иконку «Поделиться» в строке профиля — откроется QR-код, который можно отсканировать камерой в Wisteria Android.</p>`;
+}
+
+function openGuideModal(tab) {
+  if (tab) S.guideTab = tab;
+  const ov = $("modal-guide");
+  if (!ov) return;
+  const tabsEl = $("guide-tabs");
+  if (tabsEl) {
+    tabsEl.innerHTML = GUIDE_SECTIONS.map(([id, k]) =>
+      `<button class="modal-tab ${S.guideTab === id ? "active" : ""}" data-gtab="${id}">${esc(t(k))}</button>`
+    ).join("");
+    tabsEl.querySelectorAll("[data-gtab]").forEach((b) => b.addEventListener("click", () => {
+      openGuideModal(b.dataset.gtab);
+    }));
+  }
+  const bodyEl = $("guide-body");
+  if (bodyEl) bodyEl.innerHTML = renderGuideBody(S.guideTab);
+  ov.classList.add("show");
+}
+function closeGuideModal() {
+  const ov = $("modal-guide");
+  if (ov) ov.classList.remove("show");
+}
+
+if ($("upd-modal-later")) $("upd-modal-later").addEventListener("click", closeUpdateModal);
+if ($("modal-update")) $("modal-update").addEventListener("click", (ev) => { if (ev.target === $("modal-update")) closeUpdateModal(); });
+if ($("upd-modal-go")) $("upd-modal-go").addEventListener("click", async () => {
+  if (S.updReady) {
+    try { await api().RestartApp(); } catch (e) { showToast((e && e.message) || e); }
+    return;
+  }
+  if (S.updBusy) return;
+  S.updBusy = true;
+  openUpdateModal(S.upd);
+  try {
+    await api().ApplyAppUpdate();
+    S.updReady = true;
+    showToast(t("toast.updReady"));
+  } catch (e) { showToast("✕ " + ((e && e.message) || e)); }
+  S.updBusy = false;
+  openUpdateModal(S.upd);
+  if (S.tab === "settings") renderContent();
+});
+if ($("guide-close")) $("guide-close").addEventListener("click", closeGuideModal);
+if ($("modal-guide")) $("modal-guide").addEventListener("click", (ev) => { if (ev.target === $("modal-guide")) closeGuideModal(); });
+
 
 // manual form extra fields
 function renderExtraFields() {
@@ -1963,7 +2222,12 @@ whenReady(async () => {
   window.runtime.EventsOn("log", () => { if (S.tab === "logs") pullLogs(); });
   window.runtime.EventsOn("appupdate", (info) => {
     S.upd = info;
-    showToast(t("set.updAvail") + ": v" + (info && info.latest));
+    if (info && info.has_update && !S.updModalShown) {
+      S.updModalShown = true;
+      openUpdateModal(info);
+    } else if (info && info.has_update) {
+      showToast(t("set.updAvail") + ": v" + info.latest);
+    }
     if (S.tab === "settings") renderContent();
   });
   // «Открыть логи» on the diagnostics page: the 2s pullWDiag poll rebuilds

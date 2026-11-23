@@ -38,6 +38,7 @@ object EngineHub {
     @Volatile var profileId: String = ""
     @Volatile var profileName: String = ""
     @Volatile var profileType: String = ""
+    @Volatile var autoProfile: Boolean = false
 
     @Volatile var lastHealth: JSONObject? = null
         private set

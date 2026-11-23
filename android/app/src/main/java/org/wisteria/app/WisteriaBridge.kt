@@ -83,6 +83,7 @@ class WisteriaBridge(activity: MainActivity) {
                 .put("type", type)
                 .put("started_at", if (startedAt > 0) AndroidStore.epochIso(startedAt) else "")
                 .put("sys_proxy", false)
+                .put("auto_profile", EngineHub.autoProfile)
                 // An Android VPN is always TUN; the frontend shows its
                 // "tun active" note only while this is true when connected.
                 .put("tun", state == "connected")
@@ -213,6 +214,10 @@ class WisteriaBridge(activity: MainActivity) {
         "ClearLogs" -> { EngineHub.clearLogs(); null }
         "GetAutostart" -> store.autostart()
         "SetAutostart" -> { store.setAutostart(args.getBoolean(0)); null }
+        "GetDeviceInfo" -> JSONObject()
+            .put("id", store.deviceId())
+            .put("name", store.deviceName())
+            .put("os", store.deviceOs())
 
         // ---- desktop-only, honest stubs ----
         "IsElevated" -> false
@@ -252,6 +257,7 @@ class WisteriaBridge(activity: MainActivity) {
         val since = engine.optLong("since", 0)
         out.put("started_at", if (since > 0) AndroidStore.epochIso(since) else "")
         out.put("sys_proxy", false)
+        out.put("auto_profile", EngineHub.autoProfile)
         out.put("tun", running)
         if (running) {
             out.put("socks_addr", engine.optString("endpoint"))
@@ -271,7 +277,11 @@ class WisteriaBridge(activity: MainActivity) {
     // ---- connect / disconnect ----
 
     private fun connect(id: String) {
-        store.profile(id) ?: throw err("профиль не найден")
+        if (id == AndroidStore.AUTO_PROFILE_ID) {
+            if (store.listProfiles().length() == 0) throw err("нет профилей для автоподключения")
+        } else {
+            store.profile(id) ?: throw err("профиль не найден")
+        }
         store.setActive(id)
         // VpnService.prepare(context) is the non-null-safe overload: it does
         // not need the activity, and the consent dialog itself is launched on
@@ -1518,7 +1528,13 @@ class WisteriaBridge(activity: MainActivity) {
         // v2rayN/SFA servers only emit Subscription-Userinfo when the client
         // identifies as one of them; the plain UA still works everywhere.
         conn.setRequestProperty("Accept", "*/*")
+        conn.setRequestProperty("X-Device-ID", store.deviceId())
+        conn.setRequestProperty("X-Device-Name", store.deviceName())
+        conn.setRequestProperty("X-Device-OS", store.deviceOs())
         try {
+            if (conn.responseCode == 403) {
+                throw err("доступ запрещён (403) — возможно, превышен лимит устройств для этой ссылки")
+            }
             if (conn.responseCode !in 200..299) throw err("HTTP ${conn.responseCode}")
             val headers = HashMap<String, String>()
             for ((k, v) in conn.headerFields) {

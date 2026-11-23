@@ -23,6 +23,14 @@ const (
 	subFetchTimeout = 15 * time.Second
 )
 
+// DeviceHeaders identifies this client machine to subscription endpoints that
+// enforce per-link device limits (HWID).
+type DeviceHeaders struct {
+	ID   string
+	Name string
+	OS   string
+}
+
 // SubUserinfo holds quota and expiry metadata from the Subscription-Userinfo
 // response header (v2rayN / sing-box convention).
 type SubUserinfo struct {
@@ -54,6 +62,10 @@ func validateSubURL(u *url.URL) error {
 }
 
 func FetchSubscription(rawURL string, timeout time.Duration) (SubFetch, error) {
+	return FetchSubscriptionWithDevice(rawURL, timeout, DeviceHeaders{})
+}
+
+func FetchSubscriptionWithDevice(rawURL string, timeout time.Duration, dev DeviceHeaders) (SubFetch, error) {
 	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil {
 		return SubFetch{}, fmt.Errorf("некорректный URL подписки: %v", err)
@@ -75,12 +87,29 @@ func FetchSubscription(rawURL string, timeout time.Duration) (SubFetch, error) {
 		return SubFetch{}, err
 	}
 	req.Header.Set("User-Agent", subUserAgent)
+	if dev.ID != "" {
+		req.Header.Set("X-Device-ID", dev.ID)
+	}
+	if dev.Name != "" {
+		req.Header.Set("X-Device-Name", dev.Name)
+	}
+	if dev.OS != "" {
+		req.Header.Set("X-Device-OS", dev.OS)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return SubFetch{}, fmt.Errorf("загрузка: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusForbidden {
+			msgBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+			msg := strings.TrimSpace(string(msgBytes))
+			if msg != "" && !strings.HasPrefix(strings.ToLower(msg), "<") {
+				return SubFetch{}, fmt.Errorf("доступ запрещён (403): %s", msg)
+			}
+			return SubFetch{}, errors.New("доступ запрещён (403) — возможно, превышен лимит устройств для этой ссылки")
+		}
 		return SubFetch{}, fmt.Errorf("сервер ответил %s", resp.Status)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, subMaxBody+1))

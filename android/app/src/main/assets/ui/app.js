@@ -39,6 +39,7 @@ const I = {
   download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
   upload: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
   battery: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="1" y="7" width="17" height="10" rx="2"/><line x1="22" y1="11" x2="22" y2="13"/><line x1="5" y1="11" x2="5" y2="13"/><line x1="9" y1="11" x2="9" y2="13"/></svg>',
+  book: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>',
 };
 
 const THEMES = [
@@ -187,6 +188,20 @@ const I18N = {
     "pull.refreshing": "Обновляю…", "pull.done": "Обновлено", "pull.release": "Отпустите",
     "deeplink.added": "Ссылка добавлена в профили", "deeplink.failed": "Ссылка не распознана",
     "toast.copied": "Скопировано",
+    "auto.name": "Автопрофиль",
+    "auto.desc": "Автоматически выбирает лучший сервер и переключается при сбое",
+    "auto.activeSub": "Активен: {name}",
+    "upd.modalTitle": "Доступно обновление",
+    "upd.modalDesc": "Вышла новая версия Wisteria. Рекомендуем обновиться для получения исправлений и новых функций.",
+    "upd.later": "Позже",
+    "set.hwid": "ID устройства (HWID)",
+    "set.hwidNote": "аппаратный идентификатор для контроля лимита устройств в подписках",
+    "guide.btn": "Справочник и FAQ",
+    "guide.title": "Справочник и FAQ",
+    "guide.tabCores": "Ядра",
+    "guide.tabUpdates": "Обновления",
+    "guide.tabFeatures": "Возможности",
+    "guide.tabFaq": "FAQ",
   },
   en: {
     "brand": "Wisteria",
@@ -322,6 +337,20 @@ const I18N = {
     "pull.refreshing": "Refreshing…", "pull.done": "Refreshed", "pull.release": "Release",
     "deeplink.added": "Link added to profiles", "deeplink.failed": "Link not recognized",
     "toast.copied": "Copied",
+    "auto.name": "Auto-Profile",
+    "auto.desc": "Automatically picks the best server and fails over on drop",
+    "auto.activeSub": "Active: {name}",
+    "upd.modalTitle": "Update available",
+    "upd.modalDesc": "A new version of Wisteria is available. Update now to get the latest fixes and improvements.",
+    "upd.later": "Later",
+    "set.hwid": "Device ID (HWID)",
+    "set.hwidNote": "hardware identifier used for per-link device limits in subscriptions",
+    "guide.btn": "Guide & FAQ",
+    "guide.title": "Guide & FAQ",
+    "guide.tabCores": "Cores",
+    "guide.tabUpdates": "Updates",
+    "guide.tabFeatures": "Features",
+    "guide.tabFaq": "FAQ",
   },
 };
 let lang = "ru";
@@ -359,6 +388,9 @@ const S = {
   traffic: { rx: 0, tx: 0, rxTotal: 0, txTotal: 0, ok: false },
   battery: null, // {ignoring: bool} — refreshed when Settings → System renders
   pendingShare: "", // link shown in the QR modal
+  devInfo: null, // hardware device id (HWID)
+  guideTab: "cores",
+  updModalShown: false,
 };
 const $ = (id) => document.getElementById(id);
 // Android build (android-shim.js sets __PLATFORM before this file loads).
@@ -387,6 +419,15 @@ function tlsBadge(p) {
   if (!p || p.type !== "wisteria" || p.transport !== "tls") return "";
   const tip = p.tls_sni ? "SNI: " + p.tls_sni : t("tls.sniAuto");
   return ` <span class="tls-badge" title="${esc(tip)}">TLS</span>`;
+}
+
+function protoBadge(p) {
+  if (!p) return "";
+  if (p.id === "__auto__") return ' <span class="proto-badge pb-auto">AUTO</span>';
+  const raw = String(p.type || "").toLowerCase();
+  if (!raw) return "";
+  const label = raw === "hysteria2" ? "HY2" : raw.toUpperCase();
+  return ` <span class="proto-badge pb-${esc(raw)}">${esc(label)}</span>`;
 }
 
 function showToast(msg) {
@@ -454,13 +495,16 @@ function renderSidebarFooter() {
   // Before the first connect the backend status carries no profile_id —
   // fall back to the profile selected on the Profiles tab, so the choice
   // is visible immediately instead of "no profile selected".
+  const isAuto = S.selected === "__auto__" || !!st.auto_profile;
   const p = S.profiles.find((x) => x.id === (st.profile_id || S.selected));
   const dot = st.state === "connected" ? "on" : st.state === "connecting" ? "mid" : "";
   const statusText = st.state === "connected" ? t("vpn.connected") : st.state === "connecting" ? t("vpn.connecting") : t("vpn.unprotected");
+  const title = isAuto ? (p ? t("auto.name") + " · " + p.name : t("auto.name")) : (p ? p.name : (st.profile_name || "—"));
+  const sub = p ? p.host + ":" + p.port : (isAuto ? t("auto.desc") : (st.socks_addr || ""));
   $("sidebar-footer").innerHTML = `
     <div class="sf-status"><div class="sf-dot ${dot}"></div> ${esc(statusText)}</div>
-    <div class="sf-server">${esc(p ? p.name : (st.profile_name || "—"))}</div>
-    <div class="sf-ip">${esc(p ? p.host + ":" + p.port : (st.socks_addr || ""))}</div>`;
+    <div class="sf-server">${esc(title)}</div>
+    <div class="sf-ip">${esc(sub)}</div>`;
 }
 
 // Human-readable byte counts for the traffic card and the subscription bar.
@@ -478,11 +522,19 @@ function renderVpn() {
   const conn = st.state === "connected";
   const connecting = st.state === "connecting";
   const reconn = !!st.reconnecting; // always false on Android (no shell-side reconnect field), keeps the markup desktop-identical
+  const isAuto = S.selected === "__auto__" || !!st.auto_profile;
   const p = S.profiles.find((x) => x.id === (st.profile_id || S.selected)) || null;
   const label = conn ? t("vpn.protected") : connecting ? t("vpn.connecting") : t("vpn.unprotected");
   const btnText = conn ? t("vpn.connected") : connecting ? t("vpn.connecting") : t("vpn.disconnected");
   const lat = p && p.latency_ms ? (p.latency_ms < 0 ? "n/a" : p.latency_ms + " ms") : "";
   const noProfiles = S.profiles.length === 0;
+  const cardIcon = isAuto ? I.zap : typeIcon(p ? p.type : "");
+  const cardTitle = isAuto
+    ? esc(t("auto.name")) + protoBadge({ id: "__auto__" }) + (p ? protoBadge(p) : "")
+    : esc(p ? p.name : t("vpn.noProfile")) + protoBadge(p) + tlsBadge(p);
+  const cardSub = isAuto
+    ? (p ? t("auto.activeSub").replace("{name}", p.name) + " · " + p.host + ":" + p.port + (lat ? " · " + lat : "") : t("auto.desc"))
+    : (p ? p.host + ":" + p.port + (lat ? " · " + lat : "") + mirrorsLabel(p) : t("vpn.clickSelect"));
   return `
     <div class="vpn-screen">
       <div class="vpn-status ${conn ? "on" : connecting || reconn ? "mid" : ""}"><div class="label">${esc(label)}</div></div>
@@ -496,10 +548,10 @@ function renderVpn() {
         </button>
       </div>
       <div class="profile-card" id="card-profile">
-        <div class="icon-box">${typeIcon(p ? p.type : "")}</div>
+        <div class="icon-box">${cardIcon}</div>
         <div class="srv-info">
-          <div class="srv-name">${esc(p ? p.name : t("vpn.noProfile"))}${tlsBadge(p)}</div>
-          <div class="srv-ping">${esc(p ? p.host + ":" + p.port + (lat ? " · " + lat : "") + mirrorsLabel(p) : t("vpn.clickSelect"))}</div>
+          <div class="srv-name">${cardTitle}</div>
+          <div class="srv-ping">${esc(cardSub)}</div>
         </div>
         ${I.chev}
       </div>
@@ -563,7 +615,7 @@ function profileCard(p) {
     <div class="server-list-item ${active ? "active-server" : ""}" data-id="${p.id}">
       <div class="sli-icon">${typeIcon(p.type)}</div>
       <div class="sli-data">
-        <div class="sli-name">${esc(p.name)}${tlsBadge(p)}</div>
+        <div class="sli-name">${esc(p.name)}${protoBadge(p)}${tlsBadge(p)}</div>
         <div class="sli-addr">${esc(p.host)}:${p.port}${mirrorsLabel(p)}</div>
         ${lat}
       </div>
@@ -640,6 +692,22 @@ function renderGroup(key, title, metaHtml, items, emptyKey, actionsHtml) {
     </div>`;
 }
 
+function renderAutoProfileCard() {
+  if (!S.profiles.length) return "";
+  const active = S.selected === "__auto__" || !!S.state.auto_profile;
+  const live = S.state.auto_profile ? S.profiles.find((x) => x.id === S.state.profile_id) : null;
+  const desc = live ? t("auto.activeSub").replace("{name}", live.name) : t("auto.desc");
+  return `
+    <div class="server-list-item auto-profile-card ${active ? "active-server" : ""}" data-id="__auto__">
+      <div class="sli-icon">${I.zap}</div>
+      <div class="sli-data">
+        <div class="sli-name">${esc(t("auto.name"))}${protoBadge({ id: "__auto__" })}</div>
+        <div class="sli-addr">${esc(desc)}</div>
+      </div>
+      <span class="sli-check" style="${active ? "" : "display:none"}">${I.check}</span>
+    </div>`;
+}
+
 function renderProfilesList() {
   const manual = S.profiles.filter((p) => !p.sub_id || !S.subs.some((x) => x.id === p.sub_id));
   const visible = (list) => list.filter(matchProfile);
@@ -653,7 +721,7 @@ function renderProfilesList() {
     return renderGroup("sub:" + s.id, s.name, meta,
       visible(S.profiles.filter((p) => p.sub_id === s.id)), "subs.emptyGroup", actions);
   }).join("");
-  return groups + (S.subs.length
+  return renderAutoProfileCard() + groups + (S.subs.length
     ? renderGroup("manual", t("profiles.manual"), "", visible(manual), "profiles.empty", "")
     : profileGrid(visible(manual), "profiles.empty"));
 }
@@ -855,8 +923,16 @@ function renderSettings() {
         <input id="s-autoping" type="number" min="0" max="3600"/>`}
         <label>${esc(t("set.autoconnect"))}</label>
         <select id="s-autoconnect"><option value="">—</option></select>
+        <label>${esc(t("set.hwid"))}<span class="set-note">${esc(t("set.hwidNote"))}</span></label>
+        <div class="hwid-row">
+          <code class="hwid-code" id="s-hwid">${esc((S.devInfo && S.devInfo.id) || "…")}</code>
+          <button class="ghost-btn" id="btn-copy-hwid" type="button">${esc(t("tun.copy") || "Копировать")}</button>
+        </div>
       </div>
-      <div style="margin-top:10px;"><button class="ghost-btn" id="btn-checkip">${esc(t("set.checkIpNow"))}</button></div>
+      <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="ghost-btn" id="btn-checkip">${esc(t("set.checkIpNow"))}</button>
+        <button class="ghost-btn" id="btn-open-guide-2">${I.book}<span>${esc(t("guide.btn"))}</span></button>
+      </div>
     </div>
     ${isAndroid ? `
     <div class="settings-section">
@@ -998,7 +1074,7 @@ function renderSettings() {
       </div>
     </div>`;
   }
-  return `<div class="settings-title">${esc(t("settings.title"))}</div>${bar}${body}
+  return `<div class="settings-head-row"><div class="settings-title">${esc(t("settings.title"))}</div><button class="ghost-btn" id="btn-open-guide">${I.book}<span>${esc(t("guide.btn"))}</span></button></div>${bar}${body}
     <div style="margin:6px 0 30px;">
       <button class="submit-btn save-btn" id="btn-save-settings">${esc(t("set.save"))}</button>
     </div>`;
@@ -1007,10 +1083,15 @@ function renderSettings() {
 // Optimistically show "connecting to X" the moment a switch starts, so the
 // wait is visible; backend state events overwrite this as they arrive.
 function markConnecting(id) {
+  if (id === "__auto__") {
+    S.connectingAt = Date.now();
+    renderState({ ...S.state, state: "connecting", auto_profile: true, profile_name: t("auto.name"), error: "" });
+    return;
+  }
   const p = S.profiles.find((x) => x.id === id);
   if (!p) return;
   S.connectingAt = Date.now();
-  renderState({ ...S.state, state: "connecting", profile_id: p.id, profile_name: p.name, error: "" });
+  renderState({ ...S.state, state: "connecting", auto_profile: false, profile_id: p.id, profile_name: p.name, error: "" });
 }
 
 // Reject after ms so a wedged backend call can never lock the busy guard
@@ -1321,7 +1402,7 @@ function wireProfileList(scope) {
 
 function wireContent() {
   const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
-  if (isAndroid) { segmentify("s-loglevel"); segmentify("s-tunstack"); segmentify("s-splitmode"); segmentify("s-wist-preset"); }
+  if (isAndroid) { segmentify("s-tunstack"); segmentify("s-splitmode"); segmentify("s-wist-preset"); }
 
   on("btn-toggle", "click", async () => {
     if (S.busy) { showToast(t("toast.busy")); return; }
@@ -1470,6 +1551,14 @@ function wireContent() {
   });
   on("btn-upd-singbox", "click", () => updateCore("sing-box"));
   on("btn-upd-xray", "click", () => updateCore("xray"));
+  on("btn-open-guide", "click", () => openGuideModal());
+  on("btn-open-guide-2", "click", () => openGuideModal());
+  on("btn-copy-hwid", "click", async () => {
+    const id = S.devInfo && S.devInfo.id;
+    if (!id) return;
+    try { await api().CopyToClipboard(id); showToast(t("toast.copied")); }
+    catch (e) { try { await navigator.clipboard.writeText(id); showToast(t("toast.copied")); } catch (_) {} }
+  });
   document.querySelectorAll(".set-tab").forEach((b) => b.addEventListener("click", () => {
     S.setTab = b.dataset.settab;
     renderContent();
@@ -1557,9 +1646,17 @@ async function fillSettingsForm(s) {
   setv("s-xray", s.xray_core || "");
   const sel = $("s-autoconnect");
   if (sel) {
-    sel.innerHTML = `<option value="">—</option>` + S.profiles.map((p) =>
-      `<option value="${p.id}">${esc(p.name)} (${esc(p.type)})</option>`).join("");
+    sel.innerHTML = `<option value="">—</option>` +
+      (S.profiles.length ? `<option value="__auto__">${esc(t("auto.name"))} (AUTO)</option>` : "") +
+      S.profiles.map((p) => `<option value="${p.id}">${esc(p.name)} (${esc(p.type)})</option>`).join("");
     sel.value = s.auto_connect || "";
+  }
+  if (!S.devInfo && api().GetDeviceInfo) {
+    api().GetDeviceInfo().then((d) => {
+      S.devInfo = d;
+      const el = $("s-hwid");
+      if (el && d && d.id) el.textContent = d.id;
+    }).catch(() => {});
   }
   // The form is filled after the segments were built (async GetSettings):
   // move the highlight to the real values, not the template defaults.
@@ -1994,7 +2091,119 @@ document.addEventListener("keydown", (ev) => {
   if ($("modal-add") && $("modal-add").classList.contains("show")) closeModal();
   else if ($("modal-share") && $("modal-share").classList.contains("show")) closeShareModal();
   else if ($("modal-edit") && $("modal-edit").classList.contains("show")) closeEditModal();
+  else if ($("modal-update") && $("modal-update").classList.contains("show")) closeUpdateModal();
+  else if ($("modal-guide") && $("modal-guide").classList.contains("show")) closeGuideModal();
 });
+
+// ---------- Update & Guide Modals ----------
+function openUpdateModal(info) {
+  const ov = $("modal-update");
+  if (!ov || !info) return;
+  const verEl = $("upd-modal-ver");
+  if (verEl) verEl.textContent = "v" + (info.current || S.version || "?") + " → v" + (info.latest || "?");
+  ov.classList.add("show");
+}
+function closeUpdateModal() {
+  const ov = $("modal-update");
+  if (ov) ov.classList.remove("show");
+}
+
+const GUIDE_SECTIONS = [
+  ["cores", "guide.tabCores"],
+  ["updates", "guide.tabUpdates"],
+  ["features", "guide.tabFeatures"],
+  ["faq", "guide.tabFaq"],
+];
+
+function renderGuideBody(tab) {
+  if (lang === "en") {
+    if (tab === "cores") return `
+      <h4>1. Built-in engines</h4>
+      <ul>
+        <li><code>wisteria</code> — native anti-DPI protocol engine (Noise + obfuscation + yamux).</li>
+        <li><code>sing-box</code> — embedded core for VLESS, VMess, Shadowsocks, Trojan, Hysteria2, and TUIC.</li>
+      </ul>
+      <h4>2. Do I need to download cores manually?</h4>
+      <p>No — on Android both engines are bundled inside the application package. You can import share links or subscriptions right away.</p>
+      <h4>3. Battery optimization</h4>
+      <p>Disable battery optimization for Wisteria in <b>Settings → General → System</b> so Android does not suspend the VPN tunnel in the background.</p>`;
+    if (tab === "updates") return `
+      <h4>App updates</h4>
+      <p>Wisteria checks GitHub Releases on startup and shows a popup notification when a new release is available. Tap <b>Download and install</b> to open the release page and install the updated APK over your current version.</p>`;
+    if (tab === "features") return `
+      <h4>Auto-Profile (Failover)</h4>
+      <p>Select <b>Auto-Profile</b> at the top of the Profiles tab. Wisteria picks the best available server and automatically switches to another profile if the connection drops.</p>
+      <h4>Split-tunnel & RU bypass</h4>
+      <p>In <b>Settings → Routing</b> you can bypass Russian subnets (Android 13+) or pick specific apps to exclude from / route through the tunnel.</p>
+      <h4>Hardware Device ID (HWID)</h4>
+      <p>Each device sends a stable hardware fingerprint (<code>X-Device-ID</code>) when refreshing subscriptions so panels can enforce per-link device limits.</p>`;
+    return `
+      <h4>Why does a link fail to connect?</h4>
+      <p>Open <b>Diagnostics</b> (for Wisteria profiles) or <b>Logs</b>. Common causes: expired/revoked key, wrong device clock, or network restrictions.</p>
+      <h4>How do I share a profile?</h4>
+      <p>Tap the share icon on any imported link profile to show its QR code or send the raw link.</p>`;
+  }
+  if (tab === "cores") return `
+    <h4>1. Встроенные ядра</h4>
+    <ul>
+      <li><code>wisteria</code> — нативный движок протокола Wisteria (anti-DPI: Noise + обфускация + yamux).</li>
+      <li><code>sing-box</code> — встроенное ядро для VLESS, VMess, Shadowsocks, Trojan, Hysteria2 и TUIC.</li>
+    </ul>
+    <h4>2. Нужно ли скачивать ядра вручную?</h4>
+    <p>Нет — в Android-версии оба движка уже встроены в приложение. Достаточно добавить share-ссылку или подписку и нажать <b>Connect</b>.</p>
+    <h4>3. Оптимизация батареи</h4>
+    <p>Отключите оптимизацию батареи для Wisteria в <b>Настройки → Основные → Система</b>, чтобы Android не останавливал VPN в фоне.</p>`;
+  if (tab === "updates") return `
+    <h4>Обновление приложения</h4>
+    <p>При запуске Wisteria проверяет свежие релизы и показывает всплывающее окно, если вышла новая версия. Нажмите <b>Скачать и установить</b>, чтобы открыть страницу релиза и установить свежий APK поверх текущей версии.</p>`;
+  if (tab === "features") return `
+    <h4>Автопрофиль (Автопереключение)</h4>
+    <p>Выберите карточку <b>Автопрофиль</b> вверху списка профилей. Приложение выберет лучший сервер и при обрыве связи автоматически переключится на следующий рабочий профиль.</p>
+    <h4>Split-tunnel и обход РФ</h4>
+    <p>В разделе <b>Настройки → Маршрутизация</b> можно включить обход российских подсетей (Android 13+) или выбрать отдельные приложения, которые пойдут мимо туннеля.</p>
+    <h4>Идентификатор устройства (HWID)</h4>
+    <p>При обновлении подписок приложение передаёт аппаратный отпечаток устройства (<code>X-Device-ID</code>), чтобы панель могла контролировать лимит устройств на одну ссылку.</p>`;
+  return `
+    <h4>Профиль не подключается — что проверить?</h4>
+    <p>Откройте вкладку <b>Диагностика</b> или <b>Логи</b>. Чаще всего причина в отозванном ключе, неточном времени на телефоне или блокировке на стороне сети.</p>
+    <h4>Как поделиться профилем?</h4>
+    <p>Нажмите иконку «Поделиться» в строке профиля — откроется QR-код и кнопка отправки ссылки.</p>`;
+}
+
+function openGuideModal(tab) {
+  if (tab) S.guideTab = tab;
+  const ov = $("modal-guide");
+  if (!ov) return;
+  const tabsEl = $("guide-tabs");
+  if (tabsEl) {
+    tabsEl.innerHTML = GUIDE_SECTIONS.map(([id, k]) =>
+      `<button class="modal-tab ${S.guideTab === id ? "active" : ""}" data-gtab="${id}">${esc(t(k))}</button>`
+    ).join("");
+    tabsEl.querySelectorAll("[data-gtab]").forEach((b) => b.addEventListener("click", () => {
+      openGuideModal(b.dataset.gtab);
+    }));
+  }
+  const bodyEl = $("guide-body");
+  if (bodyEl) bodyEl.innerHTML = renderGuideBody(S.guideTab);
+  ov.classList.add("show");
+}
+function closeGuideModal() {
+  const ov = $("modal-guide");
+  if (ov) ov.classList.remove("show");
+}
+
+if ($("upd-modal-later")) $("upd-modal-later").addEventListener("click", closeUpdateModal);
+if ($("modal-update")) $("modal-update").addEventListener("click", (ev) => { if (ev.target === $("modal-update")) closeUpdateModal(); });
+if ($("upd-modal-go")) $("upd-modal-go").addEventListener("click", async () => {
+  try {
+    const target = (S.upd && (S.upd.url || S.upd.latest)) || "";
+    closeUpdateModal();
+    await api().ApplyAppUpdate(target);
+  } catch (e) { showToast("✕ " + ((e && e.message) || e)); }
+});
+if ($("guide-close")) $("guide-close").addEventListener("click", closeGuideModal);
+if ($("modal-guide")) $("modal-guide").addEventListener("click", (ev) => { if (ev.target === $("modal-guide")) closeGuideModal(); });
+
 $("btn-qr-copy").addEventListener("click", async () => {
   try { await api().CopyToClipboard(S.pendingShare); showToast(t("toast.copied")); }
   catch (e) { showToast((e && e.message) || e); }
@@ -2239,7 +2448,12 @@ whenReady(async () => {
   window.runtime.EventsOn("log", () => { if (S.tab === "logs") pullLogs(); });
   window.runtime.EventsOn("appupdate", (info) => {
     S.upd = info;
-    showToast(t("set.updAvail") + ": v" + (info && info.latest));
+    if (info && info.has_update && !S.updModalShown) {
+      S.updModalShown = true;
+      openUpdateModal(info);
+    } else if (info && info.has_update) {
+      showToast(t("set.updAvail") + ": v" + info.latest);
+    }
     if (S.tab === "settings") renderContent();
   });
   // Launch-time update check, mirroring the desktop (s-updcheck setting).
@@ -2250,7 +2464,12 @@ whenReady(async () => {
       const info = await api().CheckAppUpdate();
       if (info && info.has_update) {
         S.upd = info;
-        showToast(t("set.updAvail") + ": v" + info.latest);
+        if (!S.updModalShown) {
+          S.updModalShown = true;
+          openUpdateModal(info);
+        } else {
+          showToast(t("set.updAvail") + ": v" + info.latest);
+        }
         if (S.tab === "settings") renderContent();
       }
     } catch (e) { /* offline or rate-limited — stay silent */ }

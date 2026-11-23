@@ -356,3 +356,73 @@ html.platform-android .edit-box { max-width: 420px; }
 @media (max-width: 380px) {
   .set-grid { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ---------- Mobile Settings button sizing & layout fixes (#2) ---------- */
+html.platform-android .set-grid {
+  padding: 16px;
+  gap: 12px 12px;
+}
+html.platform-android .set-grid .ghost-btn,
+html.platform-android .settings-section > div > .ghost-btn,
+html.platform-android .sys-actions .ghost-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 10px 14px;
+  font-size: 13px;
+  line-height: 1.25;
+  text-align: center;
+  white-space: normal;
+  border-radius: 12px;
+}
+html.platform-android .set-grid .ghost-btn {
+  width: 100%;
+}
+html.platform-android .set-grid .hwid-row .ghost-btn {
+  width: auto;
+  flex-shrink: 0;
+  padding: 8px 12px;
+  min-height: 36px;
+}
+html.platform-android .set-grid .ghost-btn svg,
+html.platform-android .sys-actions .ghost-btn svg,
+html.platform-android .settings-head-row .ghost-btn svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+html.platform-android .sys-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+html.platform-android .sys-actions .ghost-btn {
+  width: 100%;
+}
+html.platform-android .ab-seg button {
+  min-height: 40px;
+  padding: 10px 8px;
+  font-size: 13px;
+}
+html.platform-android .save-btn {
+  width: 100%;
+  min-height: 48px;
+  padding: 14px 20px;
+  font-size: 15px;
+}
+html.platform-android .settings-head-row .ghost-btn {
+  padding: 9px 12px;
+  font-size: 12.5px;
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+html.platform-android #s-loglevel {
+  min-height: 42px;
+  padding: 10px 12px;
+  font-size: 13.5px;
+}

@@ -372,3 +372,45 @@ textarea:focus-visible, [tabindex]:focus-visible {
   .profile-card:hover, .server-list-item:hover { transform: translateY(-2px); border-color: rgba(var(--accent-rgb), .35); box-shadow: 0 6px 22px rgba(0,0,0,.28); }
   .connect-btn:hover:not(:disabled) { transform: scale(1.02); }
 }
+
+/* ---------- protocol badges, auto-profile, update modal, guide & HWID ---------- */
+.proto-badge { display: inline-block; font-size: 9px; font-weight: 700; letter-spacing: .55px; line-height: 1; text-transform: uppercase; padding: 2.5px 5px; border-radius: 5px; margin-left: 6px; vertical-align: 1px; font-family: 'JetBrains Mono', monospace; background: rgba(var(--accent-rgb), .14); color: var(--accent); border: 1px solid rgba(var(--accent-rgb), .35); }
+.proto-badge.pb-wisteria { background: rgba(167, 139, 250, .16); color: #c4b5fd; border-color: rgba(167, 139, 250, .42); }
+.proto-badge.pb-vless { background: rgba(56, 189, 248, .15); color: #7dd3fc; border-color: rgba(56, 189, 248, .38); }
+.proto-badge.pb-hysteria2, .proto-badge.pb-hy2 { background: rgba(251, 146, 60, .15); color: #fdba74; border-color: rgba(251, 146, 60, .38); }
+.proto-badge.pb-tuic { background: rgba(52, 211, 153, .15); color: #6ee7b7; border-color: rgba(52, 211, 153, .38); }
+.proto-badge.pb-vmess, .proto-badge.pb-trojan, .proto-badge.pb-ss { background: rgba(244, 114, 182, .14); color: #f9a8d4; border-color: rgba(244, 114, 182, .35); }
+.proto-badge.pb-auto { background: rgba(var(--accent-rgb), .2); color: var(--accent); border-color: rgba(var(--accent-rgb), .5); }
+.theme-arctic .proto-badge.pb-wisteria { color: #5b21b6; }
+.theme-arctic .proto-badge.pb-vless { color: #0369a1; }
+.theme-arctic .proto-badge.pb-hysteria2, .theme-arctic .proto-badge.pb-hy2 { color: #c2410c; }
+.theme-arctic .proto-badge.pb-tuic { color: #047857; }
+.theme-arctic .proto-badge.pb-vmess, .theme-arctic .proto-badge.pb-trojan, .theme-arctic .proto-badge.pb-ss { color: #be185d; }
+
+.auto-profile-card { margin-bottom: 14px; border-style: dashed; border-color: rgba(var(--accent-rgb), .38); }
+.auto-profile-card.active-server { border-style: solid; }
+
+.upd-modal-box { max-width: 420px; text-align: center; padding: 26px 22px 22px; }
+.upd-modal-icon { width: 50px; height: 50px; margin: 0 auto 14px; border-radius: 16px; background: rgba(var(--accent-rgb), .16); color: var(--accent); display: flex; align-items: center; justify-content: center; box-shadow: 0 6px 20px rgba(var(--accent-rgb), .22); }
+.upd-modal-icon svg { width: 24px; height: 24px; }
+.upd-modal-title { font-size: 19px; font-weight: 700; margin-bottom: 6px; }
+.upd-modal-ver { display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 600; color: var(--accent); background: rgba(var(--accent-rgb), .12); border: 1px solid rgba(var(--accent-rgb), .32); padding: 3px 10px; border-radius: 20px; margin-bottom: 12px; }
+.upd-modal-desc { font-size: 13.5px; color: var(--muted); line-height: 1.55; margin-bottom: 20px; }
+.upd-modal-actions { display: flex; gap: 10px; align-items: center; }
+.upd-modal-actions .ghost-btn { flex: 1; padding: 13px 14px; }
+.upd-modal-actions .submit-btn { flex: 1.4; margin-top: 0; padding: 13px 14px; font-size: 14px; }
+
+.guide-box { max-width: 640px; }
+.guide-tabs { flex-wrap: wrap; gap: 6px; }
+.guide-body { font-size: 13.5px; line-height: 1.6; color: var(--fg); user-select: text; }
+.guide-body h4 { font-size: 14px; font-weight: 700; color: var(--accent); margin: 14px 0 6px; }
+.guide-body h4:first-child { margin-top: 0; }
+.guide-body p { color: var(--muted); margin-bottom: 8px; }
+.guide-body ul { padding-left: 18px; color: var(--muted); margin-bottom: 10px; }
+.guide-body li { margin-bottom: 5px; }
+.guide-body code { font-family: 'JetBrains Mono', monospace; font-size: 12px; background: rgba(var(--accent-rgb), .1); color: var(--fg); padding: 2px 6px; border-radius: 6px; }
+
+.hwid-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.hwid-code { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--accent); background: rgba(var(--accent-rgb), .08); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; flex: 1; min-width: 0; }
+.settings-head-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 16px 0 18px; width: 100%; }
+.settings-head-row .settings-title { margin: 0; width: auto; }

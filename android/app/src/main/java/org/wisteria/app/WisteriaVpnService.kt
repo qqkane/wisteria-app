@@ -186,26 +186,79 @@ class WisteriaVpnService : VpnService() {
     /** Serialized teardown of the dead session + a delayed connect of the
      *  active profile. connect("") re-reads the active id, so a profile
      *  renamed/switched while offline reconnects to the current one. */
+    private val autoTriedIds = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    private fun pickAutoCandidate(store: AndroidStore, excludeId: String = ""): JSONObject? {
+        val arr = store.listProfiles()
+        val list = ArrayList<Pair<Int, JSONObject>>(arr.length())
+        for (i in 0 until arr.length()) {
+            val p = arr.getJSONObject(i)
+            val id = p.optString("id")
+            if (id.isEmpty() || id == AndroidStore.AUTO_PROFILE_ID) continue
+            list.add(i to p)
+        }
+        if (list.isEmpty()) return null
+        fun tier(ms: Long): Int = when {
+            ms > 0L -> 0
+            ms == 0L -> 1
+            else -> 2
+        }
+        list.sortWith { a, b ->
+            val la = a.second.optLong("latency_ms", 0L)
+            val lb = b.second.optLong("latency_ms", 0L)
+            val ta = tier(la)
+            val tb = tier(lb)
+            if (ta != tb) ta.compareTo(tb)
+            else if (ta == 0 && la != lb) la.compareTo(lb)
+            else a.first.compareTo(b.first)
+        }
+        if (list.size == 1) return list[0].second
+        for ((_, p) in list) {
+            val id = p.optString("id")
+            if (id != excludeId && !autoTriedIds.contains(id)) {
+                autoTriedIds.add(id)
+                return p
+            }
+        }
+        autoTriedIds.clear()
+        for ((_, p) in list) {
+            val id = p.optString("id")
+            if (id != excludeId) {
+                autoTriedIds.add(id)
+                return p
+            }
+        }
+        val first = list[0].second
+        autoTriedIds.add(first.optString("id"))
+        return first
+    }
+
     private fun scheduleReconnect() {
         if (userStopped) return
         if (!reconnectQueued.compareAndSet(false, true)) return
         val delay = backoffSecs[min(reconnectStep, backoffSecs.size - 1)]
         reconnectStep++
-        // Generation this reconnect attempt belongs to, sampled when the
-        // backoff is scheduled: a Cancel (or a fresh Connect, which also
-        // bumps the epoch) that lands during the delay must abort this
-        // attempt instead of letting it fire with the newest generation.
         val epoch = cancelEpoch
+        val failedId = EngineHub.profileId
         EngineHub.appLog("автопереподключение через ${delay}с (попытка $reconnectStep)")
         watchdogExec.schedule({
             if (userStopped) { reconnectQueued.set(false); return@schedule }
             executor.execute {
                 if (userStopped) { reconnectQueued.set(false); return@execute }
                 if (cancelEpoch != epoch) { reconnectQueued.set(false); return@execute }
+                val wasAuto = EngineHub.autoProfile
                 teardown()
-                // Internal relaunch: nobody called startForegroundService
-                // for it, so a backgrounded app must not crash the retry.
-                connect("", epoch, fgsRequired = false)
+                if (wasAuto) {
+                    val store = AndroidStore(this)
+                    val next = pickAutoCandidate(store, failedId)
+                    if (next != null) {
+                        EngineHub.autoProfile = true
+                        EngineHub.appLog("автопрофиль: переключаюсь на «${next.optString("name")}»")
+                        connect(next.optString("id"), epoch, fgsRequired = false, keepAuto = true)
+                        return@execute
+                    }
+                }
+                connect("", epoch, fgsRequired = false, keepAuto = wasAuto)
             }
         }, delay.toLong(), TimeUnit.SECONDS)
     }
@@ -362,6 +415,8 @@ class WisteriaVpnService : VpnService() {
                 // the teardown removes the notification again.
                 tryStartForeground("disconnected")
                 userStopped = true // cancels the watchdog and the reconnect queue
+                EngineHub.autoProfile = false
+                autoTriedIds.clear()
                 cancelEpoch++ // invalidates CONNECT intents queued before this cancel
                 stopWatchdog()
                 teardown()
@@ -441,16 +496,26 @@ class WisteriaVpnService : VpnService() {
         super.onDestroy()
     }
 
-    private fun connect(profileIdParam: String, myCancelEpoch: Long, fgsRequired: Boolean = true) {
+    private fun connect(profileIdParam: String, myCancelEpoch: Long, fgsRequired: Boolean = true, keepAuto: Boolean = false) {
         val store = AndroidStore(this)
-        // Resolve the target BEFORE the duplicate check: "Connect" is also
-        // the switch-while-connected call (the frontend does SetActive +
-        // Connect on a profile tap), so a live session must be told apart
-        // from a real duplicate by *which* profile it runs. An empty request
-        // while a session is up means "the one that is running" — never tear
-        // a live tunnel down just because the active pointer is empty.
-        val targetId = profileIdParam.ifEmpty {
+        val rawTarget = profileIdParam.ifEmpty {
             store.activeId().ifEmpty { EngineHub.profileId }
+        }
+        val isAutoRequest = rawTarget == AndroidStore.AUTO_PROFILE_ID || keepAuto
+        val targetId = if (rawTarget == AndroidStore.AUTO_PROFILE_ID) {
+            autoTriedIds.clear()
+            val picked = pickAutoCandidate(store)
+            if (picked != null) {
+                EngineHub.autoProfile = true
+                EngineHub.appLog("автопрофиль: выбран «${picked.optString("name")}»")
+                picked.optString("id")
+            } else {
+                ""
+            }
+        } else {
+            EngineHub.autoProfile = keepAuto
+            if (!keepAuto) autoTriedIds.clear()
+            rawTarget
         }
 
         var switchFrom: String? = null
@@ -1045,6 +1110,7 @@ class WisteriaVpnService : VpnService() {
                 EngineHub.profileId = ""
                 EngineHub.profileName = ""
                 EngineHub.profileType = ""
+                EngineHub.autoProfile = false
                 sessionStartEpoch = 0 // the pushed "disconnected" must not carry a stale started_at
                 if (pushState) EngineHub.pushEvent("state", statusJson("disconnected"))
                 WisteriaTileService.refresh(this)

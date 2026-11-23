@@ -23,6 +23,7 @@ class AndroidStore(private val context: Context) {
         get() = context.getSharedPreferences("wisteria", Context.MODE_PRIVATE)
 
     companion object {
+        const val AUTO_PROFILE_ID = "__auto__" 
         /** Every caller (bridge, VPN service, BootReceiver) builds its own
          *  AndroidStore instance; the old @Synchronized-on-instance guards
          *  therefore guarded nothing: load→modify→save pairs running on
@@ -310,6 +311,55 @@ class AndroidStore(private val context: Context) {
             prefs.edit().putBoolean("autostart", on).apply()
         }
     }
+
+    // ---- hardware device fingerprint (HWID) ----
+
+    fun deviceId(): String = synchronized(STORE_LOCK) {
+        val aid = try {
+            android.provider.Settings.Secure.getString(
+                context.contentResolver,
+                android.provider.Settings.Secure.ANDROID_ID
+            ).orEmpty().trim()
+        } catch (_: Throwable) {
+            ""
+        }
+        val hw = listOf(
+            android.os.Build.BOARD,
+            android.os.Build.BRAND,
+            android.os.Build.DEVICE,
+            android.os.Build.HARDWARE,
+            android.os.Build.MANUFACTURER,
+            android.os.Build.MODEL,
+            android.os.Build.PRODUCT,
+        ).joinToString(":") { it.orEmpty().trim().lowercase(Locale.US) }
+
+        val seed = if (aid.isNotEmpty() && aid != "9774d56d682e549c") {
+            "android:$aid|$hw"
+        } else {
+            val saved = prefs.getString("device_fallback_id", null)
+            val fallback = if (!saved.isNullOrEmpty()) saved else {
+                val gen = UUID.randomUUID().toString().replace("-", "")
+                prefs.edit().putString("device_fallback_id", gen).apply()
+                gen
+            }
+            "fallback:$fallback|$hw"
+        }
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(("wisteria-hwid-v1:$seed").toByteArray(Charsets.UTF_8))
+        digest.take(16).joinToString("") { "%02x".format(it) }
+    }
+
+    fun deviceName(): String {
+        val manu = android.os.Build.MANUFACTURER.orEmpty().trim()
+        val model = android.os.Build.MODEL.orEmpty().trim()
+        return when {
+            model.isEmpty() -> "Android"
+            manu.isNotEmpty() && !model.lowercase(Locale.US).startsWith(manu.lowercase(Locale.US)) -> "$manu $model"
+            else -> model
+        }
+    }
+
+    fun deviceOs(): String = "android" 
 
     private fun hostOf(url: String): String = try {
         java.net.URI(url).host ?: url

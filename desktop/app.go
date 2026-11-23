@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	stdruntime "runtime"
 	"strings"
 	"sync"
 	"time"
@@ -114,7 +115,16 @@ func (a *App) startup(ctx context.Context) {
 		st := a.svc.Status()
 		runtime.EventsEmit(ctx, "state", st)
 	})
+	a.svc.SetProfileProvider(func() []core.Profile {
+		if a.store == nil {
+			return nil
+		}
+		return a.store.List()
+	})
 	a.svc.LoadSettings()
+	if stdruntime.GOOS == "linux" {
+		_, _ = core.InstallLinuxShortcuts(false)
+	}
 	core.SetGitHubToken(a.svc.Settings().GitHubToken)
 	// First-run onboarding defaults: a VPN client is expected to take over
 	// the system proxy (v2rayN/NekoBox behaviour). A stale proxy entry left
@@ -148,7 +158,10 @@ func (a *App) startup(ctx context.Context) {
 		runtime.WindowMinimise(ctx)
 	}
 	if set := a.svc.Settings(); set.AutoConnect != "" {
-		if p, err := a.store.Get(set.AutoConnect); err == nil {
+		if set.AutoConnect == core.AutoProfileID {
+			a.logf("автоподключение: Автопрофиль")
+			go func() { _ = a.svc.StartAuto() }()
+		} else if p, err := a.store.Get(set.AutoConnect); err == nil {
 			a.logf("автоподключение: %s", p.Name)
 			go func() { _ = a.svc.Start(p) }()
 		}
@@ -665,7 +678,11 @@ func (a *App) RefreshSubscription(id string) (core.Subscription, error) {
 	if err != nil {
 		return sub, err
 	}
-	fetch, err := core.FetchSubscription(sub.URL, 15*time.Second)
+	fetch, err := core.FetchSubscriptionWithDevice(sub.URL, 15*time.Second, core.DeviceHeaders{
+		ID:   core.DeviceID(a.dirs.Data),
+		Name: core.DeviceName(),
+		OS:   core.DeviceOS(),
+	})
 	if err != nil {
 		sub.Error = err.Error()
 		_ = a.store.UpdateSubscription(sub)
@@ -776,13 +793,22 @@ func (a *App) ImportFromClipboard() (ClipImport, error) {
 // connection, not the click: if the new session fails to start, the check
 // in the profiles list stays on the profile that is actually running.
 func (a *App) Connect(id string) error {
-	p, err := a.store.Get(id)
-	if err != nil {
-		return err
-	}
 	prev := ""
 	if ap, ok := a.store.Active(); ok {
 		prev = ap.ID
+	}
+	if id == core.AutoProfileID {
+		if err := a.svc.StartAuto(); err != nil {
+			if prev != "" && prev != id {
+				_ = a.store.SetActive(prev)
+			}
+			return err
+		}
+		return a.store.SetActive(id)
+	}
+	p, err := a.store.Get(id)
+	if err != nil {
+		return err
 	}
 	if err := a.svc.Start(p); err != nil {
 		if prev != "" && prev != id {
@@ -949,6 +975,30 @@ func (a *App) SetAutostart(on bool) error {
 		a.logf("автозапуск: %v", on)
 	}
 	return err
+}
+
+// DeviceInfo describes this machine's hardware identifier for subscription limits.
+type DeviceInfo struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	OS   string `json:"os"`
+}
+
+func (a *App) GetDeviceInfo() DeviceInfo {
+	return DeviceInfo{
+		ID:   core.DeviceID(a.dirs.Data),
+		Name: core.DeviceName(),
+		OS:   core.DeviceOS(),
+	}
+}
+
+// InstallShortcuts creates the application menu and Desktop launcher on Linux.
+func (a *App) InstallShortcuts() (string, error) {
+	p, err := core.InstallLinuxShortcuts(true)
+	if err == nil {
+		a.logf("ярлыки созданы: %s", p)
+	}
+	return p, err
 }
 
 func (a *App) Version() string { return appVersion }

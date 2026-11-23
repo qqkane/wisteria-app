@@ -1,7 +1,7 @@
 package main
 
-// Wisteria Desktop — Windows GUI client for the wisteria protocol, with
-// sing-box based support for the common proxy protocols (ss/vmess/vless/
+// Wisteria Desktop — Windows/Linux GUI client for the wisteria protocol, with
+// sing-box/xray based support for the common proxy protocols (ss/vmess/vless/
 // trojan/hysteria2/tuic). Architecture: a GUI shell supervising core
 // binaries as subprocesses (the v2rayN model); the wisteria core is the
 // same wisteria-client the repo ships.
@@ -12,6 +12,7 @@ import (
 	"os"
 	"runtime"
 
+	"github.com/qqkane/wisteria-app/desktop/internal/core"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
@@ -21,7 +22,11 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+//go:embed frontend/dist/assets/icon.png
+var appIconPNG []byte
+
 func main() {
+	core.SetAppIcon(appIconPNG)
 	if runtime.GOOS == "linux" {
 		// WebKit2GTK's DMABUF renderer is pathologically slow on NVIDIA
 		// proprietary setups (CSS animations drop to ~20-30 fps, sometimes

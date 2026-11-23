@@ -22,6 +22,15 @@ android {
         buildConfig true
     }
 
+    // Compress native .so libraries (libgojni.so for arm64/arm) inside the APK
+    // archive so downloads are significantly smaller while unpacking cleanly
+    // on installation.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
     // Release signing: the permanent keystore (restored from CI secrets)
     // when present and its password is exported, else the debug key so
     // local and secret-less CI builds keep assembling. The permanent key is

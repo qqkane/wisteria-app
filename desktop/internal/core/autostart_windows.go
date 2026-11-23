@@ -5,6 +5,7 @@ package core
 // Autostart via the HKCU Run key (per-user, no admin).
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 
@@ -17,6 +18,14 @@ const autostartValue = "WisteriaDesktop"
 // legacyAutostartValue: the pre-rename entry (v0.3.0 and earlier). It points
 // at an exe name that no longer exists, so it is removed opportunistically.
 const legacyAutostartValue = "WysteriaDesktop"
+
+// SetAppIcon is a no-op on Windows (resources are embedded via winres).
+func SetAppIcon(_ []byte) {}
+
+// InstallLinuxShortcuts is Linux-only.
+func InstallLinuxShortcuts(_ bool) (string, error) {
+	return "", errors.New("ярлыки XDG поддерживаются только на Linux")
+}
 
 func SetAutostart(on bool) error {
 	k, err := registry.OpenKey(registry.CURRENT_USER, runKey, registry.SET_VALUE|registry.QUERY_VALUE)

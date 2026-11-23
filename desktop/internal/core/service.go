@@ -24,8 +24,8 @@ package core
 
 import (
 	"bufio"
-	"encoding/json"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -76,6 +76,7 @@ type Status struct {
 	HttpAddr     string    `json:"http_addr,omitempty"`
 	SysProxy     bool      `json:"sys_proxy"`
 	Tun          bool      `json:"tun"`          // TUN helper active (all-system traffic)
+	AutoProfile  bool      `json:"auto_profile"` // automatic failover across profiles is active
 	Reconnecting bool      `json:"reconnecting"` // session died; auto-reconnect is scheduling
 	Attempt      int       `json:"attempt,omitempty"`
 	Error        string    `json:"error,omitempty"`
@@ -361,10 +362,10 @@ type Service struct {
 	ring     *LogRing
 	notify   func() // called on every state change
 
-	sess       *session
-	wstStatus  string     // wisteria --status file path ("" when not a wisteria session)
-	wstEvents  []WEvent   // classified connect-loop feed for the diagnostics page
-	wstHealth  CoreHealth // latest health slice (log spam consumed, not logged)
+	sess      *session
+	wstStatus string     // wisteria --status file path ("" when not a wisteria session)
+	wstEvents []WEvent   // classified connect-loop feed for the diagnostics page
+	wstHealth CoreHealth // latest health slice (log spam consumed, not logged)
 	// sing-box capability cache. Keyed by the binary's path, size and
 	// mtime, so a fresh download or a path change in Settings re-probes
 	// instead of reusing the previous binary's flags. sbMu is separate
@@ -380,8 +381,11 @@ type Service struct {
 	// reconnGen invalidates reconnect loops from a superseded session: a
 	// manual Start or Stop bumps it, and every loop carries the generation
 	// it was scheduled for and exits as soon as it no longer matches.
-	reconnGen uint64
-	startMu   sync.Mutex // serializes session spawns (UI Connect vs the reconnect loop)
+	reconnGen       uint64
+	startMu         sync.Mutex // serializes session spawns (UI Connect vs the reconnect loop)
+	profileProvider func() []Profile
+	autoMode        bool
+	autoTried       map[string]bool
 
 	// Timing knobs (defaults in newService; tests tighten them):
 	readinessTimeout time.Duration // core must open its local port within this
@@ -499,6 +503,9 @@ func (s *Service) Start(p Profile) error {
 	s.mu.Lock()
 	s.reconnGen++
 	s.reconnNext = 0
+	s.autoMode = false
+	s.autoTried = nil
+	s.st.AutoProfile = false
 	s.mu.Unlock()
 	return s.start(p, false, 0)
 }
@@ -631,6 +638,7 @@ func (s *Service) start(p Profile, isReconnect bool, attempt int) (err error) {
 		PID:         cmd.Process.Pid,
 		SocksAddr:   sess.socksAddr,
 		HttpAddr:    sess.httpAddr,
+		AutoProfile: s.autoMode,
 	}
 	if isReconnect {
 		s.st.Reconnecting = true
@@ -1001,7 +1009,14 @@ func (s *Service) reconnectLoop(p Profile, delay time.Duration, gen uint64) {
 		return
 	}
 	attempt := s.st.Attempt + 1
+	isAuto := s.autoMode
 	s.mu.Unlock()
+	if isAuto {
+		if next, ok := s.pickNextAutoProfile(p.ID); ok && next.ID != p.ID {
+			s.logf("автопрофиль: «%s» недоступен — переключаюсь на «%s» (%s)", p.Name, next.Name, next.Endpoint())
+			p = next
+		}
+	}
 	s.logf("авто-переподключение: попытка %d", attempt)
 	if err := s.start(p, true, attempt); err != nil {
 		// The spawn was refused before supervise started (busy port, config
@@ -1307,8 +1322,11 @@ func (s *Service) Stop() {
 	// even if it wakes up after this session is already gone.
 	s.reconnGen++
 	s.userStop = true
+	s.autoMode = false
+	s.autoTried = nil
 	sess := s.sess
 	wasConnected := s.st.State == StateConnected
+	s.st.AutoProfile = false
 	s.st.Reconnecting = false
 	s.st.Attempt = 0
 	s.mu.Unlock()
