@@ -49,6 +49,40 @@ func TestEngineFor(t *testing.T) {
 	}
 }
 
+func TestXrayNeedsTransportSecurity(t *testing.T) {
+	mk := func(host string, fields map[string]string) Profile {
+		return Profile{Type: TVLESS, Host: host, Fields: fields}
+	}
+	cases := []struct {
+		name string
+		p    Profile
+		want bool
+	}{
+		{"plain vless to a public domain", mk("seiercore.online", map[string]string{"security": "none"}), true},
+		{"plain vless to a public IP", mk("8.8.8.8", map[string]string{"security": "none"}), true},
+		{"plain vless to a LAN IP", mk("192.168.1.5", map[string]string{"security": "none"}), false},
+		{"plain vless to localhost", mk("localhost", map[string]string{"security": "none"}), false},
+		{"plain vless to a dotless name", mk("vpn", map[string]string{"security": "none"}), false},
+		{"plain vless to .local", mk("box.local", map[string]string{"security": "none"}), false},
+		{"vless with TLS", mk("seiercore.online", map[string]string{"security": "tls"}), false},
+		{"vless with REALITY", mk("seiercore.online", map[string]string{"security": "reality"}), false},
+		{"vless with a reality public key", mk("seiercore.online", map[string]string{"public_key": "k"}), false},
+	}
+	for _, c := range cases {
+		if got := XrayNeedsTransportSecurity(c.p); got != c.want {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
+	}
+	// Only VLESS has the plaintext guard: VMess encrypts its own payload
+	// and the renderer always gives Trojan TLS settings.
+	for _, typ := range []ProfileType{TSS, TVMess, TTrojan} {
+		p := Profile{Type: typ, Host: "seiercore.online", Fields: map[string]string{}}
+		if XrayNeedsTransportSecurity(p) {
+			t.Errorf("%s must not need TLS fallback", typ)
+		}
+	}
+}
+
 func TestSingBoxConfigRouteRules(t *testing.T) {
 	p := Profile{ID: "t", Type: TVLESS, Host: "srv.example", Port: 443, Fields: map[string]string{"uuid": "u"}}
 	conf, err := SingBoxConfig(p, SingBoxOptions{

@@ -697,7 +697,19 @@ func (s *Service) prepareCore(p Profile) (core string, args []string, confFile s
 	}
 	// xray-core as the multiprotocol engine when the per-protocol setting
 	// says so; hysteria2/tuic always need sing-box.
-	if XraySupports(p.Type) && s.settings.EngineFor(p.Type) == "xray" {
+	useXray := XraySupports(p.Type) && s.settings.EngineFor(p.Type) == "xray"
+	if useXray && XrayNeedsTransportSecurity(p) {
+		// xray 26.11+ exits before dialing: VLESS with encryption=none to
+		// a public address is refused by its config validator. sing-box
+		// carries every transport the app emits, so switch engines instead
+		// of surfacing a fatal xray error to the user.
+		if firstNonEmpty(cleanCorePath(s.settings.SingBoxCore), FindCore("sing-box")) == "" {
+			return "", nil, "", fmt.Errorf("xray 26.11+ не пропускает VLESS без TLS к публичному адресу — скачайте sing-box в Настройки → Ядра или используйте конфиг с TLS/REALITY")
+		}
+		s.logf("xray 26.11+ не пропускает VLESS без TLS — профиль %s пойдёт через sing-box", p.Name)
+		useXray = false
+	}
+	if useXray {
 		core = firstNonEmpty(cleanCorePath(s.settings.XrayCore), FindCore("xray"))
 		if err := checkCorePath(core); err != nil {
 			return "", nil, "", err

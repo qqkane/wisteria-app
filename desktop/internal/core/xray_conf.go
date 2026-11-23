@@ -9,6 +9,7 @@ package core
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 )
@@ -20,6 +21,35 @@ func XraySupports(t ProfileType) bool {
 		return true
 	}
 	return false
+}
+
+// XrayNeedsTransportSecurity mirrors xray-core's outbound validator
+// (infra/conf/xray.go, validateOutboundTransportSecurity): since 26.11 a
+// VLESS outbound with encryption "none" may only dial a private IP or a
+// private/local domain unless the stream carries TLS/REALITY. A public
+// share link without TLS therefore cannot start on xray at all — the
+// session must fall back to sing-box, which has no such policy.
+func XrayNeedsTransportSecurity(p Profile) bool {
+	if p.Type != TVLESS {
+		return false
+	}
+	f := p.Fields
+	if f["security"] == "reality" || f["public_key"] != "" ||
+		f["security"] == "tls" || f["tls"] == "1" {
+		return false
+	}
+	host := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(p.Host)), ".")
+	if ip := net.ParseIP(host); ip != nil {
+		return !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast()
+	}
+	// xray's private-domain list (common/geodata/consts.go) plus dotless
+	// names; anything else public needs encryption.
+	for _, d := range []string{"lan", "localdomain", "example", "invalid", "localhost", "test", "local", "home.arpa", "internal"} {
+		if host == d || strings.HasSuffix(host, "."+d) {
+			return false
+		}
+	}
+	return strings.Contains(host, ".")
 }
 
 // XrayOptions carries the settings that shape the generated config.
