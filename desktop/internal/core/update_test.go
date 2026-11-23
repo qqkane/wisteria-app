@@ -291,8 +291,14 @@ func TestCopyFileCreatesParentDir(t *testing.T) {
 	if b, err := os.ReadFile(dst); err != nil || string(b) != "binary" {
 		t.Fatalf("copied file = %q (%v)", b, err)
 	}
-	if st, err := os.Stat(dst); err != nil || st.Mode().Perm() != 0o755 {
-		t.Fatalf("mode = %v (%v), want 0755", st.Mode(), err)
+	if runtime.GOOS != "windows" {
+		st, err := os.Stat(dst)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if st.Mode().Perm() != 0o755 {
+			t.Fatalf("mode = %v, want 0755", st.Mode())
+		}
 	}
 }
 
