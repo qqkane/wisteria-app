@@ -254,8 +254,19 @@ func CoreUpdateApply(name, explicitPath string) (string, error) {
 	// the wisteria release ships wisteria-client, and FindCore looks for
 	// exactly that — staging it as "wisteria.exe" downloaded a core the
 	// app could never find.
-	if err := stageReplace(staged[0], filepath.Join(bin, coreBinary(name)+exeSuffix)); err != nil {
+	//
+	// The verified binary lands as <target>.new first and is swapped in on
+	// a second step: updating while the tunnel is up is allowed, and on
+	// Windows a running core holds its .exe, so the swap keeps the staged
+	// copy for ApplyPendingCores instead of failing the whole download.
+	target := filepath.Join(bin, coreBinary(name)+exeSuffix)
+	pending := target + PendingSuffix
+	if err := copyFile(staged[0], pending, 0o755); err != nil {
 		return "", err
 	}
+	if err := stageReplace(pending, target); err != nil {
+		return info.Latest, fmt.Errorf("%w — скачано и проверено, применится после перезапуска приложения или отключения: %v", ErrCorePending, err)
+	}
+	_ = os.Remove(pending)
 	return info.Latest, nil
 }

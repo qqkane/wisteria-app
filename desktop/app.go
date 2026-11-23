@@ -21,7 +21,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const appVersion = "2.0.0"
+const appVersion = "2.0.1"
 
 type App struct {
 	ctx      context.Context
@@ -83,6 +83,11 @@ func (a *App) startup(ctx context.Context) {
 	hydrateRingFromFile(a.ring, filepath.Join(d.Data, "app.log"))
 	fl := newFileLogger(d.Data)
 	a.fl = fl
+	// A core downloaded while the old binary was still in use (Windows)
+	// lands next to it as <.new>; finish the swap before anything starts.
+	if applied := core.ApplyPendingCores(); len(applied) > 0 {
+		a.logf("ядро применено после перезапуска: %s", strings.Join(applied, ", "))
+	}
 	// The frontend pulls lines from the ring when it sees the "log" event,
 	// so notify it at most ~3 times a second instead of once per core log
 	// line: sing-box at DEBUG level under a system proxy produces hundreds
@@ -1066,13 +1071,15 @@ func (a *App) CheckCoreUpdate(name string) (core.UpdateInfo, error) {
 }
 
 // UpdateCore replaces the app's own bin/<name>.exe with the latest upstream
-// release. Refuses while a session is up (the binary may be in use) and for
-// externally configured core paths.
+// release. Allowed while a session is up: the download is network-only, and
+// a target still held by a running core (Windows) is staged as .new and
+// applied after a restart/disconnect instead of blocking the user.
 func (a *App) UpdateCore(name string) (string, error) {
-	if a.svc.RunningProfile() != "" {
-		return "", errors.New("подключение активно — сначала отключитесь")
-	}
 	ver, err := core.CoreUpdateApply(name, a.coreExplicitPath(name))
+	if errors.Is(err, core.ErrCorePending) {
+		a.logf("ядро %s: %v", name, err)
+		return ver + " (применится после перезапуска)", nil
+	}
 	if err != nil {
 		return ver, err
 	}
@@ -1097,11 +1104,9 @@ func (a *App) UpdateCore(name string) (string, error) {
 
 // WintunInstall downloads the pinned official wintun.dll into the first
 // directory sing-box reads it from (Windows only — the settings screen
-// hides the button elsewhere). Refuses while a session runs.
+// hides the button elsewhere). Works while connected too; an in-use DLL is
+// reported by the write error instead of a blanket "disconnect first".
 func (a *App) WintunInstall() (string, error) {
-	if a.svc.RunningProfile() != "" {
-		return "", errors.New("подключение активно — сначала отключитесь")
-	}
 	// The same resolved sing-box path DetectCores and UpdateCore use: an
 	// empty setting must not send the DLL to a directory the TUN gate will
 	// never scan.

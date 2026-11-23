@@ -4,11 +4,13 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"compress/gzip"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCompareVersions(t *testing.T) {
@@ -206,7 +208,6 @@ func TestZipExtractWisteriaLayout(t *testing.T) {
 	}
 }
 
-
 // TestPickSingBoxAssetVariants: the release lists the legacy-windows-7 and
 // fips builds next to the normal one, and their names contain the plain
 // platform string. Picking either of them silently installed a core that
@@ -258,5 +259,48 @@ func TestCorePathForNoDoubleSuffix(t *testing.T) {
 	// suffix repeated.
 	if got := corePathFor("sing-box", ""); exeSuffix != "" && strings.HasSuffix(got, exeSuffix+exeSuffix) {
 		t.Fatalf("corePathFor returned a doubled suffix: %q", got)
+	}
+}
+
+// The updater must not inherit HTTPS_PROXY from the app environment: that
+// proxy is the app's own SOCKS bridge and is down while disconnected, which
+// used to make every core download fail with "connection refused".
+func TestReleaseClientBypassesEnvProxy(t *testing.T) {
+	c := releaseHTTPClient(time.Second)
+	tr, ok := c.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("unexpected transport %T", c.Transport)
+	}
+	if tr.Proxy != nil {
+		t.Fatal("release client must not use the environment proxy")
+	}
+}
+
+func TestApplyPendingCores(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "sing-box"+exeSuffix)
+	pending := target + PendingSuffix
+	if err := os.WriteFile(target, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pending, []byte("new"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	applied := applyPendingCoresIn(dir)
+	if len(applied) != 1 || applied[0] != filepath.Base(target) {
+		t.Fatalf("applied = %v", applied)
+	}
+	if b, err := os.ReadFile(target); err != nil || string(b) != "new" {
+		t.Fatalf("target = %q (%v), want the staged binary", b, err)
+	}
+	if _, err := os.Stat(pending); !os.IsNotExist(err) {
+		t.Fatalf(".new file must be consumed, stat err = %v", err)
+	}
+	if b, err := os.ReadFile(target + ".old"); err != nil || string(b) != "old" {
+		t.Fatalf("rollback copy = %q (%v)", b, err)
+	}
+	// Nothing staged: no-op.
+	if got := applyPendingCoresIn(t.TempDir()); len(got) != 0 {
+		t.Fatalf("empty dir applied = %v", got)
 	}
 }

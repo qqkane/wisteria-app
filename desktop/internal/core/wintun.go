@@ -158,8 +158,7 @@ func httpDownload(url, dest string) error {
 	if err != nil {
 		return err
 	}
-	client := &http.Client{Timeout: 2 * time.Minute}
-	resp, err := client.Do(req)
+	resp, err := doReleaseRequest(req, 2*time.Minute)
 	if err != nil {
 		return err
 	}

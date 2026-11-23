@@ -1332,6 +1332,9 @@ func (s *Service) Stop() {
 	s.mu.Unlock()
 	if sess == nil {
 		s.notify()
+		if applied := ApplyPendingCores(); len(applied) > 0 {
+			s.logf("ядро применено после отключения: %s", strings.Join(applied, ", "))
+		}
 		return
 	}
 	if wasConnected {
@@ -1363,6 +1366,11 @@ func (s *Service) Stop() {
 			s.mu.Unlock()
 			s.notify()
 		}
+	}
+	// A core staged while this session held its binary (Windows) can be
+	// swapped in now that the process is gone.
+	if applied := ApplyPendingCores(); len(applied) > 0 {
+		s.logf("ядро применено после отключения: %s", strings.Join(applied, ", "))
 	}
 }
 

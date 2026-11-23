@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -26,6 +27,47 @@ const (
 	ghTimeout   = 20 * time.Second
 	downloadMax = 256 << 20 // single file cap
 )
+
+// releaseAPIBase is the GitHub API root. A variable so tests can point it
+// at an httptest server.
+var releaseAPIBase = "https://api.github.com"
+
+// releaseHTTPClient builds the client for release downloads. It NEVER uses
+// HTTP(S)_PROXY from the environment: the proxy in a VPN client's own env is
+// the app's SOCKS bridge, which is exactly what is DOWN while the tunnel is
+// off — a stale variable then turns "download the core" into
+// "proxyconnect tcp: dial tcp 127.0.0.1:10808: connection refused".
+func releaseHTTPClient(timeout time.Duration) *http.Client {
+	tr, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return &http.Client{Timeout: timeout}
+	}
+	cp := tr.Clone()
+	cp.Proxy = nil
+	return &http.Client{Timeout: timeout, Transport: cp}
+}
+
+// doReleaseRequest tries the request directly first and only then through
+// the environment proxy (when one is configured): direct works while the
+// tunnel is down, the proxy fallback keeps downloads working on networks
+// where GitHub itself is blocked.
+func doReleaseRequest(req *http.Request, timeout time.Duration) (*http.Response, error) {
+	resp, err := releaseHTTPClient(timeout).Do(req)
+	if err == nil {
+		return resp, nil
+	}
+	directErr := err
+	prox, perr := http.ProxyFromEnvironment(req)
+	if perr != nil || prox == nil {
+		return nil, directErr
+	}
+	viaProxy := &http.Client{Timeout: timeout}
+	resp, err = viaProxy.Do(req.Clone(req.Context()))
+	if err != nil {
+		return nil, fmt.Errorf("напрямую: %v; через прокси %s: %v", directErr, prox, err)
+	}
+	return resp, nil
+}
 
 type ghAsset struct {
 	Name string `json:"name"`
@@ -81,8 +123,7 @@ func ghToken() string {
 // ghLatest returns the tag and assets of a repo's latest stable release.
 // A missing release page is reported as an error the UI can show as-is.
 func ghLatest(repo string) (string, []ghAsset, error) {
-	client := &http.Client{Timeout: ghTimeout}
-	req, err := http.NewRequest("GET", "https://api.github.com/repos/"+repo+"/releases/latest", nil)
+	req, err := http.NewRequest("GET", releaseAPIBase+"/repos/"+repo+"/releases/latest", nil)
 	if err != nil {
 		return "", nil, err
 	}
@@ -90,7 +131,7 @@ func ghLatest(repo string) (string, []ghAsset, error) {
 	if tok := ghToken(); tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
-	resp, err := client.Do(req)
+	resp, err := doReleaseRequest(req, ghTimeout)
 	if err != nil {
 		return "", nil, err
 	}
@@ -162,7 +203,7 @@ func versionParts(v string) []int {
 // default. Public repositories work the same way, token or not.
 func ghDownload(repo string, assetID int64, dest string) error {
 	req, err := http.NewRequest("GET",
-		fmt.Sprintf("https://api.github.com/repos/%s/releases/assets/%d", repo, assetID), nil)
+		fmt.Sprintf("%s/repos/%s/releases/assets/%d", releaseAPIBase, repo, assetID), nil)
 	if err != nil {
 		return err
 	}
@@ -170,8 +211,7 @@ func ghDownload(repo string, assetID int64, dest string) error {
 	if tok := ghToken(); tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
-	client := &http.Client{Timeout: 10 * time.Minute}
-	resp, err := client.Do(req)
+	resp, err := doReleaseRequest(req, 10*time.Minute)
 	if err != nil {
 		return err
 	}
@@ -401,6 +441,61 @@ func extractArchive(archivePath, dir string, suffixes ...string) ([]string, erro
 		return tarExtract(archivePath, dir, suffixes...)
 	}
 	return zipExtract(archivePath, dir, suffixes...)
+}
+
+// PendingSuffix marks a verified core binary waiting for the running
+// process to release the target (Windows locks a running .exe).
+const PendingSuffix = ".new"
+
+// ErrCorePending reports "downloaded and verified, but the target file is
+// still held by a running core". CoreUpdateApply staged the binary next to
+// it; ApplyPendingCores finishes the swap on startup or after disconnect.
+var ErrCorePending = errors.New("ядро занято запущенным процессом")
+
+func copyFile(src, dst string, mode os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
+}
+
+// ApplyPendingCores finishes swaps staged as <binary>.new when the target
+// was busy. Locked targets are left for the next attempt (startup or the
+// next disconnect).
+func ApplyPendingCores() []string {
+	return applyPendingCoresIn(BinDir())
+}
+
+func applyPendingCoresIn(bin string) []string {
+	entries, err := os.ReadDir(bin)
+	if err != nil {
+		return nil
+	}
+	var applied []string
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), PendingSuffix) {
+			continue
+		}
+		src := filepath.Join(bin, e.Name())
+		dst := filepath.Join(bin, strings.TrimSuffix(e.Name(), PendingSuffix))
+		if err := stageReplace(src, dst); err != nil {
+			continue
+		}
+		_ = os.Remove(src)
+		applied = append(applied, filepath.Base(dst))
+	}
+	sort.Strings(applied)
+	return applied
 }
 
 // stageReplace swaps dst for src: the running file is renamed to .old (a
