@@ -119,7 +119,6 @@ func TestWintunDestDirsOrder(t *testing.T) {
 	}
 }
 
-
 // TestWintunDestDirsRuntimeAndQuotedPath: the installer must scan the same
 // directories WintunPath reads (the runtime dir used to be skipped), and a
 // quoted "Copy as path" value must be cleaned before taking its dir.

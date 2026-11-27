@@ -37,7 +37,7 @@ var fakeCorePath string
 var fakeCoreBuildErr error
 
 func TestMain(m *testing.M) {
-	// Build the fake core once. No toolchain? The reconnect tests self-skip.
+	// Build the fake core once. Build failure fails the reconnect tests.
 	tmp, err := os.MkdirTemp("", "wisteria-fakecore")
 	if err == nil {
 		fakeCorePath = filepath.Join(tmp, "fakecore")
@@ -65,7 +65,7 @@ func TestMain(m *testing.M) {
 func fakeService(t *testing.T, mode string, closeAfter string) (*Service, string, func() int) {
 	t.Helper()
 	if fakeCoreBuildErr != nil {
-		t.Skipf("fake core build failed: %v", fakeCoreBuildErr)
+		t.Fatalf("fake core build failed: %v", fakeCoreBuildErr)
 	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -208,10 +208,18 @@ func TestManualConnectFromStuckState(t *testing.T) {
 	if st := waitState(t, svc, StateConnected, 5*time.Second); st.State != StateConnected {
 		t.Fatalf("never reached connected: %+v", st)
 	}
-	// Kill the port now; the app still believes it is connected.
-	time.Sleep(1100 * time.Millisecond)
-	if socksAlive(addr) {
-		t.Skip("fake did not close the port in time")
+	// Wait for the fake core to close the port (~1s) while the app still believes it is connected.
+	portDead := false
+	closeDeadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(closeDeadline) {
+		if !socksAlive(addr) {
+			portDead = true
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !portDead {
+		t.Fatalf("fake core did not close port %s in time", addr)
 	}
 	if st := svc.Status(); st.State != StateConnected {
 		t.Logf("watchdog already fired: %+v", st) // racing the watchdog is fine
@@ -405,7 +413,6 @@ func TestAutoReconnectExponentialBackoffGrows(t *testing.T) {
 		t.Fatalf("too many core spawns for 3 attempts (tight loop?): %d", n)
 	}
 }
-
 
 // TestFailSessionFatalDoesNotReconnect: a TUN prerequisite failure is not
 // a flaky server. The exact message must survive into the status, the state

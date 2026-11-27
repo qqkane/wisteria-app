@@ -245,7 +245,6 @@ func TestSemverPrefix(t *testing.T) {
 	}
 }
 
-
 // ---- sing-box 1.12+ TUN generation (phase 4) ----
 
 func tunCfgMap(t *testing.T, o TunOptions) map[string]any {

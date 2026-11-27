@@ -57,6 +57,9 @@ func TestDirWritable(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		return // directory write-permission bits are a POSIX concept
 	}
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: chmod 0555 does not block writes")
+	}
 	ro := filepath.Join(dir, "ro")
 	if err := os.Mkdir(ro, 0o555); err != nil {
 		t.Fatal(err)
