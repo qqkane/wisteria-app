@@ -134,6 +134,13 @@ jobs:
           go vet ./...
           go test -race ./...
 
+      - name: fuzz smoke
+        working-directory: desktop
+        run: |
+          for fn in FuzzParseLinkAll FuzzParseSubscriptionBody FuzzParseWisteriaBundle FuzzParseWisteriaTOML; do
+            go test -run='^$' -fuzz="^${fn}$" -fuzztime=5s ./internal/core
+          done
+
       - name: service e2e
         working-directory: desktop
         env:
